@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-thinkbuddy}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thinkbuddy_dev_password}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: thinkbuddy-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -42,8 +42,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minio_dev_access_key}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minio_dev_secret_key}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -57,8 +57,8 @@ services:
     container_name: thinkbuddy-mailpit
     restart: unless-stopped
     ports:
-      - "1025:1025" # SMTP
-      - "8025:8025" # Web UI
+      - "127.0.0.1:1025:1025" # SMTP
+      - "127.0.0.1:8025:8025" # Web UI
 
   core:
     build:
@@ -75,7 +75,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,7 +102,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       core:
         condition: service_healthy

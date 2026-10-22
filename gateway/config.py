@@ -1,6 +1,6 @@
 """Gateway application configuration via pydantic-settings."""
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +42,21 @@ class GatewaySettings(BaseSettings):
         description="OTel collector endpoint",
     )
     OTEL_ENABLED: bool = Field(default=False, description="Enable OpenTelemetry tracing")
+
+    @model_validator(mode="after")
+    def validate_non_local_secrets(self) -> "GatewaySettings":
+        """Refuse to start with placeholder secrets when environment is not local/development."""
+        env = self.ENVIRONMENT.lower()
+        is_local = env in {"local", "development", "dev", "test", "testing"}
+        if not is_local:
+            token_lower = self.INTERNAL_SERVICE_TOKEN.lower()
+            if "placeholder" in token_lower or "dev_" in token_lower:
+                msg = (
+                    f"Refusing to start in environment '{self.ENVIRONMENT}' "
+                    "with placeholder INTERNAL_SERVICE_TOKEN."
+                )
+                raise ValueError(msg)
+        return self
 
 
 settings = GatewaySettings()
