@@ -1,0 +1,1 @@
+"""ThinkBuddy API Gateway."""

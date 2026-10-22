@@ -1,0 +1,65 @@
+name: ThinkBuddy CI
+
+on:
+  push:
+    branches: ["main", "feat/*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run Ruff Linting
+        run: ruff check .
+
+      - name: Run Ruff Format Check
+        run: ruff format --check .
+
+      - name: Run Mypy Typecheck
+        run: mypy core gateway workers
+
+      - name: Run Bandit Security Analysis
+        run: bandit -r core gateway workers -ll
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run Tests with Coverage
+        run: pytest -v --cov=core --cov=gateway tests/
+
+      - name: Export OpenAPI Schema
+        run: python scripts/export_openapi.py
+
+      - name: Verify OpenAPI Artifact Exists
+        run: test -f docs-generated/openapi.json
