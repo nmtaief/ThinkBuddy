@@ -42,12 +42,14 @@ from core.families.router import (
     RedeemLinkResponse,
 )
 from core.planner.schemas import (
+    DailyMinutesResponse,
     PlanResponse,
     StudentChangeRequestInput,
     StudentChangeRequestResponse,
     StudySetupResponse,
     TaskResponse,
     TodayHomePayloadResponse,
+    UpdateDailyMinutesRequest,
     UpdateTaskStatusRequest,
     UpsertStudySetupRequest,
 )
@@ -428,6 +430,20 @@ async def upsert_study_setup(
     request: Request,
 ) -> Response:
     """Parent configures syllabus, exam date, and chapter order for student."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.put(
+    "/students/{student_id}/daily-minutes",
+    response_model=DailyMinutesResponse,
+    tags=["Planning"],
+)
+async def update_student_daily_minutes(
+    student_id: uuid.UUID,
+    payload: UpdateDailyMinutesRequest,
+    request: Request,
+) -> Response:
+    """Parent updates student-level daily minutes budget."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 

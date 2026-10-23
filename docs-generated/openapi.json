@@ -825,6 +825,60 @@
         }
       }
     },
+    "/v1/students/{student_id}/daily-minutes": {
+      "put": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Update Student Daily Minutes",
+        "description": "Parent updates student-level daily minutes budget.",
+        "operationId": "update_student_daily_minutes_v1_students__student_id__daily_minutes_put",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDailyMinutesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyMinutesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/students/{student_id}/study-setups/{subject}/change-requests": {
       "post": {
         "tags": [
@@ -1529,6 +1583,26 @@
           "name"
         ],
         "title": "CreateFamilyRequest"
+      },
+      "DailyMinutesResponse": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "title": "Daily Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id",
+          "daily_minutes"
+        ],
+        "title": "DailyMinutesResponse",
+        "description": "Response returning student's daily study minutes budget."
       },
       "DeviceResponse": {
         "properties": {
@@ -2382,6 +2456,23 @@
           "user"
         ],
         "title": "TokenResponse"
+      },
+      "UpdateDailyMinutesRequest": {
+        "properties": {
+          "daily_minutes": {
+            "type": "integer",
+            "maximum": 480.0,
+            "minimum": 15.0,
+            "title": "Daily Minutes",
+            "description": "Student daily study budget in minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "daily_minutes"
+        ],
+        "title": "UpdateDailyMinutesRequest",
+        "description": "Parent update to student-level shared daily study minutes budget."
       },
       "UpdateDeviceRequest": {
         "properties": {

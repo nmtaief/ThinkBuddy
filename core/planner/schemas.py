@@ -49,6 +49,19 @@ class UpsertStudySetupRequest(BaseModel):
     )
 
 
+class UpdateDailyMinutesRequest(BaseModel):
+    """Parent update to student-level shared daily study minutes budget."""
+
+    daily_minutes: int = Field(ge=15, le=480, description="Student daily study budget in minutes")
+
+
+class DailyMinutesResponse(BaseModel):
+    """Response returning student's daily study minutes budget."""
+
+    student_id: uuid.UUID
+    daily_minutes: int
+
+
 class StudySetupResponse(BaseModel):
     """Study setup details for a subject."""
 

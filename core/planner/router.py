@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+import zlib
+from asyncio import Lock
 from datetime import UTC, date, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +29,7 @@ from core.planner.engine import (
 )
 from core.planner.models import Plan, PlanDay, StudentChangeRequest, StudySetup, SyllabusItem, Task
 from core.planner.schemas import (
+    DailyMinutesResponse,
     PlanDayResponse,
     PlanResponse,
     StudentChangeRequestInput,
@@ -35,11 +38,30 @@ from core.planner.schemas import (
     SyllabusItemSummary,
     TaskResponse,
     TodayHomePayloadResponse,
+    UpdateDailyMinutesRequest,
     UpdateTaskStatusRequest,
     UpsertStudySetupRequest,
 )
 
 router = APIRouter(prefix="", tags=["Planner & Study Setup"])
+
+_STUDENT_ASYNC_LOCKS: dict[uuid.UUID, Lock] = {}
+
+
+def get_student_async_lock(student_id: uuid.UUID) -> Lock:
+    """In-process per-student lock to serialize concurrent plan regenerations."""
+    if student_id not in _STUDENT_ASYNC_LOCKS:
+        _STUDENT_ASYNC_LOCKS[student_id] = Lock()
+    return _STUDENT_ASYNC_LOCKS[student_id]
+
+
+async def acquire_student_advisory_lock(db: AsyncSession, student_id: uuid.UUID) -> None:
+    """Acquire transaction-level PostgreSQL advisory lock on student UUID."""
+    bind = db.bind
+    dialect_name = bind.dialect.name if bind else ""
+    if dialect_name == "postgresql":
+        lock_key = zlib.crc32(str(student_id).encode("utf-8")) & 0x7FFFFFFF
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
 def utcnow() -> datetime:
@@ -212,6 +234,9 @@ async def upsert_study_setup(
                     },
                 )
 
+    if payload.available_days is not None:
+        profile.available_days = payload.available_days
+
     # 6. Concurrency Check: query existing setup with row lock
     stmt_existing = (
         select(StudySetup)
@@ -288,139 +313,158 @@ async def upsert_study_setup(
     )
     db.add(audit_row)
 
-    # 9. Load all active setups for student to generate multi-subject plan
-    stmt_all_setups = (
-        select(StudySetup)
-        .options(
-            selectinload(StudySetup.syllabus_items)
-            .selectinload(SyllabusItem.chapter)
-            .selectinload(Chapter.book)
-        )
-        .where(StudySetup.student_id == student_id)
-    )
-    res_all_setups = await db.execute(stmt_all_setups)
-    all_setups = res_all_setups.scalars().all()
+    # 9. Concurrency lock: serialize plan regeneration per student
+    async with get_student_async_lock(student_id):
+        await acquire_student_advisory_lock(db, student_id)
 
-    # Prepare inputs for pure engine
-    engine_setups: list[SubjectSetupInput] = []
-    for s in all_setups:
-        ch_inputs: list[ChapterPlanInput] = []
-        for s_item in sorted(s.syllabus_items, key=lambda i: i.custom_order):
-            if not s_item.included or not s_item.chapter:
-                continue
-            ch = s_item.chapter
-            ch_inputs.append(
-                ChapterPlanInput(
-                    id=ch.id,
-                    number=ch.number,
-                    title=ch.title,
-                    printed_page_start=ch.printed_page_start,
-                    printed_page_end=ch.printed_page_end,
-                    custom_order=s_item.custom_order,
-                    book_id=ch.book_id,
-                    book_title=ch.book.title if ch.book else "",
-                    weight=s_item.weight,
-                    difficulty_factor=s_item.custom_difficulty or ch.difficulty_factor or 1.0,
-                    mastery=0.5,
+        # Refresh student profile and query max plan version
+        # to ensure strictly monotonically increasing version
+        stmt_max_v = select(func.coalesce(func.max(Plan.version), 0)).where(
+            Plan.student_id == student_id
+        )
+        res_max_v = await db.execute(stmt_max_v)
+        current_max_v = int(res_max_v.scalar_one())
+        new_student_plan_version = max(current_max_v, profile.plan_version or 0) + 1
+        profile.plan_version = new_student_plan_version
+        setup.active_plan_version = new_student_plan_version
+
+        # Load all active setups for student to generate multi-subject plan
+        stmt_all_setups = (
+            select(StudySetup)
+            .options(
+                selectinload(StudySetup.syllabus_items)
+                .selectinload(SyllabusItem.chapter)
+                .selectinload(Chapter.book)
+            )
+            .where(StudySetup.student_id == student_id)
+        )
+        res_all_setups = await db.execute(stmt_all_setups)
+        all_setups = res_all_setups.scalars().all()
+
+        # Prepare inputs for pure engine
+        engine_setups: list[SubjectSetupInput] = []
+        for s in all_setups:
+            ch_inputs: list[ChapterPlanInput] = []
+            for s_item in sorted(s.syllabus_items, key=lambda i: i.custom_order):
+                if not s_item.included or not s_item.chapter:
+                    continue
+                ch = s_item.chapter
+                ch_inputs.append(
+                    ChapterPlanInput(
+                        id=ch.id,
+                        number=ch.number,
+                        title=ch.title,
+                        printed_page_start=ch.printed_page_start,
+                        printed_page_end=ch.printed_page_end,
+                        custom_order=s_item.custom_order,
+                        book_id=ch.book_id,
+                        book_title=ch.book.title if ch.book else "",
+                        weight=s_item.weight,
+                        difficulty_factor=s_item.custom_difficulty or ch.difficulty_factor or 1.0,
+                        mastery=0.5,
+                    )
+                )
+            engine_setups.append(
+                SubjectSetupInput(
+                    subject=s.subject,
+                    exam_name=s.exam_name,
+                    exam_date=s.exam_date,
+                    chapters=ch_inputs,
+                    setup_id=s.id,
                 )
             )
-        engine_setups.append(
-            SubjectSetupInput(
-                subject=s.subject,
-                exam_name=s.exam_name,
-                exam_date=s.exam_date,
-                chapters=ch_inputs,
+
+        # Load existing tasks to preserve / roll forward
+        stmt_existing_tasks = (
+            select(Task, PlanDay.date, StudySetup.subject)
+            .join(PlanDay, Task.plan_day_id == PlanDay.id)
+            .join(Plan, PlanDay.plan_id == Plan.id)
+            .join(StudySetup, Plan.setup_id == StudySetup.id)
+            .where(Task.student_id == student_id)
+        )
+        res_existing_tasks = await db.execute(stmt_existing_tasks)
+        historical_records = [
+            CompletedTaskRecord(
+                task_id=t.id,
+                subject=sub,
+                chapter_id=t.chapter_id,
+                plan_date=p_date,
+                type=t.type,
+                est_minutes=t.est_minutes,
+                refs=t.refs,
+                status=t.status,
+                completed_at=t.completed_at.isoformat() if t.completed_at else None,
+            )
+            for t, p_date, sub in res_existing_tasks.fetchall()
+        ]
+
+        # Run Pure Planner Engine
+        plan_out = generate_student_plan(
+            student_id=student_id,
+            today=today_dhaka,
+            daily_study_minutes=profile.daily_minutes,
+            setups=engine_setups,
+            available_days=profile.available_days,
+            completed_tasks=historical_records,
+        )
+
+        # 10. Persist plans across ALL active setups for this student under new_student_plan_version
+        for s in all_setups:
+            s.active_plan_version = new_student_plan_version
+            old_plans_stmt = select(Plan).where(Plan.setup_id == s.id, Plan.status == "active")
+            res_old = await db.execute(old_plans_stmt)
+            for op in res_old.scalars().all():
+                op.status = "superseded"
+
+            new_plan = Plan(
                 setup_id=s.id,
-            )
-        )
-
-    # Load existing completed tasks to preserve
-    stmt_completed = (
-        select(Task, PlanDay.date)
-        .join(PlanDay, Task.plan_day_id == PlanDay.id)
-        .where(Task.student_id == student_id, Task.status == "done")
-    )
-    res_completed = await db.execute(stmt_completed)
-    completed_records = [
-        CompletedTaskRecord(
-            task_id=t.id,
-            subject=t.subject,
-            chapter_id=t.chapter_id,
-            plan_date=p_date,
-            type=t.type,
-            est_minutes=t.est_minutes,
-            refs=t.refs,
-            completed_at=t.completed_at.isoformat() if t.completed_at else None,
-        )
-        for t, p_date in res_completed.fetchall()
-    ]
-
-    # Run Pure Planner Engine
-    plan_out = generate_student_plan(
-        student_id=student_id,
-        today=today_dhaka,
-        daily_study_minutes=profile.daily_minutes,
-        setups=engine_setups,
-        available_days=profile.available_days,
-        completed_tasks=completed_records,
-    )
-
-    # 10. Persist plan in DB
-    # Mark old plans for setup as superseded
-    old_plans_stmt = select(Plan).where(Plan.setup_id == setup.id, Plan.status == "active")
-    res_old = await db.execute(old_plans_stmt)
-    for op in res_old.scalars().all():
-        op.status = "superseded"
-
-    new_plan = Plan(
-        setup_id=setup.id,
-        student_id=student_id,
-        version=setup.active_plan_version,
-        reason="syllabus_change" if setup.version > 1 else "initial",
-        status="active",
-        params={
-            "warnings": plan_out.warnings,
-            "daily_minutes": profile.daily_minutes,
-            "today": str(today_dhaka),
-        },
-    )
-    db.add(new_plan)
-    await db.flush()
-
-    # Filter generated days for current subject
-    for g_day in plan_out.days:
-        sub_tasks = [t for t in g_day.tasks if t.subject == subject_norm]
-        if not sub_tasks:
-            continue
-
-        p_day = PlanDay(
-            plan_id=new_plan.id,
-            date=g_day.date,
-            planned_minutes=sum(t.est_minutes for t in sub_tasks),
-            day_type=g_day.day_type,
-        )
-        db.add(p_day)
-        await db.flush()
-
-        for g_task in sub_tasks:
-            # If task was already completed, keep its original status
-            t_row = Task(
-                id=g_task.id,
-                plan_day_id=p_day.id,
                 student_id=student_id,
-                type=g_task.type,
-                chapter_id=uuid.UUID(str(g_task.chapter_id)) if g_task.chapter_id else None,
-                refs=g_task.refs,
-                est_minutes=g_task.est_minutes,
-                status=g_task.status,
-                source=g_task.source,
-                completed_at=datetime.fromisoformat(g_task.completed_at)
-                if g_task.completed_at
-                else None,
+                version=new_student_plan_version,
+                reason="syllabus_change"
+                if s.id == setup.id and setup.version > 1
+                else "multi_subject_sync",
+                status="active",
+                params={
+                    "warnings": plan_out.warnings,
+                    "daily_minutes": profile.daily_minutes,
+                    "today": str(today_dhaka),
+                },
             )
-            db.add(t_row)
+            db.add(new_plan)
+            await db.flush()
 
-    await db.commit()
+            for g_day in plan_out.days:
+                sub_tasks = [t for t in g_day.tasks if t.subject == s.subject]
+                if not sub_tasks:
+                    continue
+
+                p_day = PlanDay(
+                    plan_id=new_plan.id,
+                    date=g_day.date,
+                    planned_minutes=sum(t.est_minutes for t in sub_tasks),
+                    day_type=g_day.day_type,
+                )
+                db.add(p_day)
+                await db.flush()
+
+                for g_task in sub_tasks:
+                    t_row = Task(
+                        id=uuid.uuid4(),
+                        plan_day_id=p_day.id,
+                        student_id=student_id,
+                        type=g_task.type,
+                        chapter_id=uuid.UUID(str(g_task.chapter_id)) if g_task.chapter_id else None,
+                        refs={**g_task.refs, "planned_task_id": str(g_task.id)},
+                        est_minutes=g_task.est_minutes,
+                        status=g_task.status,
+                        source=g_task.source,
+                        completed_at=datetime.fromisoformat(g_task.completed_at)
+                        if g_task.completed_at
+                        else None,
+                    )
+                    db.add(t_row)
+
+        await db.commit()
 
     # Format response
     summary_items = [
@@ -555,56 +599,72 @@ async def get_student_plan(
         )
 
     res_plan = await db.execute(stmt_plan)
-    plan = res_plan.scalars().first()
-    if not plan:
+    plans = res_plan.scalars().all()
+    if not plans:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "PLAN_NOT_FOUND", "message": "No active study plan found for student."},
         )
 
-    day_items: list[PlanDayResponse] = []
-    for d in plan.days:
-        if from_date and d.date < from_date:
-            continue
-        if to_date and d.date > to_date:
-            continue
+    primary_plan = plans[0]
+    days_by_date: dict[date, tuple[str, list[TaskResponse]]] = {}
+    all_warnings: list[str] = []
 
-        task_items = [
-            TaskResponse(
-                id=t.id,
-                plan_day_id=t.plan_day_id,
-                student_id=t.student_id,
-                subject=t.plan_day.plan.setup.subject
-                if t.plan_day and t.plan_day.plan
-                else "general",
-                type=t.type,
-                chapter_id=t.chapter_id,
-                refs=t.refs,
-                est_minutes=t.est_minutes,
-                status=t.status,
-                source=t.source,
-                completed_at=t.completed_at,
-            )
-            for t in d.tasks
-        ]
+    for p in plans:
+        all_warnings.extend(p.params.get("warnings", []))
+        for d in p.days:
+            if from_date and d.date < from_date:
+                continue
+            if to_date and d.date > to_date:
+                continue
+
+            if d.date not in days_by_date:
+                days_by_date[d.date] = (d.day_type, [])
+
+            cur_type, t_list = days_by_date[d.date]
+            if d.day_type in ("revision", "buffer") and cur_type == "study":
+                cur_type = d.day_type
+                days_by_date[d.date] = (cur_type, t_list)
+
+            for t in d.tasks:
+                sub_name = p.setup.subject if p.setup else "general"
+                t_list.append(
+                    TaskResponse(
+                        id=t.id,
+                        plan_day_id=t.plan_day_id,
+                        student_id=t.student_id,
+                        subject=sub_name,
+                        type=t.type,
+                        chapter_id=t.chapter_id,
+                        refs=t.refs,
+                        est_minutes=t.est_minutes,
+                        status=t.status,
+                        source=t.source,
+                        completed_at=t.completed_at,
+                    )
+                )
+
+    day_items: list[PlanDayResponse] = []
+    for d_date in sorted(days_by_date.keys()):
+        d_type, t_items = days_by_date[d_date]
         day_items.append(
             PlanDayResponse(
-                date=d.date,
-                planned_minutes=d.planned_minutes,
-                day_type=d.day_type,
-                tasks=task_items,
+                date=d_date,
+                planned_minutes=sum(t.est_minutes for t in t_items),
+                day_type=d_type,
+                tasks=t_items,
             )
         )
 
     return PlanResponse(
-        setup_id=plan.setup_id,
-        student_id=plan.student_id,
-        version=plan.version,
-        generated_at=plan.generated_at,
-        reason=plan.reason,
-        status=plan.status,
+        setup_id=primary_plan.setup_id,
+        student_id=primary_plan.student_id,
+        version=primary_plan.version,
+        generated_at=primary_plan.generated_at,
+        reason=primary_plan.reason,
+        status=primary_plan.status,
         days=day_items,
-        warnings=plan.params.get("warnings", []),
+        warnings=all_warnings,
     )
 
 
@@ -739,7 +799,7 @@ async def update_task_status(
         )
 
     stmt_task = (
-        select(Task, StudySetup.subject)
+        select(Task, StudySetup.subject, PlanDay.date)
         .join(PlanDay, Task.plan_day_id == PlanDay.id)
         .join(Plan, PlanDay.plan_id == Plan.id)
         .join(StudySetup, Plan.setup_id == StudySetup.id)
@@ -754,18 +814,76 @@ async def update_task_status(
             detail={"code": "TASK_NOT_FOUND", "message": "Task not found."},
         )
 
-    task, sub = row
+    task, sub, plan_date = row
     if task.student_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Cannot modify another student's task."},
         )
 
-    task.status = payload.status
+    # 1. Status state machine
+    valid_transitions: dict[str, set[str]] = {
+        "todo": {"in_progress", "done", "skipped", "rolled"},
+        "in_progress": {"todo", "done", "skipped"},
+        "done": {"todo"},
+        "skipped": {"todo"},
+        "rolled": {"todo"},
+    }
+    if payload.status != task.status and payload.status not in valid_transitions.get(
+        task.status, set()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_TASK_STATUS_TRANSITION",
+                "message": (
+                    f"Cannot transition task status from '{task.status}' to '{payload.status}'."
+                ),
+            },
+        )
+
+    # 2. Date check: only allow completing tasks dated today or earlier in student's timezone
     if payload.status == "done":
+        profile = await db.get(StudentProfile, task.student_id)
+        tz_name = profile.time_zone if profile and profile.time_zone else "Asia/Dhaka"
+        try:
+            student_tz = ZoneInfo(tz_name)
+        except Exception:
+            student_tz = ZoneInfo("Asia/Dhaka")
+        student_today = datetime.now(student_tz).date()
+
+        if plan_date > student_today:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "FUTURE_TASK_COMPLETION_FORBIDDEN",
+                    "message": (
+                        f"Cannot mark future task scheduled for {plan_date} as completed. "
+                        f"Today is {student_today}."
+                    ),
+                },
+            )
         task.completed_at = utcnow()
     else:
         task.completed_at = None
+
+    old_status = task.status
+    task.status = payload.status
+
+    # 3. Audit log
+    audit_row = AuditLog(
+        actor_id=current_user.id,
+        action="task.status_update",
+        target_type="task",
+        target_id=str(task.id),
+        meta={
+            "student_id": str(task.student_id),
+            "old_status": old_status,
+            "new_status": payload.status,
+            "plan_date": str(plan_date),
+        },
+    )
+    db.add(audit_row)
 
     await db.commit()
     await db.refresh(task)
@@ -782,4 +900,77 @@ async def update_task_status(
         status=task.status,
         source=task.source,
         completed_at=task.completed_at,
+    )
+
+
+@router.put(
+    "/students/{student_id}/daily-minutes",
+    response_model=DailyMinutesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_student_daily_minutes(
+    student_id: uuid.UUID,
+    payload: UpdateDailyMinutesRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> DailyMinutesResponse:
+    """Update student-level daily minutes budget.
+
+    Authorization:
+    - Only authorized linked parents may update student daily minutes.
+    - Students are rejected with HTTP 403 (PARENT_ROLE_REQUIRED).
+    - Unlinked parents are rejected with HTTP 403 (FAMILY_ACCESS_DENIED).
+    """
+    if current_user.role != "parent":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "PARENT_ROLE_REQUIRED",
+                "message": "Only parents may modify student daily study budget.",
+            },
+        )
+
+    stmt_link = select(ParentStudentLink).where(
+        ParentStudentLink.parent_id == current_user.id,
+        ParentStudentLink.student_id == student_id,
+        ParentStudentLink.status == "active",
+        ParentStudentLink.revoked_at.is_(None),
+    )
+    res_link = await db.execute(stmt_link)
+    if not res_link.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FAMILY_ACCESS_DENIED",
+                "message": "You are not an active parent for this student.",
+            },
+        )
+
+    profile = await db.get(StudentProfile, student_id)
+    if not profile:
+        profile = StudentProfile(
+            user_id=student_id,
+            class_level=7,
+            medium="bn",
+            daily_minutes=payload.daily_minutes,
+            available_days=["sat", "sun", "mon", "tue", "wed", "thu"],
+            time_zone="Asia/Dhaka",
+        )
+        db.add(profile)
+    else:
+        profile.daily_minutes = payload.daily_minutes
+
+    audit_row = AuditLog(
+        actor_id=current_user.id,
+        action="student.update_daily_minutes",
+        target_type="student_profile",
+        target_id=str(student_id),
+        meta={"daily_minutes": payload.daily_minutes},
+    )
+    db.add(audit_row)
+    await db.commit()
+
+    return DailyMinutesResponse(
+        student_id=student_id,
+        daily_minutes=profile.daily_minutes,
     )

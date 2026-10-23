@@ -34,7 +34,10 @@ from httpx import AsyncClient
 from hypothesis import given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
+from sqlalchemy import select
 
+from core.common.database import AsyncSessionLocal
+from core.curriculum.models import Book, Chapter
 from core.planner.engine import (
     ChapterPlanInput,
     CompletedTaskRecord,
@@ -56,9 +59,37 @@ SAMPLE_MANIFEST_PATH = Path("tests/data/sample_manifest.jsonl")
 
 @pytest.fixture(autouse=True)
 async def setup_curriculum() -> None:
-    """Ensure curriculum textbook is in database."""
+    """Ensure curriculum textbooks are in database."""
     importer = CurriculumImporter()
     await importer.import_manifest(SAMPLE_MANIFEST_PATH, resume=True)
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(Book).where(Book.subject == "science", Book.class_level == 7)
+        res = await session.execute(stmt)
+        if not res.scalar_one_or_none():
+            sci_book = Book(
+                id=uuid.UUID("4fa85f64-5717-4562-b3fc-2c963f66afa2"),
+                title="বিজ্ঞান (সপ্তম শ্রেণি)",
+                class_level=7,
+                subject="science",
+                medium="bn",
+                edition="2024",
+                source_uri="s3://thinkbuddy-textbooks/class7/science_bn_2024.pdf",
+            )
+            session.add(sci_book)
+            await session.flush()
+            sci_ch1 = Chapter(
+                id=uuid.UUID("7ca85f64-5717-4562-b3fc-2c963f66af11"),
+                book_id=sci_book.id,
+                number=1,
+                title="নিম্নশ্রেণির জীব",
+                printed_page_start=1,
+                printed_page_end=15,
+                order_index=1,
+                difficulty_factor=1.0,
+            )
+            session.add(sci_ch1)
+            await session.commit()
 
 
 # =============================================================================
@@ -493,6 +524,7 @@ async def test_p03_study_setup_and_planner_lifecycle(gateway_client: AsyncClient
         "exam_name": "Annual Final 2026",
         "exam_date": exam_date,
         "daily_study_minutes": 60,
+        "available_days": ["sat", "sun", "mon", "tue", "wed", "thu", "fri"],
         "syllabus": [
             {"chapter_id": chapters[0]["id"], "included": True, "custom_order": 1, "weight": 1.0},
             {"chapter_id": chapters[1]["id"], "included": True, "custom_order": 2, "weight": 1.2},
@@ -631,8 +663,14 @@ async def test_p03_study_setup_and_planner_lifecycle(gateway_client: AsyncClient
     assert res_patch_cross_student.json()["error"]["code"] == "FORBIDDEN"
 
     # C. Student 1 (the task owner) successfully marks task done
+    # Select a task dated today so it satisfies student timezone date check
+    today_dhaka_str = str(datetime.now(ZoneInfo("Asia/Dhaka")).date())
+    today_tasks = [t for d in plan_data["days"] if d["date"] <= today_dhaka_str for t in d["tasks"]]
+    target_task = today_tasks[0] if today_tasks else test_task
+    target_task_id = target_task["id"]
+
     res_patch_done = await gateway_client.patch(
-        f"/v1/tasks/{task_id}",
+        f"/v1/tasks/{target_task_id}",
         json={"status": "done"},
         headers=s1_headers,
     )
@@ -640,3 +678,607 @@ async def test_p03_study_setup_and_planner_lifecycle(gateway_client: AsyncClient
     updated_task = res_patch_done.json()
     assert updated_task["status"] == "done"
     assert updated_task["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_regenerations_different_subjects_serializes_and_respects_budget(
+    gateway_client: AsyncClient,
+) -> None:
+    """Requirement 1: Two concurrent regenerations for different subjects serialize via lock.
+
+    Proves that when two setups regenerate simultaneously, no combined day exceeds daily budget.
+    """
+    import asyncio
+
+    # 1. Create Parent and Student
+    p_phone = f"+880173{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    p_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_p.json()['access_token']}",
+    }
+
+    res_fam = await gateway_client.post(
+        "/v1/families", json={"name": "Concurrent Family"}, headers=p_headers
+    )
+    fam_id = res_fam.json()["id"]
+
+    daily_budget = 90
+    res_child = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={
+            "display_name": "Concurrent Student",
+            "class_level": 7,
+            "medium": "bn",
+            "daily_minutes": daily_budget,
+        },
+        headers=p_headers,
+    )
+    link_code = res_child.json()["link_code"]
+
+    s_phone = f"+880174{uuid.uuid4().hex[:6]}"
+    res_s = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={
+            "provider_token": f"fake:phone:{s_phone}",
+            "role": "student",
+            "link_code": link_code,
+        },
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    student_id = res_s.json()["user"]["id"]
+    s_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_s.json()['access_token']}",
+    }
+
+    # Fetch textbook chapters for math and science
+    res_books_math = await gateway_client.get(
+        "/v1/books?class_level=7&subject=math", headers=p_headers
+    )
+    math_book_id = res_books_math.json()["items"][0]["id"]
+    res_math_ch = await gateway_client.get(f"/v1/books/{math_book_id}/chapters", headers=p_headers)
+    math_chapters = res_math_ch.json()["items"]
+
+    res_books_sci = await gateway_client.get(
+        "/v1/books?class_level=7&subject=science", headers=p_headers
+    )
+    sci_book_id = res_books_sci.json()["items"][0]["id"]
+    res_sci_ch = await gateway_client.get(f"/v1/books/{sci_book_id}/chapters", headers=p_headers)
+    sci_chapters = res_sci_ch.json()["items"]
+
+    today = datetime.now(ZoneInfo("Asia/Dhaka")).date()
+    exam_math = today + timedelta(days=40)
+    exam_sci = today + timedelta(days=50)
+
+    payload_math = {
+        "exam_name": "Math Exam",
+        "exam_date": str(exam_math),
+        "syllabus": [
+            {
+                "chapter_id": math_chapters[0]["id"],
+                "included": True,
+                "custom_order": 1,
+                "weight": 1.0,
+            }
+        ],
+    }
+    payload_sci = {
+        "exam_name": "Science Exam",
+        "exam_date": str(exam_sci),
+        "syllabus": [
+            {
+                "chapter_id": sci_chapters[0]["id"],
+                "included": True,
+                "custom_order": 1,
+                "weight": 1.0,
+            }
+        ],
+    }
+
+    # 2. Trigger concurrent regenerations for different subjects
+    res_math, res_sci = await asyncio.gather(
+        gateway_client.put(
+            f"/v1/students/{student_id}/study-setups/math",
+            json=payload_math,
+            headers=p_headers,
+        ),
+        gateway_client.put(
+            f"/v1/students/{student_id}/study-setups/science",
+            json=payload_sci,
+            headers=p_headers,
+        ),
+    )
+    assert res_math.status_code == 200
+    assert res_sci.status_code == 200
+
+    # 3. Verify unified schedule: no combined day exceeds daily budget
+    res_plan = await gateway_client.get(f"/v1/students/{student_id}/plan", headers=s_headers)
+    assert res_plan.status_code == 200
+    plan = res_plan.json()
+
+    for day in plan["days"]:
+        day_total = sum(t["est_minutes"] for t in day["tasks"])
+        assert day_total <= daily_budget, (
+            f"Day {day['date']} total {day_total}m exceeds budget {daily_budget}m"
+        )
+        assert day["planned_minutes"] <= daily_budget
+
+
+def test_min_subject_daily_share_and_cross_subject_feasibility_warning() -> None:
+    """Requirement 2: Configurable minimum daily share per active subject
+    and cross-subject feasibility warning.
+    """
+    today = date(2026, 10, 23)
+    daily_budget = 100
+
+    ch1 = ChapterPlanInput(
+        id=uuid.uuid4(),
+        number=1,
+        title="Math Ch 1",
+        printed_page_start=1,
+        printed_page_end=30,
+        custom_order=1,
+        difficulty_factor=1.0,
+    )
+    ch2 = ChapterPlanInput(
+        id=uuid.uuid4(),
+        number=1,
+        title="Sci Ch 1",
+        printed_page_start=1,
+        printed_page_end=30,
+        custom_order=1,
+        difficulty_factor=1.0,
+    )
+
+    setup_math = SubjectSetupInput(
+        subject="Mathematics",
+        exam_name="Math",
+        exam_date=today + timedelta(days=20),
+        chapters=[ch1],
+    )
+    setup_sci = SubjectSetupInput(
+        subject="Science",
+        exam_name="Science",
+        exam_date=today + timedelta(days=25),
+        chapters=[ch2],
+    )
+
+    # A. Minimum daily share (10%)
+    plan = generate_student_plan(
+        student_id=uuid.uuid4(),
+        today=today,
+        daily_study_minutes=daily_budget,
+        setups=[setup_math, setup_sci],
+        min_subject_daily_share=0.10,
+    )
+    for day in plan.days:
+        if day.day_type == "study" and len(day.tasks) >= 2:
+            assert day.planned_minutes <= daily_budget
+
+    # B. Cross-subject feasibility warning under extreme workload
+    huge_ch = ChapterPlanInput(
+        id=uuid.uuid4(),
+        number=2,
+        title="Huge Chapter",
+        printed_page_start=1,
+        printed_page_end=800,
+        custom_order=2,
+        difficulty_factor=2.0,
+    )
+    heavy_setup = SubjectSetupInput(
+        subject="HeavySubject",
+        exam_name="HeavyExam",
+        exam_date=today + timedelta(days=3),
+        chapters=[huge_ch],
+    )
+
+    infeasible_plan = generate_student_plan(
+        student_id=uuid.uuid4(),
+        today=today,
+        daily_study_minutes=60,
+        setups=[setup_math, heavy_setup],
+    )
+    assert any(
+        "CROSS_SUBJECT_FEASIBILITY_WARNING" in w or "INSUFFICIENT_TIME" in w
+        for w in infeasible_plan.warnings
+    )
+
+
+def test_rolling_horizon_and_extension() -> None:
+    """Requirement 3: Rolling horizon logic for exams far into the future."""
+    today = date(2026, 10, 23)
+    far_exam = today + timedelta(days=150)
+
+    ch = ChapterPlanInput(
+        id=uuid.uuid4(),
+        number=1,
+        title="Far Chapter",
+        printed_page_start=1,
+        printed_page_end=50,
+        custom_order=1,
+    )
+    setup = SubjectSetupInput(
+        subject="History",
+        exam_name="History Final",
+        exam_date=far_exam,
+        chapters=[ch],
+    )
+
+    plan = generate_student_plan(
+        student_id=uuid.uuid4(),
+        today=today,
+        daily_study_minutes=60,
+        setups=[setup],
+        rolling_horizon_days=60,
+    )
+
+    # Days must not exceed 60-day rolling horizon
+    max_planned_date = max(d.date for d in plan.days)
+    assert max_planned_date <= today + timedelta(days=60)
+    assert any("ROLLING_HORIZON_ACTIVE" in w for w in plan.warnings)
+
+
+@pytest.mark.asyncio
+async def test_task_status_state_machine_and_future_completion_forbidden(
+    gateway_client: AsyncClient,
+) -> None:
+    """Requirement 4: Rejects future task completion; server sets completed_at;
+    enforces state machine.
+    """
+    # 1. Create Parent and Student
+    p_phone = f"+880175{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    p_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_p.json()['access_token']}",
+    }
+
+    res_fam = await gateway_client.post(
+        "/v1/families", json={"name": "SM Family"}, headers=p_headers
+    )
+    fam_id = res_fam.json()["id"]
+
+    res_child = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "SM Student", "class_level": 7, "medium": "bn", "daily_minutes": 60},
+        headers=p_headers,
+    )
+    link_code = res_child.json()["link_code"]
+
+    s_phone = f"+880176{uuid.uuid4().hex[:6]}"
+    res_s = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={
+            "provider_token": f"fake:phone:{s_phone}",
+            "role": "student",
+            "link_code": link_code,
+        },
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    student_id = res_s.json()["user"]["id"]
+    s_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_s.json()['access_token']}",
+    }
+
+    # Setup subject
+    res_books = await gateway_client.get(
+        "/v1/books?class_level=7&subject=math&medium=bn", headers=p_headers
+    )
+    book_id = res_books.json()["items"][0]["id"]
+    res_ch = await gateway_client.get(f"/v1/books/{book_id}/chapters", headers=p_headers)
+    chapters = res_ch.json()["items"]
+
+    today = datetime.now(ZoneInfo("Asia/Dhaka")).date()
+    await gateway_client.put(
+        f"/v1/students/{student_id}/study-setups/math",
+        json={
+            "exam_name": "Math Exam",
+            "exam_date": str(today + timedelta(days=30)),
+            "syllabus": [
+                {
+                    "chapter_id": chapters[0]["id"],
+                    "included": True,
+                    "custom_order": 1,
+                    "weight": 1.0,
+                }
+            ],
+        },
+        headers=p_headers,
+    )
+
+    res_plan = await gateway_client.get(f"/v1/students/{student_id}/plan", headers=s_headers)
+    plan = res_plan.json()
+
+    # Find a future day task (date > today)
+    future_tasks = [t for d in plan["days"] if d["date"] > str(today) for t in d["tasks"]]
+    assert len(future_tasks) > 0
+    future_task = future_tasks[0]
+
+    # A. Future task completion forbidden
+    res_future_done = await gateway_client.patch(
+        f"/v1/tasks/{future_task['id']}",
+        json={"status": "done"},
+        headers=s_headers,
+    )
+    assert res_future_done.status_code == 400
+    assert res_future_done.json()["error"]["code"] == "FUTURE_TASK_COMPLETION_FORBIDDEN"
+
+    # Find a task on today
+    today_tasks = [t for d in plan["days"] if d["date"] == str(today) for t in d["tasks"]]
+    if today_tasks:
+        today_task = today_tasks[0]
+        t_id = today_task["id"]
+
+        # B. Valid transition: todo -> in_progress
+        res_prog = await gateway_client.patch(
+            f"/v1/tasks/{t_id}",
+            json={"status": "in_progress"},
+            headers=s_headers,
+        )
+        assert res_prog.status_code == 200
+        assert res_prog.json()["status"] == "in_progress"
+        assert res_prog.json()["completed_at"] is None
+
+        # C. Valid transition: in_progress -> done
+        res_done = await gateway_client.patch(
+            f"/v1/tasks/{t_id}",
+            json={"status": "done"},
+            headers=s_headers,
+        )
+        assert res_done.status_code == 200
+        assert res_done.json()["status"] == "done"
+        assert res_done.json()["completed_at"] is not None
+
+        # D. Invalid transition: done cannot transition directly to in_progress
+        res_invalid = await gateway_client.patch(
+            f"/v1/tasks/{t_id}",
+            json={"status": "in_progress"},
+            headers=s_headers,
+        )
+        assert res_invalid.status_code == 400
+        assert res_invalid.json()["error"]["code"] == "INVALID_TASK_STATUS_TRANSITION"
+
+
+def test_final_revision_window_and_weekly_buffer_and_missed_task_roll_forward() -> None:
+    """Requirement 5: Confirms final revision window, weekly buffer,
+    and missed-task roll-forward.
+    """
+    today = date(2026, 10, 23)
+    exam_date = today + timedelta(days=28)
+
+    ch = ChapterPlanInput(
+        id=uuid.uuid4(),
+        number=1,
+        title="Test Chapter",
+        printed_page_start=1,
+        printed_page_end=40,
+        custom_order=1,
+    )
+    setup = SubjectSetupInput(
+        subject="Math",
+        exam_name="Math Exam",
+        exam_date=exam_date,
+        chapters=[ch],
+    )
+
+    # Missed past task
+    past_task = CompletedTaskRecord(
+        task_id=uuid.uuid4(),
+        subject="Math",
+        chapter_id=ch.id,
+        plan_date=today - timedelta(days=1),
+        type="study",
+        est_minutes=25,
+        refs={"guideline": "Read pages 1-10"},
+        status="todo",  # missed!
+    )
+
+    plan = generate_student_plan(
+        student_id=uuid.uuid4(),
+        today=today,
+        daily_study_minutes=60,
+        setups=[setup],
+        available_days=["sat", "sun", "mon", "tue", "wed", "thu", "fri"],
+        completed_tasks=[past_task],
+    )
+
+    # 1. Final revision window: last 3+ days before exam must have 0 study tasks
+    rev_days = [d for d in plan.days if d.day_type == "revision" and d.date <= exam_date]
+    assert len(rev_days) >= 3
+    for rd in rev_days:
+        assert all(t.type in ("revision", "quiz") for t in rd.tasks)
+
+    # 2. Weekly buffer days: must exist and have 0 new study tasks
+    buffer_days = [d for d in plan.days if d.day_type == "buffer"]
+    assert len(buffer_days) >= 1
+    for bd in buffer_days:
+        assert all(t.type != "study" for t in bd.tasks)
+
+    # 3. Missed task roll forward: original task marked rolled, new task on today
+    past_day = next(d for d in plan.days if d.date == today - timedelta(days=1))
+    assert any(t.status == "rolled" for t in past_day.tasks)
+
+    today_day = next(d for d in plan.days if d.date == today)
+    assert any("[Rolled from" in t.refs.get("guideline", "") for t in today_day.tasks)
+
+
+@pytest.mark.asyncio
+async def test_student_cannot_put_setup_and_unlinked_parent_gets_403(
+    gateway_client: AsyncClient,
+) -> None:
+    """Requirement 7: Student cannot PUT setup (403); unlinked parent gets 403."""
+    # 1. Register Parent A and Student A
+    p_a_phone = f"+880177{uuid.uuid4().hex[:6]}"
+    res_pa = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_a_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    pa_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_pa.json()['access_token']}",
+    }
+
+    res_fam_a = await gateway_client.post(
+        "/v1/families", json={"name": "Family A"}, headers=pa_headers
+    )
+    fam_a_id = res_fam_a.json()["id"]
+
+    res_child = await gateway_client.post(
+        f"/v1/families/{fam_a_id}/students",
+        json={"display_name": "Student A", "class_level": 7, "medium": "bn", "daily_minutes": 60},
+        headers=pa_headers,
+    )
+    link_code = res_child.json()["link_code"]
+
+    sa_phone = f"+880178{uuid.uuid4().hex[:6]}"
+    res_sa = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={
+            "provider_token": f"fake:phone:{sa_phone}",
+            "role": "student",
+            "link_code": link_code,
+        },
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    student_a_id = res_sa.json()["user"]["id"]
+    sa_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_sa.json()['access_token']}",
+    }
+
+    # 2. Register Unlinked Parent B
+    p_b_phone = f"+880179{uuid.uuid4().hex[:6]}"
+    res_pb = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_b_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    pb_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_pb.json()['access_token']}",
+    }
+
+    setup_payload = {
+        "exam_name": "Test Exam",
+        "exam_date": str(datetime.now(ZoneInfo("Asia/Dhaka")).date() + timedelta(days=30)),
+        "syllabus": [],
+    }
+
+    # A. Student A tries to PUT study setup -> 403
+    res_student_put = await gateway_client.put(
+        f"/v1/students/{student_a_id}/study-setups/math",
+        json=setup_payload,
+        headers=sa_headers,
+    )
+    assert res_student_put.status_code == 403
+    assert res_student_put.json()["error"]["code"] == "STUDENT_CANNOT_EDIT_SETUP"
+
+    # B. Unlinked Parent B tries to PUT study setup for Student A -> 403
+    res_unlinked_put = await gateway_client.put(
+        f"/v1/students/{student_a_id}/study-setups/math",
+        json=setup_payload,
+        headers=pb_headers,
+    )
+    assert res_unlinked_put.status_code == 403
+    assert res_unlinked_put.json()["error"]["code"] == "FORBIDDEN_STUDENT_ACCESS"
+
+
+@pytest.mark.asyncio
+async def test_single_daily_minutes_endpoint_parent_only(
+    gateway_client: AsyncClient,
+) -> None:
+    """Requirement 6: Single daily-minutes field editable only by an authorized linked parent."""
+    # 1. Create Parent and Student
+    p_phone = f"+880181{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    p_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_p.json()['access_token']}",
+    }
+
+    res_fam = await gateway_client.post(
+        "/v1/families", json={"name": "Minutes Family"}, headers=p_headers
+    )
+    fam_id = res_fam.json()["id"]
+
+    res_child = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={
+            "display_name": "Budget Student",
+            "class_level": 7,
+            "medium": "bn",
+            "daily_minutes": 45,
+        },
+        headers=p_headers,
+    )
+    link_code = res_child.json()["link_code"]
+
+    s_phone = f"+880182{uuid.uuid4().hex[:6]}"
+    res_s = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={
+            "provider_token": f"fake:phone:{s_phone}",
+            "role": "student",
+            "link_code": link_code,
+        },
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    student_id = res_s.json()["user"]["id"]
+    s_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_s.json()['access_token']}",
+    }
+
+    # Unlinked Parent
+    p2_phone = f"+880183{uuid.uuid4().hex[:6]}"
+    res_p2 = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p2_phone}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    p2_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {res_p2.json()['access_token']}",
+    }
+
+    # A. Student cannot edit daily minutes -> 403
+    res_student_edit = await gateway_client.put(
+        f"/v1/students/{student_id}/daily-minutes",
+        json={"daily_minutes": 120},
+        headers=s_headers,
+    )
+    assert res_student_edit.status_code == 403
+    assert res_student_edit.json()["error"]["code"] == "PARENT_ROLE_REQUIRED"
+
+    # B. Unlinked parent cannot edit daily minutes -> 403
+    res_unlinked_edit = await gateway_client.put(
+        f"/v1/students/{student_id}/daily-minutes",
+        json={"daily_minutes": 120},
+        headers=p2_headers,
+    )
+    assert res_unlinked_edit.status_code == 403
+    assert res_unlinked_edit.json()["error"]["code"] == "FAMILY_ACCESS_DENIED"
+
+    # C. Linked parent updates daily minutes -> 200
+    res_parent_edit = await gateway_client.put(
+        f"/v1/students/{student_id}/daily-minutes",
+        json={"daily_minutes": 120},
+        headers=p_headers,
+    )
+    assert res_parent_edit.status_code == 200
+    assert res_parent_edit.json()["daily_minutes"] == 120

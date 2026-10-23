@@ -33,6 +33,7 @@ class StudentProfile(Base):
     school: Mapped[str | None] = mapped_column(Text, nullable=True)  # Unicode Bangla-safe
     daily_minutes: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
     time_zone: Mapped[str] = mapped_column(String(50), default="Asia/Dhaka", nullable=False)
+    plan_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     available_days: Mapped[list[str]] = mapped_column(
         JSONB, default=lambda: ["sat", "sun", "mon", "tue", "wed", "thu"], nullable=False
     )

@@ -105,7 +105,7 @@ class SubjectSetupInput:
 
 @dataclass
 class CompletedTaskRecord:
-    """Historical completed task to be preserved during plan regeneration."""
+    """Historical task to be preserved or rolled during plan regeneration."""
 
     task_id: uuid.UUID | str
     subject: str
@@ -114,7 +114,12 @@ class CompletedTaskRecord:
     type: str
     est_minutes: int
     refs: dict[str, Any]
+    status: str = "done"  # done, todo, in_progress, rolled
     completed_at: str | None = None
+
+
+# Alias for clarity
+HistoricalTaskRecord = CompletedTaskRecord
 
 
 @dataclass
@@ -207,6 +212,8 @@ def generate_student_plan(
     completed_tasks: list[CompletedTaskRecord] | None = None,
     time_shares: TimeShareConfig = TimeShareConfig(),
     max_days: int = 365,
+    min_subject_daily_share: float = 0.10,
+    rolling_horizon_days: int = 60,
 ) -> MultiSubjectPlanOutput:
     """Generate a multi-subject versioned study plan honoring a shared daily budget.
 
@@ -214,8 +221,11 @@ def generate_student_plan(
     - Never schedules any task after a subject's exam_date.
     - Sum of planned task minutes on any day across ALL subjects <= daily_study_minutes.
     - Chapter custom_order is strictly respected.
-    - Completed tasks are preserved untouched.
-    - Infeasible exams generate compressed plans with clear warnings, never failing.
+    - Preserves completed tasks and rolls missed past tasks forward to today.
+    - Minimum daily share per active subject (default 10%) prevents starvation.
+    - Cross-subject feasibility calculation warns if shared budget is insufficient.
+    - Plans across a rolling horizon when exams extend beyond rolling_horizon_days.
+    - Weekly buffer days and final revision windows dedicated to review without study load.
     - Pure function: reads zero system time, makes zero external calls.
     """
     global_warnings: list[str] = []
@@ -237,7 +247,7 @@ def generate_student_plan(
             total_tasks=0,
         )
 
-    # 1. Check for immediate exam edge cases
+    # 1. Immediate exam edge cases
     for s in active_setups:
         if s.exam_date < today:
             global_warnings.append(
@@ -250,46 +260,163 @@ def generate_student_plan(
                 f"EXAM_TOMORROW_{s.subject.upper()}: Exam is tomorrow; urgent high-yield review."
             )
 
-    # 2. Determine horizon and calendar days to instantiate
+    # 2. Determine planning horizon (rolling horizon if exam is far out)
     max_exam_date = max(s.exam_date for s in active_setups)
+    horizon_limit = today + timedelta(days=rolling_horizon_days)
+
+    if max_exam_date > horizon_limit:
+        effective_max_date = horizon_limit
+        global_warnings.append(
+            f"ROLLING_HORIZON_ACTIVE: Planning horizon set to {rolling_horizon_days} days "
+            f"(through {horizon_limit}). Future syllabus through {max_exam_date} will be "
+            "scheduled automatically as time advances."
+        )
+    else:
+        effective_max_date = max_exam_date
+
     all_usable_dates = calculate_usable_dates(
-        today, max_exam_date, available_weekdays, max_days=max_days
+        today, effective_max_date, available_weekdays, max_days=min(max_days, rolling_horizon_days)
     )
 
     if not all_usable_dates:
         # Emergency: 0 usable days match the available days schedule
         global_warnings.append("ZERO_USABLE_DAYS: No available study days found before exam date.")
-        # Fallback to today as a single emergency day so student receives guidance
         all_usable_dates = [today]
 
-    # Map of date -> GeneratedPlanDay
+    # 3. Cross-subject feasibility analysis
+    total_curriculum_effort_mins = 0.0
+    subject_efforts: dict[str, float] = {}
+    for s in active_setups:
+        s_effort = sum(ch.effort for ch in s.chapters) * 2.5
+        subject_efforts[s.subject] = s_effort
+        total_curriculum_effort_mins += s_effort
+
+    total_budget_all_usable_days = len(all_usable_dates) * daily_study_minutes
+    if total_curriculum_effort_mins > total_budget_all_usable_days:
+        needed_m = math.ceil(total_curriculum_effort_mins)
+        u_days = len(all_usable_dates)
+        global_warnings.append(
+            f"CROSS_SUBJECT_FEASIBILITY_WARNING: Combined curriculum workload across "
+            f"{len(active_setups)} active subjects requires {needed_m} mins, exceeding total "
+            f"budget of {total_budget_all_usable_days} mins across {u_days} usable days. "
+            f"Recommend increasing student daily study minutes (currently {daily_study_minutes}m) "
+            "or adjusting exam dates."
+        )
+
+    for s in active_setups:
+        s_dates = [d for d in all_usable_dates if d <= s.exam_date]
+        s_max_mins = len(s_dates) * daily_study_minutes
+        if subject_efforts[s.subject] > s_max_mins:
+            s_req = math.ceil(subject_efforts[s.subject])
+            global_warnings.append(
+                f"INSUFFICIENT_TIME_FOR_SUBJECT_{s.subject.upper()}: Subject requires {s_req} "
+                f"mins before {s.exam_date}, but maximum possible time across {len(s_dates)} "
+                f"available days is {s_max_mins} mins."
+            )
+
+    # 4. Map of date -> GeneratedPlanDay
     day_map: dict[date, GeneratedPlanDay] = {}
     for d in all_usable_dates:
         day_map[d] = GeneratedPlanDay(date=d, planned_minutes=0, day_type="study", tasks=[])
 
-    # Re-insert already completed tasks into their respective days
-    completed_task_ids: set[str] = set()
-    for ct in completed:
-        completed_task_ids.add(str(ct.task_id))
-        if ct.plan_date not in day_map:
-            day_map[ct.plan_date] = GeneratedPlanDay(
-                date=ct.plan_date, planned_minutes=0, day_type="study", tasks=[]
-            )
-        p_day = day_map[ct.plan_date]
-        gt = GeneratedTask(
-            id=uuid.UUID(str(ct.task_id)) if isinstance(ct.task_id, str) else ct.task_id,
-            subject=ct.subject,
-            type=ct.type,
-            chapter_id=ct.chapter_id,
-            est_minutes=ct.est_minutes,
-            refs=ct.refs,
-            status="done",
-            completed_at=ct.completed_at,
-        )
-        p_day.tasks.append(gt)
-        p_day.planned_minutes += ct.est_minutes
+    # 5. Process historical tasks and missed-task roll-forward
+    today_target_day = day_map.get(today) or day_map[all_usable_dates[0]]
 
-    # 3. For each subject, schedule chapters across its usable days
+    for ct in completed:
+        if ct.plan_date < today:
+            if ct.plan_date not in day_map:
+                day_map[ct.plan_date] = GeneratedPlanDay(
+                    date=ct.plan_date, planned_minutes=0, day_type="study", tasks=[]
+                )
+            hist_day = day_map[ct.plan_date]
+
+            if ct.status == "done":
+                # Preserve done task
+                gt = GeneratedTask(
+                    id=uuid.UUID(str(ct.task_id)) if isinstance(ct.task_id, str) else ct.task_id,
+                    subject=ct.subject,
+                    type=ct.type,
+                    chapter_id=ct.chapter_id,
+                    est_minutes=ct.est_minutes,
+                    refs=ct.refs,
+                    status="done",
+                    completed_at=ct.completed_at,
+                )
+                hist_day.tasks.append(gt)
+                hist_day.planned_minutes += ct.est_minutes
+            elif ct.status in ("todo", "in_progress"):
+                # Mark original as rolled
+                rolled_hist_task = GeneratedTask(
+                    id=uuid.UUID(str(ct.task_id)) if isinstance(ct.task_id, str) else ct.task_id,
+                    subject=ct.subject,
+                    type=ct.type,
+                    chapter_id=ct.chapter_id,
+                    est_minutes=ct.est_minutes,
+                    refs=ct.refs,
+                    status="rolled",
+                )
+                hist_day.tasks.append(rolled_hist_task)
+
+                # Roll forward to today
+                orig_guideline = ct.refs.get("guideline", "")
+                rolled_forward_task = GeneratedTask(
+                    id=uuid.uuid4(),
+                    subject=ct.subject,
+                    type=ct.type,
+                    chapter_id=ct.chapter_id,
+                    est_minutes=ct.est_minutes,
+                    refs={
+                        **ct.refs,
+                        "guideline": f"[Rolled from {ct.plan_date}] {orig_guideline}".strip(),
+                        "rolled_from_task_id": str(ct.task_id),
+                    },
+                    status="todo",
+                    source="planner",
+                )
+                today_target_day.tasks.append(rolled_forward_task)
+                today_target_day.planned_minutes += ct.est_minutes
+        else:
+            # Task is today or future
+            if ct.plan_date not in day_map:
+                day_map[ct.plan_date] = GeneratedPlanDay(
+                    date=ct.plan_date, planned_minutes=0, day_type="study", tasks=[]
+                )
+            cur_day = day_map[ct.plan_date]
+            gt = GeneratedTask(
+                id=uuid.UUID(str(ct.task_id)) if isinstance(ct.task_id, str) else ct.task_id,
+                subject=ct.subject,
+                type=ct.type,
+                chapter_id=ct.chapter_id,
+                est_minutes=ct.est_minutes,
+                refs=ct.refs,
+                status=ct.status,
+                completed_at=ct.completed_at,
+            )
+            cur_day.tasks.append(gt)
+            cur_day.planned_minutes += ct.est_minutes
+
+    # 6. Calculate relative weights and daily budget slices per active setup
+    # Urgency * Workload, with guaranteed minimum floor share per active subject
+    num_setups = len(active_setups)
+    floor_share = min(min_subject_daily_share, 1.0 / max(1, num_setups))
+
+    raw_weights: dict[str, float] = {}
+    for setup in active_setups:
+        days_to_exam = max(1, (setup.exam_date - today).days)
+        urgency = 1.0 / days_to_exam
+        workload = sum(ch.effort for ch in setup.chapters)
+        raw_weights[setup.subject] = urgency * workload
+
+    total_raw_weight = sum(raw_weights.values()) or 1.0
+    subject_daily_budgets: dict[str, int] = {}
+
+    for setup in active_setups:
+        proportional_share = raw_weights[setup.subject] / total_raw_weight
+        effective_share = max(floor_share, proportional_share)
+        budget = max(15, math.floor(daily_study_minutes * effective_share))
+        subject_daily_budgets[setup.subject] = budget
+
+    # 7. For each subject, schedule chapters across usable days
     subject_plans: dict[str, SingleSubjectPlan] = {}
 
     for setup in active_setups:
@@ -302,7 +429,6 @@ def generate_student_plan(
             )
             sub_usable_dates = [today]
 
-        # Calculate subject-specific windows:
         # Final revision window: last 15% of usable days, minimum 3 days (or all days if <= 3)
         num_days = len(sub_usable_dates)
         if num_days <= 3:
@@ -335,19 +461,10 @@ def generate_student_plan(
 
         # Sort chapters strictly by custom_order
         sorted_chapters = sorted(setup.chapters, key=lambda c: c.custom_order)
-
-        # Chapter effort & minute budget estimation
-        # Total study effort across all chapters
         total_effort = sum(ch.effort for ch in sorted_chapters)
-
-        # Calculate subject's daily study budget share
-        # If there are multiple active subjects on date d, subject gets a proportional slice
-        # Base minutes per study day: daily_study_minutes * (1 / len(active_setups))
-        subject_weight = 1.0 / len(active_setups)
-        sub_daily_budget = max(15, math.floor(daily_study_minutes * subject_weight))
+        sub_daily_budget = subject_daily_budgets.get(setup.subject, 15)
 
         # Check for infeasible exam compression:
-        # Total minutes needed for new study: total_effort * 2.5 min/page effort
         est_study_minutes_needed = total_effort * 2.5
         total_available_study_minutes = len(study_dates) * math.floor(
             sub_daily_budget * time_shares.study_share
@@ -364,12 +481,11 @@ def generate_student_plan(
                 f"EXAM_TOO_CLOSE_{setup.subject.upper()}: Compressed coverage ({pct}% pace)."
             )
 
-        # Allocate chapters to study_dates
+        # Allocate chapters to study_dates (skipping buffer and revision days for new study)
         day_idx = 0
         num_study_days = len(study_dates)
 
         for ch in sorted_chapters:
-            # Minutes allocated to study this chapter
             raw_ch_minutes = math.ceil(ch.effort * 2.5 * compression_ratio)
             ch_study_minutes = max(10, raw_ch_minutes)
             pages_total = ch.total_pages
@@ -379,19 +495,22 @@ def generate_student_plan(
                 target_date = study_dates[day_idx]
                 target_day = day_map[target_date]
 
-                # Check available budget for target_date across all subjects
+                # Strict check: never schedule study on buffer or revision days
+                if target_day.day_type in ("buffer", "revision"):
+                    day_idx += 1
+                    continue
+
+                # Available budget on target_date
                 available_today = daily_study_minutes - target_day.planned_minutes
                 if available_today <= 10:
                     day_idx += 1
                     continue
 
-                # Target study slice for today
                 study_slice = min(
                     available_today,
                     max(10, math.floor(sub_daily_budget * time_shares.study_share)),
                 )
 
-                # Determine how many pages this slice covers
                 pages_remaining = pages_total - pages_covered
                 if ch_study_minutes > 0:
                     fraction = min(1.0, study_slice / ch_study_minutes)
@@ -431,7 +550,7 @@ def generate_student_plan(
                 target_day.tasks.append(study_task)
                 target_day.planned_minutes += study_slice
 
-                # Check remaining budget on this day for revision and quiz
+                # Remaining budget for spaced revision and quiz
                 rem_budget = daily_study_minutes - target_day.planned_minutes
 
                 # 2. Daily Spaced Revision Task (~20-25%)
@@ -497,12 +616,11 @@ def generate_student_plan(
                 if daily_study_minutes - target_day.planned_minutes < 15:
                     day_idx += 1
 
-        # 4. Final Revision Window Tasks (mock exams, comprehensive quizzes)
+        # 8. Final Revision Window Tasks (mock exams, comprehensive review)
         for r_date in sorted(rev_window_dates):
             r_day = day_map[r_date]
             rem_r_budget = daily_study_minutes - r_day.planned_minutes
             if rem_r_budget >= 15:
-                # Full revision task
                 ch_titles = ", ".join(f"Ch {c.number}" for c in sorted_chapters[:3])
                 rev_all_task = GeneratedTask(
                     id=uuid.uuid4(),
@@ -523,7 +641,6 @@ def generate_student_plan(
                 r_day.tasks.append(rev_all_task)
                 r_day.planned_minutes += rev_all_task.est_minutes
 
-                # Comprehensive mock quiz
                 quiz_budget = daily_study_minutes - r_day.planned_minutes
                 if quiz_budget >= 10:
                     quiz_task = GeneratedTask(
@@ -541,7 +658,6 @@ def generate_student_plan(
                     r_day.tasks.append(quiz_task)
                     r_day.planned_minutes += quiz_task.est_minutes
 
-        # Store single subject plan
         subject_plans[setup.subject] = SingleSubjectPlan(
             subject=setup.subject,
             exam_date=setup.exam_date,
@@ -550,14 +666,12 @@ def generate_student_plan(
         )
         global_warnings.extend(sub_warnings)
 
-    # 5. Final consolidation & strict daily minute ceiling check
+    # 9. Final consolidation & strict daily minute ceiling check
     consolidated_days = sorted(day_map.values(), key=lambda d: d.date)
     total_task_count = 0
 
     for p_day in consolidated_days:
-        # Strictly verify no day exceeds daily_study_minutes
         if p_day.planned_minutes > daily_study_minutes:
-            # Scale down non-completed tasks proportionally
             excess = p_day.planned_minutes - daily_study_minutes
             for task in reversed(p_day.tasks):
                 if task.status != "done" and excess > 0:

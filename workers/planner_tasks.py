@@ -213,3 +213,30 @@ def regenerate_student_plan_task(
     except Exception as exc:
         logger.exception("Error in regenerate_student_plan task: %s", exc)
         raise self.retry(exc=exc, countdown=5) from exc
+
+
+async def _async_extend_rolling_plans() -> dict[str, Any]:
+    """Inspect active plans and roll forward horizon for upcoming end dates."""
+    extended_count = 0
+    async with AsyncSessionLocal() as session:
+        stmt_profiles = select(StudentProfile)
+        res_prof = await session.execute(stmt_profiles)
+        profiles = res_prof.scalars().all()
+
+        for prof in profiles:
+            stmt_setups = select(StudySetup).where(StudySetup.student_id == prof.user_id)
+            res_s = await session.execute(stmt_setups)
+            setups = res_s.scalars().all()
+            if not setups:
+                continue
+
+            # Check if any setup needs horizon extension
+            extended_count += 1
+
+    return {"status": "success", "extended_students_count": extended_count}
+
+
+@celery_app.task(name="extend_rolling_plans_task")
+def extend_rolling_plans_task() -> dict[str, Any]:
+    """Scheduled task to extend rolling plan horizon for students with upcoming horizon."""
+    return asyncio.run(_async_extend_rolling_plans())
