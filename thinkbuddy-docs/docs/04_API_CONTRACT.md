@@ -32,11 +32,13 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /chapters/{id}` – get chapter details with concepts and chunk count.
 
 ### Planning
-- `PUT /students/{id}/study-setups/{subject}` – exam, syllabus selection, order, daily minutes (parent).
-- `POST /students/{id}/study-setups/{subject}/change-requests` (student).
+- `PUT /students/{id}/study-setups/{subject}` – exam date, syllabus selection, chapter order, student-level daily minutes budget (parent, with optimistic locking via `version`).
+- `GET /students/{id}/study-setups` – list all study setups for a student.
+- `POST /students/{id}/study-setups/{subject}/change-requests` (student submits change request).
+- `POST /students/{id}/generate-plan` – generate or recalculate unified schedule across all active setups.
 - `GET /students/{id}/plan?from=&to=` – days + tasks.
-- `GET /students/{id}/today` – the home screen payload (tasks, revision, streak, exam countdown).
-- `PATCH /tasks/{id}` – status update.
+- `GET /students/{id}/today` – the home screen payload (tasks, revision, streak, exam countdown, localized to student timezone).
+- `PATCH /tasks/{id}` – status update (student only; parents read-only; ownership verified).
 
 ### Quiz
 - `POST /quizzes/{id}/attempts` – start; returns `attempt_id`, `deadline_at`, `attempt_token`, first question.

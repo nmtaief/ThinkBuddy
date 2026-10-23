@@ -41,6 +41,16 @@ from core.families.router import (
     RedeemLinkRequest,
     RedeemLinkResponse,
 )
+from core.planner.schemas import (
+    PlanResponse,
+    StudentChangeRequestInput,
+    StudentChangeRequestResponse,
+    StudySetupResponse,
+    TaskResponse,
+    TodayHomePayloadResponse,
+    UpdateTaskStatusRequest,
+    UpsertStudySetupRequest,
+)
 from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
 from gateway.client import core_client
 
@@ -401,6 +411,74 @@ async def get_book_chapters(book_id: uuid.UUID, request: Request) -> Response:
 async def get_chapter_detail(chapter_id: uuid.UUID, request: Request) -> Response:
     """Get detailed chapter information including educational concepts and chunk counts."""
     return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Planning & Study Setup
+# -------------------------------------------------------------------------
+@router.put(
+    "/students/{student_id}/study-setups/{subject}",
+    response_model=StudySetupResponse,
+    tags=["Planning"],
+)
+async def upsert_study_setup(
+    student_id: uuid.UUID,
+    subject: str,
+    payload: UpsertStudySetupRequest,
+    request: Request,
+) -> Response:
+    """Parent configures syllabus, exam date, and chapter order for student."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/students/{student_id}/study-setups/{subject}/change-requests",
+    response_model=StudentChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Planning"],
+)
+async def submit_student_change_request(
+    student_id: uuid.UUID,
+    subject: str,
+    payload: StudentChangeRequestInput,
+    request: Request,
+) -> Response:
+    """Student submits proposed schedule adjustment to their study setup."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.get(
+    "/students/{student_id}/plan",
+    response_model=PlanResponse,
+    tags=["Planning"],
+)
+async def get_student_plan(student_id: uuid.UUID, request: Request) -> Response:
+    """Fetch active versioned study plan and daily tasks."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/students/{student_id}/today",
+    response_model=TodayHomePayloadResponse,
+    tags=["Planning"],
+)
+async def get_today_payload(student_id: uuid.UUID, request: Request) -> Response:
+    """Home screen daily learning loop payload."""
+    return await forward_to_core(request)
+
+
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=TaskResponse,
+    tags=["Planning"],
+)
+async def update_task_status(
+    task_id: uuid.UUID,
+    payload: UpdateTaskStatusRequest,
+    request: Request,
+) -> Response:
+    """Update task completion status (student only)."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
 # -------------------------------------------------------------------------

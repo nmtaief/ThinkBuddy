@@ -762,6 +762,274 @@
         }
       }
     },
+    "/v1/students/{student_id}/study-setups/{subject}": {
+      "put": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Upsert Study Setup",
+        "description": "Parent configures syllabus, exam date, and chapter order for student.",
+        "operationId": "upsert_study_setup_v1_students__student_id__study_setups__subject__put",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subject"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertStudySetupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudySetupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/study-setups/{subject}/change-requests": {
+      "post": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Submit Student Change Request",
+        "description": "Student submits proposed schedule adjustment to their study setup.",
+        "operationId": "submit_student_change_request_v1_students__student_id__study_setups__subject__change_requests_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subject"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentChangeRequestInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentChangeRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/plan": {
+      "get": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Get Student Plan",
+        "description": "Fetch active versioned study plan and daily tasks.",
+        "operationId": "get_student_plan_v1_students__student_id__plan_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/today": {
+      "get": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Get Today Payload",
+        "description": "Home screen daily learning loop payload.",
+        "operationId": "get_today_payload_v1_students__student_id__today_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayHomePayloadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}": {
+      "patch": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Update Task Status",
+        "description": "Update task completion status (student only).",
+        "operationId": "update_task_status_v1_tasks__task_id__patch",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTaskStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/teacher/queue": {
       "get": {
         "tags": [
@@ -1440,6 +1708,96 @@
         ],
         "title": "LinkedStudentResponse"
       },
+      "PlanDayResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "planned_minutes": {
+            "type": "integer",
+            "title": "Planned Minutes"
+          },
+          "day_type": {
+            "type": "string",
+            "title": "Day Type"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "planned_minutes",
+          "day_type",
+          "tasks"
+        ],
+        "title": "PlanDayResponse",
+        "description": "Daily study plan allocation."
+      },
+      "PlanResponse": {
+        "properties": {
+          "setup_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Setup Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/PlanDayResponse"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "setup_id",
+          "student_id",
+          "version",
+          "generated_at",
+          "reason",
+          "status",
+          "days"
+        ],
+        "title": "PlanResponse",
+        "description": "Full versioned study plan."
+      },
       "RedeemLinkRequest": {
         "properties": {
           "link_code": {
@@ -1579,6 +1937,420 @@
         ],
         "title": "ReviewSubmissionRequest"
       },
+      "StudentChangeRequestInput": {
+        "properties": {
+          "requested_changes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requested Changes",
+            "description": "Proposed schedule adjustments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested_changes"
+        ],
+        "title": "StudentChangeRequestInput",
+        "description": "Student proposed modification to study schedule or order."
+      },
+      "StudentChangeRequestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "setup_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Setup Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "requested_changes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Requested Changes"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "setup_id",
+          "student_id",
+          "requested_changes",
+          "status",
+          "created_at"
+        ],
+        "title": "StudentChangeRequestResponse",
+        "description": "Change request submission record."
+      },
+      "StudySetupResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "exam_name": {
+            "type": "string",
+            "title": "Exam Name"
+          },
+          "exam_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Exam Date"
+          },
+          "active_plan_version": {
+            "type": "integer",
+            "title": "Active Plan Version"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "syllabus": {
+            "items": {
+              "$ref": "#/components/schemas/SyllabusItemSummary"
+            },
+            "type": "array",
+            "title": "Syllabus"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "student_id",
+          "subject",
+          "exam_name",
+          "exam_date",
+          "active_plan_version",
+          "version",
+          "syllabus",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "StudySetupResponse",
+        "description": "Study setup details for a subject."
+      },
+      "SyllabusItemInput": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "included": {
+            "type": "boolean",
+            "title": "Included",
+            "default": true
+          },
+          "custom_order": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Custom Order",
+            "description": "1-indexed sequence order"
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 5.0,
+            "minimum": 0.1,
+            "title": "Weight",
+            "description": "Relative priority weight",
+            "default": 1.0
+          },
+          "custom_difficulty": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 3.0,
+                "minimum": 0.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Difficulty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "custom_order"
+        ],
+        "title": "SyllabusItemInput",
+        "description": "Chapter inclusion and order specification."
+      },
+      "SyllabusItemSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "chapter_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Number"
+          },
+          "chapter_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Title"
+          },
+          "included": {
+            "type": "boolean",
+            "title": "Included"
+          },
+          "custom_order": {
+            "type": "integer",
+            "title": "Custom Order"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight"
+          },
+          "custom_difficulty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Difficulty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "chapter_id",
+          "included",
+          "custom_order",
+          "weight"
+        ],
+        "title": "SyllabusItemSummary",
+        "description": "Summary of a chapter in the syllabus."
+      },
+      "TaskResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "plan_day_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Plan Day Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "refs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Refs"
+          },
+          "est_minutes": {
+            "type": "integer",
+            "title": "Est Minutes"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "plan_day_id",
+          "student_id",
+          "subject",
+          "type",
+          "refs",
+          "est_minutes",
+          "status",
+          "source"
+        ],
+        "title": "TaskResponse",
+        "description": "Study, revision, homework, or quiz task."
+      },
+      "TodayHomePayloadResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "study_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "type": "array",
+            "title": "Study Tasks"
+          },
+          "revision_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "type": "array",
+            "title": "Revision Tasks"
+          },
+          "homework_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "type": "array",
+            "title": "Homework Tasks"
+          },
+          "quiz_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskResponse"
+            },
+            "type": "array",
+            "title": "Quiz Tasks"
+          },
+          "total_planned_minutes": {
+            "type": "integer",
+            "title": "Total Planned Minutes"
+          },
+          "completed_minutes": {
+            "type": "integer",
+            "title": "Completed Minutes"
+          },
+          "completion_percentage": {
+            "type": "number",
+            "title": "Completion Percentage"
+          },
+          "exam_countdown_days": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Exam Countdown Days"
+          },
+          "streak": {
+            "type": "integer",
+            "title": "Streak",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "student_id",
+          "study_tasks",
+          "revision_tasks",
+          "homework_tasks",
+          "quiz_tasks",
+          "total_planned_minutes",
+          "completed_minutes",
+          "completion_percentage",
+          "exam_countdown_days"
+        ],
+        "title": "TodayHomePayloadResponse",
+        "description": "Home screen learning loop payload (Product Flows §4.2 / Rule 4)."
+      },
       "TokenResponse": {
         "properties": {
           "access_token": {
@@ -1638,6 +2410,94 @@
         },
         "type": "object",
         "title": "UpdateDeviceRequest"
+      },
+      "UpdateTaskStatusRequest": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "pattern": "^(todo|in_progress|done|skipped)$",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "UpdateTaskStatusRequest",
+        "description": "Task status update payload."
+      },
+      "UpsertStudySetupRequest": {
+        "properties": {
+          "exam_name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Exam Name"
+          },
+          "exam_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Exam Date"
+          },
+          "syllabus": {
+            "items": {
+              "$ref": "#/components/schemas/SyllabusItemInput"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 0,
+            "title": "Syllabus"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "Current version for optimistic concurrency"
+          },
+          "daily_study_minutes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 480.0,
+                "minimum": 15.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Study Minutes",
+            "description": "Override student daily budget"
+          },
+          "available_days": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Days",
+            "description": "Available study days (e.g. ['sat', 'sun', ...])"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exam_name",
+          "exam_date",
+          "syllabus"
+        ],
+        "title": "UpsertStudySetupRequest",
+        "description": "Parent configuration for a subject's study syllabus and exam."
       },
       "UserResponse": {
         "properties": {
