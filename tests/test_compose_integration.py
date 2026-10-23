@@ -114,7 +114,34 @@ def test_refuse_placeholder_secrets_in_production() -> None:
             LINK_CODE_SECRET="dev_link_code_secret_change_in_production",
         )
 
-    # Production with legitimate credentials -> successfully instantiates
+    # Production with short secret (< 32 chars) -> must raise ValueError
+    with pytest.raises(ValueError, match="must have at least 32 characters"):
+        CoreSettings(
+            ENVIRONMENT="production",
+            INTERNAL_SERVICE_TOKEN="short_token_under_32_chars",
+            DATABASE_URL="postgresql+asyncpg://prod_user:prod_pass@prod-db:5432/thinkbuddy",
+            JWT_SECRET_KEY="prod_valid_high_entropy_jwt_secret_94827398472938472",
+            LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
+        )
+
+    # Production with duplicate secrets across keys -> must raise ValueError
+    with pytest.raises(ValueError, match="must be distinct"):
+        CoreSettings(
+            ENVIRONMENT="production",
+            INTERNAL_SERVICE_TOKEN="super_secure_random_production_service_token_987654321",
+            DATABASE_URL="postgresql+asyncpg://prod_user:prod_pass@prod-db:5432/thinkbuddy",
+            JWT_SECRET_KEY="super_secure_random_production_service_token_987654321",
+            LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
+        )
+
+    # Gateway in staging with short token -> must raise ValueError
+    with pytest.raises(ValueError, match="must have at least 32 characters"):
+        GatewaySettings(
+            ENVIRONMENT="staging",
+            INTERNAL_SERVICE_TOKEN="short_staging_token_123",
+        )
+
+    # Production with legitimate distinct credentials (>= 32 chars) -> successfully instantiates
     prod_core = CoreSettings(
         ENVIRONMENT="production",
         INTERNAL_SERVICE_TOKEN="prod_valid_high_entropy_token_4892374982374982374",

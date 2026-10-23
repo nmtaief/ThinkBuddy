@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
+from core.common.config import settings
 from core.common.database import AsyncSessionLocal
 from core.curriculum.models import Book, Chapter, Chunk, Concept, IngestBatch
 from rag.embedding import EmbeddingProvider, get_embedding_provider
@@ -48,10 +49,12 @@ class CurriculumImporter:
     def __init__(
         self,
         embedding_provider: EmbeddingProvider | None = None,
-        min_ocr_quality: float = 0.70,
+        min_ocr_quality: float | None = None,
     ) -> None:
         self.embedding_provider = embedding_provider or get_embedding_provider()
-        self.min_ocr_quality = min_ocr_quality
+        self.min_ocr_quality = (
+            min_ocr_quality if min_ocr_quality is not None else settings.OCR_QUALITY_THRESHOLD
+        )
 
     async def import_manifest(
         self,

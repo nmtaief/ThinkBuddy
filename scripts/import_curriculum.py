@@ -13,14 +13,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rag.ingest import CurriculumImporter
 
 
-async def run_import(manifest_path: str, resume: bool = True) -> int:
+async def run_import(
+    manifest_path: str,
+    resume: bool = True,
+    ocr_threshold: float | None = None,
+) -> int:
     path = Path(manifest_path)
     if not path.is_file():
         print(f"Error: Manifest file '{manifest_path}' does not exist.", file=sys.stderr)
         return 1
 
     print(f"Starting curriculum ingestion from: {manifest_path}")
-    importer = CurriculumImporter()
+    importer = CurriculumImporter(min_ocr_quality=ocr_threshold)
     result = await importer.import_manifest(manifest_path, resume=resume)
 
     print("\n" + "=" * 50)
@@ -44,9 +48,21 @@ def main() -> None:
         action="store_true",
         help="Do not resume; re-process all chunks",
     )
+    parser.add_argument(
+        "--ocr-threshold",
+        type=float,
+        default=None,
+        help="Override minimum OCR quality threshold (defaults to settings.OCR_QUALITY_THRESHOLD)",
+    )
 
     args = parser.parse_args()
-    code = asyncio.run(run_import(args.manifest, resume=not args.no_resume))
+    code = asyncio.run(
+        run_import(
+            args.manifest,
+            resume=not args.no_resume,
+            ocr_threshold=args.ocr_threshold,
+        )
+    )
     sys.exit(code)
 
 

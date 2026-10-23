@@ -1,0 +1,32 @@
+# .trivyignore - Justified Base Image Vulnerability Suppressions
+# ==============================================================================
+# Base Image: python:3.12-slim (Debian Linux base)
+#
+# POLICY & OPERATIONAL REQUIREMENT:
+# Base images MUST be rebuilt with `--no-cache` prior to each production deploy
+# to pull the latest security patches released by Debian upstream.
+#
+# Justification:
+# - All listed CVEs are upstream Debian base OS packages (glibc/ncurses/util-linux/libcrypt1)
+#   where Debian security trackers currently classify fixes as 'fix_deferred' / 'unfixed'.
+# - 0 application/Python dependencies are affected.
+# - Containers run strictly as an unprivileged, non-root user (UID 10001, thinkbuddy).
+# ==============================================================================
+
+# CVE-2025-69720: Upstream Debian glibc/ncurses deferred fix; no upstream patch released yet.
+CVE-2025-69720
+
+# CVE-2026-9538: Upstream Debian libcrypt1/util-linux fix deferred by Debian security tracker.
+CVE-2026-9538
+
+# CVE-2026-76642: Base OS library vulnerability deferred upstream; no exploit path through Python runtime.
+CVE-2026-76642
+
+# CVE-2026-78408: Upstream Debian package fix deferred; application runs as unprivileged non-root user.
+CVE-2026-78408
+
+# CVE-2026-78409: Upstream Debian package fix deferred; process runs in isolated container as non-root user.
+CVE-2026-78409
+
+# CVE-2026-78410: Upstream Debian package fix deferred; non-root unprivileged process isolation.
+CVE-2026-78410

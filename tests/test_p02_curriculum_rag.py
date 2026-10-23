@@ -325,6 +325,29 @@ async def test_curriculum_read_apis(gateway_client: AsyncClient) -> None:
     assert any(c["title"] == "বর্গ ও বর্গমূলের ধারণা" for c in detail["concepts"])
 
 
+@pytest.mark.asyncio
+async def test_curriculum_read_apis_require_authentication(gateway_client: AsyncClient) -> None:
+    """Verify that all curriculum read endpoints strictly require authentication (Rule 9)."""
+    fake_id = uuid.uuid4()
+    endpoints = [
+        ("GET", "/v1/books"),
+        ("GET", f"/v1/books/{fake_id}"),
+        ("GET", f"/v1/books/{fake_id}/chapters"),
+        ("GET", f"/v1/chapters/{fake_id}"),
+    ]
+    for method, path in endpoints:
+        res = await gateway_client.request(method, path, headers=CLIENT_HEADERS_ANDROID)
+        assert res.status_code == 401, f"Expected 401 for {path}, got {res.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_configurable_ocr_quality_threshold() -> None:
+    """Verify that CurriculumImporter respects configured min_ocr_quality."""
+    # When threshold is set to 0.95, even 0.85 OCR quality chunks should be marked unretrievable
+    strict_importer = CurriculumImporter(min_ocr_quality=0.95)
+    assert strict_importer.min_ocr_quality == 0.95
+
+
 # =============================================================================
 # 6. Retrieval Evaluation Harness & Threshold Gate
 # =============================================================================

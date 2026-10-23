@@ -38,12 +38,21 @@ All deliverables and constraints defined in `thinkbuddy-docs/prompts/P02_curricu
 
 ---
 
-## 3. Retrieval Evaluation Report
+## 3. Retrieval Evaluation Report (Synthetic Smoke Test – Not a Quality Measure)
+
+> [!NOTE]
+> **SYNTHETIC SMOKE TEST NOTICE:**
+> The 100% retrieval metrics below represent an end-to-end **synthetic smoke test** on mock vectors and synthetic test chunks (`tests/data/retrieval_eval_dataset.json`), designed solely to validate pipeline mechanics (JSONL ingestion, pgvector storage, `tsvector` full-text search, HNSW/IVFFlat hybrid queries, and RRF fusion).
+> - **Dataset Scope:** 8 total manifest chunks (6 retrievable, 2 rejected: 1 low OCR quality, 1 corrupted/truncated) and 6 test queries (5 Bangla, 1 English).
+> - **Embedding Provider:** Generated via `MockMultilingualEmbeddingProvider` (deterministic 384-dimensional character n-gram + keyword pseudo-embeddings).
+> - **Quality Measure Disclaimer:** This is **NOT** a real-world retrieval quality measure. The real-data retrieval evaluation will be run as a separate validation gate before P05, once real Knowledge Factory textbook samples and actual student test questions are provided.
+> - **Live API Status:** `HostedMultilingualEmbeddingProvider` (for external embedding APIs such as Voyage, Cohere, BGE-M3, or HuggingFace TEI) **has not been tested against a live API yet**.
 
 ```text
 ================================================================================
-THINKBUDDY RETRIEVAL EVALUATION HARNESS
+THINKBUDDY RETRIEVAL EVALUATION HARNESS (SYNTHETIC SMOKE TEST)
 Dataset: retrieval_eval_dataset.json | Total Queries: 6 | Top-K: 5
+Embedding Provider: MockMultilingualEmbeddingProvider (Synthetic Smoke Test)
 ================================================================================
   [TOP5]  [BN] বর্গ ও বর্গমূলের ধারণা কী এবং কীভাব... -> Exp(Ch:1, Pg:2)  | Top-1(Ch:[1], Pg:[12])
   [EXACT] [BN] মৌলিক উৎপাদকের সাহায্যে বর্গমূল নির... -> Exp(Ch:1, Pg:5)  | Top-1(Ch:[1], Pg:[5])
@@ -63,14 +72,16 @@ PER-LANGUAGE BREAKDOWN:
   * [BN]: Hit@5 = 100.0% (5/5) | PageAcc@5 = 100.0% (5/5)
   * [EN]: Hit@5 = 100.0% (1/1) | PageAcc@5 = 100.0% (1/1)
 ================================================================================
-RETRIEVAL QUALITY GATE PASSED (Thresholds: Hit@5 >= 80.0%, PageAcc@5 >= 80.0%)
+SYNTHETIC SMOKE TEST PASSED (Harness thresholds: Hit@5 >= 80.0%, PageAcc@5 >= 80.0%)
 ================================================================================
 ```
 
 ---
 
-## 4. Key Architectural Guarantees
+## 4. Key Architectural Guarantees & Configuration
 
-1. **Config-Driven Embedding Dimension:** Vector dimension in `chunks.embedding` is derived dynamically from `settings.EMBEDDING_DIMENSION` (configured in `migrations/versions/0003_p02_curriculum_rag.py`). Changing embedding models without downtime is supported by adding an embedding column version and filtering on `embedding_model`.
-2. **Idempotent Resume:** Ingestion checks existing `(book_id, chunk_index)` records before inserting, enabling graceful resumes upon worker restart without re-embedding.
-3. **Grounding & Citations:** Every retrieved chunk returns `book_title`, `chapter_number`, `chapter_title`, and `printed_page`, giving the chat orchestrator precise citation metadata.
+1. **Configurable OCR Quality Threshold:** Configured via `settings.OCR_QUALITY_THRESHOLD` (default 0.70) in `core/common/config.py` and overridable via `--ocr-threshold` in `scripts/import_curriculum.py` CLI.
+2. **Config-Driven Embedding Dimension:** Vector dimension in `chunks.embedding` is derived dynamically from `settings.EMBEDDING_DIMENSION` (configured in `migrations/versions/0003_p02_curriculum_rag.py`). Changing embedding models without downtime is supported by adding an embedding column version and filtering on `embedding_model`.
+3. **Idempotent Resume:** Ingestion checks existing `(book_id, chunk_index)` records before inserting, enabling graceful resumes upon worker restart without re-embedding.
+4. **Grounding & Citations:** Every retrieved chunk returns `book_title`, `chapter_number`, `chapter_title`, and `printed_page`, giving the chat orchestrator precise citation metadata.
+5. **Base Image Maintenance & Trivy Suppressions:** Unpatched upstream Debian 13 base OS packages are documented in `.trivyignore`. Base images must be rebuilt with `--no-cache` prior to each production deploy to incorporate the latest upstream Debian security updates.
