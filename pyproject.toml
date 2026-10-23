@@ -14,7 +14,8 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.14.2",
-    "sqlalchemy>=2.0.32",
+    "sqlalchemy[asyncio]>=2.0.32",
+    "greenlet>=3.0.3",
     "alembic>=1.13.0",
     "asyncpg>=0.29.0",
     "redis>=5.0.8",
@@ -60,6 +61,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106"] # Allow assert and hardcoded test tokens in tests
+"migrations/*" = ["E402"] # Allow sys.path setup before application imports
 
 [tool.mypy]
 python_version = "3.12"

@@ -14,7 +14,7 @@ def main() -> None:
     if len(sys.argv) < 2:
         print(
             "Usage: python scripts/run.py "
-            "[up|down|migrate|test|lint|format|typecheck|export-openapi]"
+            "[up|down|migrate|test|lint|format|typecheck|export-openapi|check-images]"
         )
         sys.exit(1)
 
@@ -40,6 +40,8 @@ def main() -> None:
         sys.exit(run_command(["mypy", "core", "gateway", "workers"]))
     elif task == "export-openapi":
         sys.exit(run_command(["python", "scripts/export_openapi.py"]))
+    elif task == "check-images":
+        sys.exit(run_command(["python", "scripts/check_images.py"]))
     else:
         print(f"Unknown task: {task}")
         sys.exit(1)

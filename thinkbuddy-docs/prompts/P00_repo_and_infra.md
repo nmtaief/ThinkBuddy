@@ -10,7 +10,7 @@ Create the repository structure and a local environment that boots with one comm
 
 ## Deliverables
 1. Monorepo layout: `/gateway`, `/core` (modular monolith with one package per module listed in architecture §4), `/rag`, `/workers`, `/android`, `/infra`, `/thinkbuddy-docs`.
-2. `docker-compose.yml` with: Postgres 16 + pgvector, Redis 7, gateway, core, workers, MinIO (S3 stand-in), Mailpit optional.
+2. `docker-compose.yml` with: Postgres 16 + pgvector, Redis 7, gateway, core, workers, local S3-compatible store (pgsty/silo), Mailpit optional.
 3. Python 3.12 project setup (uv or poetry), linting (ruff), typing (mypy), pytest, pre-commit.
 4. FastAPI apps for gateway and core with `/healthz` and `/readyz` (checks DB and Redis).
 5. Alembic initialized; first migration enables `pgvector`, `pg_trgm`, and creates an empty baseline.

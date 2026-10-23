@@ -39,6 +39,32 @@ class CoreSettings(BaseSettings):
         description="Redis connection URL",
     )
 
+    # Storage (Generic S3 Interface - Cloudflare R2 / AWS S3 in prod, Silo in dev)
+    S3_ENDPOINT_URL: str = Field(
+        default="http://localhost:9000",
+        description="S3 endpoint URL",
+    )
+    S3_ACCESS_KEY_ID: str = Field(
+        default="minio_dev_access_key",
+        description="S3 access key ID",
+    )
+    S3_SECRET_ACCESS_KEY: str = Field(
+        default="minio_dev_secret_key",
+        description="S3 secret access key",
+    )
+    S3_BUCKET_NAME: str = Field(
+        default="thinkbuddy-content",
+        description="S3 bucket name",
+    )
+    S3_REGION: str = Field(
+        default="auto",
+        description="S3 region name",
+    )
+    S3_USE_SSL: bool = Field(
+        default=False,
+        description="Whether to use SSL for S3 connection",
+    )
+
     # Observability
     OTEL_SERVICE_NAME: str = Field(default="thinkbuddy-core", description="OTel service name")
     OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(

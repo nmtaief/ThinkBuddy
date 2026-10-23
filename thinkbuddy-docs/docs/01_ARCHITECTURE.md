@@ -59,7 +59,7 @@ Two clarifications so Antigravity does not misread them:
 | LLM | LiteLLM → hosted frontier model; vLLM later if cost demands | Model chosen per task (chat, grading, generation) |
 | DB | PostgreSQL 16 + pgvector | `VectorStore` interface for later Qdrant swap |
 | Cache/queue | Redis 7 | |
-| Files | S3 or Cloudflare R2 | Signed URLs only |
+| Files | S3 or Cloudflare R2 (local S3-compatible store for dev) | Signed URLs only |
 | Push | FCM (Android + web), APNs via FCM for iOS | `devices` table stores tokens |
 | Deploy | Docker Compose → single VM (Hetzner/DO) → managed later | Caddy or Nginx, Cloudflare in front |
 | Observability | OpenTelemetry, Prometheus/Grafana or hosted, Sentry | Request IDs end to end |
