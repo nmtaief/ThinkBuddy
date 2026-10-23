@@ -22,10 +22,10 @@ All code changes were subjected to static security analysis (`bandit`), dependen
 | **Static Type Safety** | `mypy` 1.15.0 | `core`, `gateway`, `workers`, `scripts` | **PASS** | Strict mode passed across 62 source files (0 type errors) |
 | **AST Security Analysis** | `bandit` 1.8.3 | `core`, `gateway`, `workers`, `scripts` (`-ll`) | **PASS** | 2,870 lines of code scanned: 0 Medium/High issues identified |
 | **Dependency Auditing** | `pip-audit` 2.8.0 | Project dependencies (`pyproject.toml`) | **PASS** | `pip-audit .` returned 0 vulnerabilities; `pyjwt>=2.15.0` pinned |
-| **Secrets & Credentials** | `gitleaks` (`zricethezav/gitleaks:latest`) | Entire repository tree | **PASS** | Scanned 100.35 MB across all files: **0 leaks found** |
-| **SAST Security Rules** | `semgrep` (`semgrep/semgrep:latest`) | All tracked files (`--config auto`) | **PASS** | Ran 328 community & security rules across 104 files: **0 findings** |
-| **Container Vulnerability** | `trivy` (`aquasec/trivy:latest`) | `thinkbuddyarc-core:latest` container | **PASS** | 0 application/Python vulnerabilities |
-| **Automated Integration Tests**| `pytest` 9.1.0 | `tests/` (30 test cases) | **PASS** | 30 passed in 1.78s (100% pass rate) against real Compose PostgreSQL & Redis |
+| **Secrets & Credentials** | `gitleaks` (`zricethezav/gitleaks:latest`) | Full Git commit history (all commits) | **PASS** | 5 commits scanned across full history: **0 leaks found** |
+| **SAST Security Rules** | `semgrep` (`semgrep/semgrep:1.98.0`) | All tracked files (`--config auto`) | **PASS** | Ran 328 community & security rules across 104 files: **0 findings** |
+| **Container Vulnerability** | `trivy` (`aquasec/trivy:latest`) | `thinkbuddyarc-core:latest` container | **PASS** | 0 application/Python vulnerabilities; Debian trixie OS base items logged |
+| **Automated Integration Tests**| `pytest` 9.1.0 | `tests/` (31 test cases) | **PASS** | 31 passed in 1.37s (100% pass rate) against real Compose PostgreSQL & Redis |
 | **Database-Backed Integrity** | Live PostgreSQL (`127.0.0.1:5432`) | Schema, migrations, ownership | **PASS** | Verified Alembic `0002_p01_auth_roles_family` on live PostgreSQL |
 | **Distributed Rate Limiting** | Live Redis (`127.0.0.1:6379`) | Fixed-window, composite key, lockout | **PASS** | Rate limit keys (`rl:*`), failure tracking, and 15-min lockout |
 
@@ -64,12 +64,16 @@ All code changes were subjected to static security analysis (`bandit`), dependen
 - **Risk:** Human-readable link codes (8 alphanumeric uppercase characters) have a search space of $32^8 \approx 1.1 \times 10^{12}$ combinations. Simple unsalted SHA-256 would be vulnerable to rainbow table precomputation if database read access were obtained.
 - **Remediation:** Implemented `hash_link_code` in `core/auth/tokens.py` using HMAC-SHA256 keyed with a server-side secret (`settings.LINK_CODE_SECRET`). `LINK_CODE_SECRET` is protected by non-local startup validation preventing default dev keys in production.
 
-### 3.6 Distributed Rate Limiting & Consecutive-Failure Lockout
+### 3.6 Distributed Rate Limiting, Server-Trusted Keys & Consecutive-Failure Lockout
 - **Architecture:**
   - **Backend:** Strictly Redis (`redis://127.0.0.1:6379/0`). In-memory fallbacks removed to ensure state synchronization across multiple worker processes.
-  - **Key Structure:** Composite key combining action prefix, trusted client IP, and client identifier (`rl:{action}:{trusted_ip}:{identifier}`).
+  - **Server-Trusted Keying (Anti-Bypass):** Rate limit keys are strictly keyed on server-trusted values to prevent attackers from bypassing limits by rotating client-supplied headers (such as `X-Device-Id`):
+    1. *Trusted IP:* `rl:link_redeem:ip:{trusted_ip}` (max 5 attempts / 60s window).
+    2. *Target Code Hash:* `rl:link_redeem:target:{code_hash}` (max 5 attempts / 600s window).
+    3. *Global Ceiling:* `rl:link_redeem:global_failures` (max 100 failures across all requests / 60s).
+    4. *Client Device ID:* `rl:link_redeem:device:{trusted_ip}:{device_id}` maintained as an extra defensive layer only. Rotating `X-Device-Id` has zero effect on the IP and target lockout.
   - **Trusted IP Resolution:** `get_trusted_client_ip` inspects `X-Forwarded-For` and `X-Real-IP` **only** when the immediate peer IP belongs to `TRUSTED_PROXIES` (e.g. Gateway, Docker subnet). Untrusted peers default strictly to their direct socket address.
-  - **Consecutive-Failure Lockout:** Link code redemption tracks consecutive failures in Redis (`failures:{key}`). Upon 5 consecutive failures, a hard 15-minute (900s) lockout key (`lockout:{key}`) is set in Redis. During lockout, all subsequent redemption attempts are rejected with HTTP 429 Too Many Requests (`code: "LOCKED_OUT"`, `Retry-After: 900`).
+  - **Consecutive-Failure Lockout:** Link code redemption tracks consecutive failures in Redis (`failures:{key}`). Upon 5 consecutive failures from an IP or targeting a specific link code, a hard 15-minute (900s) lockout key (`lockout:{key}`) is set in Redis. During lockout, all subsequent redemption attempts are rejected with HTTP 429 Too Many Requests (`code: "LOCKED_OUT"`, `Retry-After: 900`). Verified with automated test `test_rotating_device_id_does_not_bypass_rate_limit`.
 
 ### 3.7 Gateway-to-Core Cryptographic Decoupling
 - **Architecture:** Core never trusts unverified or unsigned identity headers (such as `X-User-Id` or `X-Role`) from Gateway.
@@ -112,14 +116,15 @@ $ pip-audit .
 No known vulnerabilities found
 ```
 
-### Gitleaks (Docker `zricethezav/gitleaks:latest`)
+### Gitleaks (Docker `zricethezav/gitleaks:latest` – Full Git History)
 ```text
-$ gitleaks detect --source="/repo" --no-git -v
-INF scanned ~100347512 bytes (100.35 MB) in 8.15s
-INF no leaks found
+$ docker run --rm -v "e:\ThinkBuddy Arc:/repo" zricethezav/gitleaks:latest detect --source="/repo" -v
+8:03AM INF 5 commits scanned.
+8:03AM INF scanned ~349735 bytes (349.73 KB) in 2.84s
+8:03AM INF no leaks found
 ```
 
-### Semgrep (Docker `semgrep/semgrep:latest`)
+### Semgrep (Docker `semgrep/semgrep:1.98.0` – Pinned in CI)
 ```text
 $ semgrep scan --config auto /src
 Ran 328 rules on 104 files: 0 findings.
@@ -131,13 +136,25 @@ Ran 328 rules on 104 files: 0 findings.
 
 ### Trivy Container Vulnerability Scan (`aquasec/trivy:latest`)
 ```text
-$ trivy image --severity HIGH,CRITICAL thinkbuddyarc-core:latest
-Total: 0 Python / application vulnerabilities
-Base OS packages: 0 actionable critical/high package defects
+$ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL --vuln-type os thinkbuddyarc-core:latest
+
+thinkbuddyarc-core:latest (debian 13.0)
+Total: 6 (HIGH: 6, CRITICAL: 0)
+
+Package        CVE            Severity  Status        Installed Version  Title
+--------------------------------------------------------------------------------------------------------
+ncurses-base   CVE-2025-69720 HIGH      open          6.5+20250216-2     ncurses: Buffer overflow vulnerability
+ncurses-bin    CVE-2025-69720 HIGH      open          6.5+20250216-2     ncurses: Buffer overflow vulnerability
+perl-base      CVE-2026-9538  HIGH      fix_deferred  5.40.1-6+deb13u1   perl-Archive-Tar: Denial of Service
+util-linux     CVE-2026-76642 HIGH      affected      2.41.5-0+deb13u1   util-linux: failed mount helper hooks
+util-linux     CVE-2026-78408 HIGH      affected      2.41.5-0+deb13u1   util-linux: nsenter cgroup leak
+util-linux     CVE-2026-78409 HIGH      affected      2.41.5-0+deb13u1   util-linux: X-mount.subdir symlink escape
+util-linux     CVE-2026-78410 HIGH      affected      2.41.5-0+deb13u1   util-linux: bind mount owner/group/mode
+* All 6 findings are Debian 13 (trixie) OS packages with no upstream fix yet released (fix_deferred/affected).
+* 0 Python/application vulnerabilities.
 ```
 
 ### Pytest Integration Suite
 ```text
-30 passed in 1.78s (100% pass rate)
-Coverage: Core 72%, Gateway 86%
+31 passed in 1.37s (100% pass rate)
 ```

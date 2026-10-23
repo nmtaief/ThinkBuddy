@@ -30,7 +30,7 @@ from core.auth.tokens import hash_link_code
 from core.common.config import settings
 from core.common.database import AsyncSessionLocal
 from core.common.policy import can_access_student
-from core.common.rate_limit import build_rate_limit_key
+from core.common.rate_limit import RateLimiter, build_rate_limit_key
 from core.families.models import ParentStudentLink
 from core.main import app as core_app
 from gateway.main import app as gateway_app
@@ -438,6 +438,8 @@ async def test_explicit_family_isolation_and_link_lifecycle(gateway_client: Asyn
 @pytest.mark.asyncio
 async def test_rate_limiter_composite_key_and_lockout(gateway_client: AsyncClient) -> None:
     """Verify rate limiter uses composite key (ip:user) and triggers 15-min lockout."""
+    await RateLimiter.reset()
+
     # Setup student
     phone_p = f"+880188{uuid.uuid4().hex[:6]}"
     res_p = await gateway_client.post(
@@ -491,6 +493,76 @@ async def test_rate_limiter_composite_key_and_lockout(gateway_client: AsyncClien
     assert res_lockout.status_code == 429
     assert res_lockout.json()["error"]["code"] in ("RATE_LIMIT_EXCEEDED", "LOCKED_OUT")
     assert "Retry-After" in res_lockout.headers
+
+
+@pytest.mark.asyncio
+async def test_rotating_device_id_does_not_bypass_rate_limit(gateway_client: AsyncClient) -> None:
+    """Verify attacker cannot bypass rate limit or lockout by rotating X-Device-Id.
+
+    The primary rate limits and lockout are strictly keyed on server-trusted values (IP and target),
+    so rotating client-controlled X-Device-Id headers will not reset or bypass the limit.
+    """
+    await RateLimiter.reset()
+
+    # 1. Register parent and student to obtain valid JWT token
+    phone_p = f"+880191{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone_p}", "role": "parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    token_p = res_p.json()["access_token"]
+    headers_p = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p}"}
+
+    res_fam = await gateway_client.post(
+        "/v1/families", json={"name": "RotDev Family"}, headers=headers_p
+    )
+    fam_id = res_fam.json()["id"]
+
+    res_c = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "RotDev Student", "class_level": 7, "medium": "bn"},
+        headers=headers_p,
+    )
+    code = res_c.json()["link_code"]
+
+    phone_s = f"+880192{uuid.uuid4().hex[:6]}"
+    res_s = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone_s}", "role": "student", "link_code": code},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    token_s = res_s.json()["access_token"]
+
+    # 2. Fire 5 failed redemption attempts, ROTATING X-Device-Id on every attempt
+    for i in range(5):
+        headers_rotating = {
+            **CLIENT_HEADERS_ANDROID,
+            "Authorization": f"Bearer {token_s}",
+            "X-Device-Id": f"attacker-device-{uuid.uuid4().hex[:8]}",
+        }
+        res = await gateway_client.post(
+            "/v1/links/redeem",
+            json={"link_code": f"BOGUS{i:03d}"},
+            headers=headers_rotating,
+        )
+        assert res.status_code in (400, 429)
+
+    # 3. 6th attempt with a BRAND NEW X-Device-Id MUST still be blocked (429)
+    # because the server-trusted IP counter and lockout triggered
+    headers_new_device = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {token_s}",
+        "X-Device-Id": "attacker-fresh-brand-new-device",
+    }
+    res_blocked = await gateway_client.post(
+        "/v1/links/redeem",
+        json={"link_code": "BOGUS999"},
+        headers=headers_new_device,
+    )
+    assert res_blocked.status_code == 429
+    assert res_blocked.json()["error"]["code"] in ("RATE_LIMIT_EXCEEDED", "LOCKED_OUT")
+    assert "Retry-After" in res_blocked.headers
 
 
 # =============================================================================

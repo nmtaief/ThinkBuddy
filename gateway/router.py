@@ -18,8 +18,9 @@ from core.auth.router import (
     TokenResponse,
     UserResponse,
 )
+from core.auth.tokens import hash_link_code
 from core.common.logging import request_id_ctx
-from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
+from core.common.rate_limit import RateLimiter, get_trusted_client_ip
 from core.devices.router import (
     DeviceResponse,
     RegisterDeviceRequest,
@@ -75,9 +76,7 @@ async def forward_to_core(request: Request, json_body: Any = None) -> Response:
 
 def _get_client_rate_key(request: Request, prefix: str) -> str:
     trusted_ip = get_trusted_client_ip(request)
-    device_id = request.headers.get("x-device-id", "")
-    ident = device_id if device_id else "anonymous"
-    return build_rate_limit_key(prefix, trusted_ip, ident)
+    return f"rl:{prefix}:ip:{trusted_ip}"
 
 
 # -------------------------------------------------------------------------
@@ -138,11 +137,12 @@ async def get_client_config(
 async def exchange_auth_token(payload: AuthExchangeRequest, request: Request) -> Response:
     """Exchange third-party provider credential for ThinkBuddy session tokens.
 
-    Strictly rate limited to prevent credential guessing.
+    Strictly rate limited to prevent credential guessing, keyed primarily on server-trusted IP.
     """
-    rate_key = _get_client_rate_key(request, "auth_exchange")
+    trusted_ip = get_trusted_client_ip(request)
+    ip_key = f"rl:auth_exchange:ip:{trusted_ip}"
     allowed, retry_after = await RateLimiter.check_rate_limit(
-        rate_key, max_requests=10, window_seconds=60
+        ip_key, max_requests=10, window_seconds=60
     )
     if not allowed:
         req_id = request_id_ctx.get() or ""
@@ -207,29 +207,92 @@ async def add_child(family_id: uuid.UUID, payload: AddChildRequest, request: Req
 async def redeem_link_code(payload: RedeemLinkRequest, request: Request) -> Response:
     """Student redeems link code to establish family connection.
 
-    Strictly rate limited to prevent brute-force attacks on link codes.
+    Enforces multi-layer rate limits keyed on server-trusted values:
+    1. Per trusted IP: rl:link_redeem:ip:{trusted_ip}
+    2. Per target link code: rl:link_redeem:target:{code_hash}
+    3. Global ceiling for link-redemption failures: rl:link_redeem:global_failures
+    4. Client-supplied device ID as extra layer: rl:link_redeem:device:{trusted_ip}:{device_id}
     """
-    rate_key = _get_client_rate_key(request, "link_redeem")
-    allowed, retry_after = await RateLimiter.check_rate_limit(
-        rate_key, max_requests=5, window_seconds=60
+    trusted_ip = get_trusted_client_ip(request)
+    ip_key = f"rl:link_redeem:ip:{trusted_ip}"
+
+    target_code = payload.link_code.strip().upper()
+    code_hash = hash_link_code(target_code)
+    target_key = f"rl:link_redeem:target:{code_hash}"
+
+    device_id = request.headers.get("x-device-id", "")
+    device_key = f"rl:link_redeem:device:{trusted_ip}:{device_id}" if device_id else None
+    global_failures_key = "rl:link_redeem:global_failures"
+
+    # 1. Server-trusted IP rate limit & lockout check
+    allowed_ip, retry_ip = await RateLimiter.check_rate_limit(
+        ip_key, max_requests=5, window_seconds=60
     )
-    if not allowed:
+    if not allowed_ip:
         req_id = request_id_ctx.get() or ""
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(retry_ip)},
             content={
                 "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Too many link redemption attempts. Please try again later.",
+                    "message": (
+                        "Too many link redemption attempts from this IP. Please try again later."
+                    ),
                     "request_id": req_id,
                 }
             },
         )
 
+    # 2. Server-trusted target link code rate limit
+    allowed_target, retry_target = await RateLimiter.check_rate_limit(
+        target_key, max_requests=5, window_seconds=600
+    )
+    if not allowed_target:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_target)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many attempts for this link code. Please try again later.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
+    # 3. Client device limit (extra layer only)
+    if device_key:
+        allowed_dev, retry_dev = await RateLimiter.check_rate_limit(
+            device_key, max_requests=5, window_seconds=60
+        )
+        if not allowed_dev:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_dev)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many link redemption attempts from this device.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
     res = await forward_to_core(request, json_body=payload.model_dump(mode="json"))
     if res.status_code >= 400:
-        is_locked, lockout_seconds = await RateLimiter.record_failure(rate_key)
+        # 1. Server-trusted IP failure tracking & 15-min lockout
+        is_locked, lockout_seconds = await RateLimiter.record_failure(ip_key)
+        # 2. Target code failure tracking
+        await RateLimiter.record_failure(target_key)
+        # 3. Global failure ceiling
+        global_count = await RateLimiter.increment_counter(global_failures_key, window_seconds=60)
+        # 4. Device failure tracking (extra layer)
+        if device_key:
+            await RateLimiter.record_failure(device_key)
+
         if is_locked:
             req_id = request_id_ctx.get() or ""
             return JSONResponse(
@@ -246,8 +309,26 @@ async def redeem_link_code(payload: RedeemLinkRequest, request: Request) -> Resp
                     }
                 },
             )
+        if global_count > 100:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": "60"},
+                content={
+                    "error": {
+                        "code": "GLOBAL_RATE_LIMIT_EXCEEDED",
+                        "message": (
+                            "Global link redemption threshold exceeded. Please try again later."
+                        ),
+                        "request_id": req_id,
+                    }
+                },
+            )
     else:
-        await RateLimiter.record_success(rate_key)
+        await RateLimiter.record_success(ip_key)
+        await RateLimiter.record_success(target_key)
+        if device_key:
+            await RateLimiter.record_success(device_key)
 
     return res
 

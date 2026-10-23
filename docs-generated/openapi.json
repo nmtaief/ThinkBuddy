@@ -124,7 +124,7 @@
           "Auth"
         ],
         "summary": "Exchange Auth Token",
-        "description": "Exchange third-party provider credential for ThinkBuddy session tokens.\n\nStrictly rate limited to prevent credential guessing.",
+        "description": "Exchange third-party provider credential for ThinkBuddy session tokens.\n\nStrictly rate limited to prevent credential guessing, keyed primarily on server-trusted IP.",
         "operationId": "exchange_auth_token_v1_auth_exchange_post",
         "requestBody": {
           "content": {
@@ -366,7 +366,7 @@
           "Families"
         ],
         "summary": "Redeem Link Code",
-        "description": "Student redeems link code to establish family connection.\n\nStrictly rate limited to prevent brute-force attacks on link codes.",
+        "description": "Student redeems link code to establish family connection.\n\nEnforces multi-layer rate limits keyed on server-trusted values:\n1. Per trusted IP: rl:link_redeem:ip:{trusted_ip}\n2. Per target link code: rl:link_redeem:target:{code_hash}\n3. Global ceiling for link-redemption failures: rl:link_redeem:global_failures\n4. Client-supplied device ID as extra layer: rl:link_redeem:device:{trusted_ip}:{device_id}",
         "operationId": "redeem_link_code_v1_links_redeem_post",
         "requestBody": {
           "content": {

@@ -140,6 +140,15 @@ class RateLimiter:
         await redis.delete(f"failures:{key}")
 
     @classmethod
+    async def increment_counter(cls, key: str, window_seconds: int = 60) -> int:
+        """Increment a counter with an expiration window."""
+        redis = get_redis_client()
+        val = await redis.incr(key)
+        if val == 1:
+            await redis.expire(key, window_seconds)
+        return val
+
+    @classmethod
     async def reset(cls) -> None:
         """Clear all rate limit, failure, and lockout keys from Redis (used in test fixtures)."""
         redis = get_redis_client()
