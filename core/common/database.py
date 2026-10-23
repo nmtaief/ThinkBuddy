@@ -53,6 +53,9 @@ async_session_factory = async_sessionmaker(
     autoflush=False,
 )
 
+# Standard alias for session factory
+AsyncSessionLocal = async_session_factory
+
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for obtaining an asynchronous database session."""

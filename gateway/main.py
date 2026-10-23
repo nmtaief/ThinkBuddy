@@ -32,13 +32,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await close_redis()
 
 
+is_local = settings.is_local
+
 app = FastAPI(
     title="ThinkBuddy API Gateway",
     description="Edge API Gateway handling routing, rate limiting, and client config.",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if is_local else None,
+    redoc_url=None,  # Redoc disabled across all environments
+    openapi_url="/openapi.json" if is_local else None,
     lifespan=lifespan,
 )
 

@@ -19,7 +19,7 @@ from core.auth.router import (
     UserResponse,
 )
 from core.common.logging import request_id_ctx
-from core.common.rate_limit import RateLimiter
+from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.devices.router import (
     DeviceResponse,
     RegisterDeviceRequest,
@@ -74,10 +74,10 @@ async def forward_to_core(request: Request, json_body: Any = None) -> Response:
 
 
 def _get_client_rate_key(request: Request, prefix: str) -> str:
+    trusted_ip = get_trusted_client_ip(request)
     device_id = request.headers.get("x-device-id", "")
-    client_ip = request.client.host if request.client else "unknown"
-    ident = device_id if device_id else client_ip
-    return f"rate_limit:{prefix}:{ident}"
+    ident = device_id if device_id else "anonymous"
+    return build_rate_limit_key(prefix, trusted_ip, ident)
 
 
 # -------------------------------------------------------------------------
@@ -93,14 +93,13 @@ async def get_client_config(
 
     Returns server-driven settings, minimum version thresholds, active feature flags,
     and quiz security modes allowed per platform without code branching.
+    Aligned with docs/05_SECURE_QUIZ.md §3 ('assessed' on mobile, 'practice_only' on web).
     """
     platform = x_client_platform.lower()
     form_factor = x_client_form_factor.lower()
 
-    if platform == "android":
-        quiz_security_mode = "secure_kiosk"
-    elif platform == "ios":
-        quiz_security_mode = "secure_app"
+    if platform in ("android", "ios"):
+        quiz_security_mode = "assessed"
     else:
         quiz_security_mode = "practice_only"
 
@@ -118,7 +117,7 @@ async def get_client_config(
         },
         "quiz_security": {
             "allowed_mode": quiz_security_mode,
-            "screen_pinning_required": (platform == "android"),
+            "flag_secure": (platform == "android"),
             "heartbeat_interval_seconds": 15,
         },
         "polling_intervals": {
@@ -227,7 +226,30 @@ async def redeem_link_code(payload: RedeemLinkRequest, request: Request) -> Resp
                 }
             },
         )
-    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+    res = await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+    if res.status_code >= 400:
+        is_locked, lockout_seconds = await RateLimiter.record_failure(rate_key)
+        if is_locked:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(lockout_seconds)},
+                content={
+                    "error": {
+                        "code": "LOCKED_OUT",
+                        "message": (
+                            "Repeated failed link redemption attempts. "
+                            "15-minute security lockout active."
+                        ),
+                        "request_id": req_id,
+                    }
+                },
+            )
+    else:
+        await RateLimiter.record_success(rate_key)
+
+    return res
 
 
 @router.post("/links/{link_id}/revoke", tags=["Families"])

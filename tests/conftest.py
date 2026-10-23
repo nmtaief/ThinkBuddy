@@ -6,7 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 # Set testing environment variables before application imports
-os.environ["ENVIRONMENT"] = "testing"
+os.environ["ENV"] = "local"
+os.environ["ENVIRONMENT"] = "local"
 os.environ["INTERNAL_SERVICE_TOKEN"] = "test_internal_service_token_12345"
 
 from collections.abc import AsyncGenerator

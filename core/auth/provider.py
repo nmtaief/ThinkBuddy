@@ -36,10 +36,22 @@ class AuthProvider(Protocol):
 class FakeAuthProvider:
     """In-memory identity provider for automated testing and local development.
 
+    CRITICAL SECURITY GUARD:
+    Cannot be instantiated or loaded unless ENV=local. In all other environments
+    (development, staging, production), attempts to load will raise a RuntimeError.
+
     Supports:
     - String prefix syntax: 'fake:phone:+8801700000001', 'fake:google:parent@thinkbuddy.org'
     - JSON payload strings: '{"uid": "user-123", "phone": "+8801700000001", "role": "parent"}'
     """
+
+    def __init__(self) -> None:
+        if not settings.is_local:
+            msg = (
+                f"Security Violation: FakeAuthProvider cannot load when ENV='{settings.ENV}'. "
+                "FakeAuthProvider is strictly forbidden unless ENV=local."
+            )
+            raise RuntimeError(msg)
 
     async def verify_token(self, id_token: str) -> AuthProviderUser:
         token = id_token.strip()
@@ -100,19 +112,26 @@ class FakeAuthProvider:
 
 
 class FirebaseAuthProvider:
-    """Production identity verification via Google Firebase Auth."""
+    """Production identity verification via Google Firebase Auth.
 
-    def __init__(self) -> None:
-        # In a real environment, initialize firebase_admin if not already initialized
-        pass
+    Cryptographic Verification Guarantees:
+    1. Signature: Validated against Google's live public RSA/ECDSA key certs from Google JWKS.
+    2. Issuer: Must strictly match 'https://securetoken.google.com/<FIREBASE_PROJECT_ID>'.
+    3. Audience: Must strictly match the configured Firebase Project ID.
+    4. Expiry: Token expiration ('exp') is verified with clock skew checks; future 'iat' rejected.
+    5. Revocation: Optionally checks token revocation status against Firebase Auth backend.
+    """
+
+    def __init__(self, check_revoked: bool = True) -> None:
+        self.check_revoked = check_revoked
 
     async def verify_token(self, id_token: str) -> AuthProviderUser:
         # Production Firebase ID token verification
-        # When Firebase SDK is configured, calls auth.verify_id_token(id_token)
+        # Cryptographically verifies signature, issuer, audience, and expiry
         try:
             import firebase_admin.auth as fb_auth
 
-            decoded = fb_auth.verify_id_token(id_token)
+            decoded = fb_auth.verify_id_token(id_token, check_revoked=self.check_revoked)
 
             firebase_id = decoded.get("firebase", {})
             sign_in_provider = firebase_id.get("sign_in_provider", "firebase")
@@ -127,13 +146,18 @@ class FirebaseAuthProvider:
             )
         except ImportError:
             # Fallback if firebase-admin package is not yet installed in local dev
-            msg = "Firebase Admin SDK not installed. Use FakeAuthProvider in development."
+            msg = (
+                "Firebase Admin SDK not installed. "
+                "In non-local environments, firebase-admin is required."
+            )
             raise ValueError(msg) from None
 
 
 def get_auth_provider() -> AuthProvider:
-    """Factory returning appropriate provider for current environment."""
-    env = settings.ENVIRONMENT.lower()
-    if env in {"local", "development", "dev", "test", "testing"}:
+    """Factory returning appropriate provider for current environment.
+
+    Enforces that FakeAuthProvider cannot load unless ENV=local.
+    """
+    if settings.is_local:
         return FakeAuthProvider()
     return FirebaseAuthProvider()

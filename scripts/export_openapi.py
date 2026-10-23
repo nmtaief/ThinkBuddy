@@ -1,7 +1,11 @@
 """Export OpenAPI schemas from FastAPI applications to /docs-generated/openapi.json."""
 
 import json
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.openapi.utils import get_openapi
 

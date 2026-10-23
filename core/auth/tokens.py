@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,16 @@ def utcnow() -> datetime:
 def hash_token(token: str) -> str:
     """Return SHA-256 hash hex string of a secret token for secure database storage."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def hash_link_code(code: str) -> str:
+    """Hash short link code using HMAC-SHA256 with server-side LINK_CODE_SECRET.
+
+    Prevents precomputation and rainbow table attacks on short 8-character codes.
+    """
+    secret = settings.LINK_CODE_SECRET.encode("utf-8")
+    normalized = code.strip().upper().encode("utf-8")
+    return hmac.new(secret, normalized, hashlib.sha256).hexdigest()
 
 
 def generate_secure_token(length_bytes: int = 32) -> str:

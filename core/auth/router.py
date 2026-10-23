@@ -8,17 +8,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit.models import AuditLog
 from core.auth.dependencies import get_current_user
 from core.auth.models import Session as DbSession
 from core.auth.models import User
 from core.auth.provider import get_auth_provider
-from core.auth.tokens import create_access_jwt, generate_secure_token, hash_token
+from core.auth.tokens import create_access_jwt, generate_secure_token, hash_link_code, hash_token
 from core.common.config import settings
 from core.common.database import get_db_session
-from core.families.models import StudentProfile
+from core.families.models import FamilyMember, ParentStudentLink, StudentProfile
 
 router = APIRouter(tags=["Auth"])
 
@@ -30,6 +31,10 @@ def utcnow() -> datetime:
 class AuthExchangeRequest(BaseModel):
     provider_token: str = Field(..., description="Firebase ID token or test token")
     role: str = Field(default="student", description="Role: student or parent")
+    link_code: str | None = Field(
+        default=None,
+        description="Expiring invitation link code from parent (required for student registration)",
+    )
     display_name: str | None = Field(default=None, description="User full name (Bangla/English)")
     locale: str = Field(default="bn", description="Preferred locale: bn or en")
     class_level: int | None = Field(default=None, description="Class level (6-8) for students")
@@ -93,6 +98,36 @@ async def exchange_token(
     user = result.scalar_one_or_none()
 
     if not user:
+        # Enforce that student cannot register without a parent link code
+        link: ParentStudentLink | None = None
+        if requested_role == "student":
+            if not payload.link_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "LINK_CODE_REQUIRED",
+                        "message": (
+                            "Student registration requires a valid parent invitation link code."
+                        ),
+                    },
+                )
+            code_hash = hash_link_code(payload.link_code)
+            link_stmt = select(ParentStudentLink).where(
+                ParentStudentLink.link_code_hash == code_hash,
+                ParentStudentLink.status == "pending",
+                ParentStudentLink.link_code_expires_at > utcnow(),
+            )
+            link_res = await db.execute(link_stmt)
+            link = link_res.scalar_one_or_none()
+            if not link:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "INVALID_OR_EXPIRED_CODE",
+                        "message": "Link code is invalid, expired, or already used.",
+                    },
+                )
+
         display_name = payload.display_name or verified_user.display_name or "ThinkBuddy User"
         user = User(
             id=uuid.uuid4(),
@@ -108,14 +143,53 @@ async def exchange_token(
         db.add(user)
         await db.flush()
 
-        # If registering as a student, create academic profile
-        if requested_role == "student":
+        # If registering as a student with verified parent link, configure profile & redeem link
+        if requested_role == "student" and link is not None:
+            # Check if parent pre-configured academic details on placeholder profile
+            parent_prof_stmt = select(StudentProfile).where(
+                StudentProfile.user_id == link.student_id
+            )
+            parent_prof_res = await db.execute(parent_prof_stmt)
+            parent_prof = parent_prof_res.scalar_one_or_none()
+
+            class_lvl = parent_prof.class_level if parent_prof else (payload.class_level or 7)
+            med = parent_prof.medium if parent_prof else payload.medium
+            sch = parent_prof.school if parent_prof else None
+            mins = parent_prof.daily_minutes if parent_prof else 45
+
             profile = StudentProfile(
                 user_id=user.id,
-                class_level=payload.class_level or 7,
-                medium=payload.medium,
+                class_level=class_lvl,
+                medium=med,
+                school=sch,
+                daily_minutes=mins,
             )
             db.add(profile)
+
+            # Establish and activate link
+            link.status = "active"
+            link.student_id = user.id
+            link.consent_at = utcnow()
+            link.link_code_hash = None  # Invalidate single-use code immediately
+
+            if link.family_id:
+                member = FamilyMember(
+                    id=uuid.uuid4(),
+                    family_id=link.family_id,
+                    user_id=user.id,
+                    relation="child",
+                )
+                db.add(member)
+
+            audit = AuditLog(
+                id=uuid.uuid4(),
+                actor_id=user.id,
+                action="family.student_registered_via_link",
+                target_type="parent_student_link",
+                target_id=str(link.id),
+                meta={"parent_id": str(link.parent_id), "student_id": str(user.id)},
+            )
+            db.add(audit)
             await db.flush()
 
     if user.status != "active":
@@ -163,14 +237,15 @@ async def refresh_session(
     payload: RefreshTokenRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> TokenResponse:
-    """Rotate refresh token and issue a new access token."""
+    """Rotate refresh token and issue a new access token.
+
+    Detects refresh token reuse attacks: presenting an already-revoked refresh token
+    immediately revokes all active sessions for that user and records an audit log.
+    """
     token_hash = hash_token(payload.refresh_token)
 
-    stmt = select(DbSession).where(
-        DbSession.refresh_token_hash == token_hash,
-        DbSession.revoked_at.is_(None),
-        DbSession.expires_at > utcnow(),
-    )
+    # 1. Search session by token hash WITHOUT filtering out revoked_at
+    stmt = select(DbSession).where(DbSession.refresh_token_hash == token_hash)
     result = await db.execute(stmt)
     old_session = result.scalar_one_or_none()
 
@@ -179,7 +254,55 @@ async def refresh_session(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "code": "INVALID_REFRESH_TOKEN",
-                "message": "Invalid or revoked refresh token.",
+                "message": "Invalid refresh token.",
+            },
+        )
+
+    # 2. Check if token was already revoked/rotated -> REUSE ATTACK DETECTED!
+    if old_session.revoked_at is not None:
+        # Compromised refresh token reuse detected!
+        # Revoke ALL active sessions for this user immediately
+        revoke_all_stmt = (
+            update(DbSession)
+            .where(DbSession.user_id == old_session.user_id, DbSession.revoked_at.is_(None))
+            .values(revoked_at=utcnow())
+        )
+        await db.execute(revoke_all_stmt)
+
+        audit = AuditLog(
+            id=uuid.uuid4(),
+            actor_id=old_session.user_id,
+            action="auth.refresh_token_reuse_detected",
+            target_type="session",
+            target_id=str(old_session.id),
+            meta={
+                "security_event": "rotated_refresh_token_reused",
+                "action_taken": "all_user_sessions_revoked",
+            },
+        )
+        db.add(audit)
+        await db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "REFRESH_TOKEN_REUSE_DETECTED",
+                "message": (
+                    "Revoked refresh token reuse detected. "
+                    "All active sessions for this account have been terminated for security."
+                ),
+            },
+        )
+
+    # 3. Check expiration
+    if old_session.expires_at <= utcnow():
+        old_session.revoked_at = utcnow()
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "EXPIRED_REFRESH_TOKEN",
+                "message": "Refresh token has expired. Please sign in again.",
             },
         )
 

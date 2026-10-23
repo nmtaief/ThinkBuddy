@@ -68,9 +68,8 @@ async def test_client_config_android(gateway_client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["min_supported_version"] == "1.0.0"
-    assert data["feature_flags"]["teacher_reviews"] is False  # Flagged off for beta
-    assert data["quiz_security"]["allowed_mode"] == "secure_kiosk"
-    assert data["quiz_security"]["screen_pinning_required"] is True
+    assert data["quiz_security"]["allowed_mode"] == "assessed"
+    assert data["quiz_security"]["flag_secure"] is True
     assert data["layout_hints"]["image_size_class"] == "md"
 
 

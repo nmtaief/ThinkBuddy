@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.audit.models import AuditLog
 from core.auth.dependencies import require_role
 from core.auth.models import User
-from core.auth.tokens import hash_token
+from core.auth.tokens import hash_link_code
 from core.common.config import settings
 from core.common.database import get_db_session
 from core.common.policy import check_student_access
@@ -179,7 +179,7 @@ async def add_child_to_family(
 
     # Generate single-use expiring link code
     plain_link_code = generate_link_code(8)
-    code_hash = hash_token(plain_link_code)
+    code_hash = hash_link_code(plain_link_code)
     expires_at = utcnow() + timedelta(hours=settings.LINK_CODE_EXPIRE_HOURS)
 
     link = ParentStudentLink(
@@ -221,7 +221,7 @@ async def redeem_link_code(
 ) -> RedeemLinkResponse:
     """Student redeems link code to establish active family link."""
     raw_code = payload.link_code.strip().upper()
-    code_hash = hash_token(raw_code)
+    code_hash = hash_link_code(raw_code)
 
     stmt = select(ParentStudentLink).where(
         ParentStudentLink.link_code_hash == code_hash,

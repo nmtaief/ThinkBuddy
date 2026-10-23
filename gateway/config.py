@@ -1,6 +1,6 @@
 """Gateway application configuration via pydantic-settings."""
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,8 +13,22 @@ class GatewaySettings(BaseSettings):
         extra="ignore",
     )
 
-    ENVIRONMENT: str = Field(default="development", description="Runtime environment")
+    ENV: str = Field(
+        default="local",
+        validation_alias=AliasChoices("ENV", "ENVIRONMENT"),
+        description="Runtime environment (local, development, staging, production)",
+    )
+    ENVIRONMENT: str = Field(
+        default="local",
+        validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
+        description="Alias for runtime environment",
+    )
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+
+    @property
+    def is_local(self) -> bool:
+        """Return True only if running in local environment (ENV=local)."""
+        return self.ENV.lower() == "local"
 
     GATEWAY_HOST: str = Field(default="127.0.0.1", description="Gateway host address")
     GATEWAY_PORT: int = Field(default=8000, description="Gateway port")
