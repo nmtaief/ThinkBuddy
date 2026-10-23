@@ -63,6 +63,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106"] # Allow assert and hardcoded test tokens in tests
 "migrations/*" = ["E402", "E501"] # Allow sys.path setup and long DDL lines in migrations
+"rag/vector_store.py" = ["S608"] # Parameterized dynamic clauses in vector store
 
 
 [tool.mypy]

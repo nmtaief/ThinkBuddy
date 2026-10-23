@@ -121,6 +121,24 @@ class CoreSettings(BaseSettings):
         default=False, description="Teacher review feature flag (off in beta)"
     )
 
+    # Ingestion & RAG Settings
+    EMBEDDING_PROVIDER: str = Field(
+        default="mock",
+        description="Embedding provider implementation (mock, hosted, bge-m3, multilingual-e5)",
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="bge-m3",
+        description="Model identifier for multilingual text embeddings",
+    )
+    EMBEDDING_DIMENSION: int = Field(
+        default=384,
+        description="Vector dimension for embeddings (read from provider config)",
+    )
+    EMBEDDING_BATCH_SIZE: int = Field(
+        default=32,
+        description="Batch size for generating embeddings",
+    )
+
     @property
     def is_local(self) -> bool:
         """Return True only if running in local environment (ENV=local)."""

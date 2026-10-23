@@ -21,6 +21,12 @@ from core.auth.router import (
 from core.auth.tokens import hash_link_code
 from core.common.logging import request_id_ctx
 from core.common.rate_limit import RateLimiter, get_trusted_client_ip
+from core.curriculum.schemas import (
+    BookListResponse,
+    BookSummary,
+    ChapterDetailResponse,
+    ChapterListResponse,
+)
 from core.devices.router import (
     DeviceResponse,
     RegisterDeviceRequest,
@@ -368,6 +374,33 @@ async def update_device(
 ) -> Response:
     """Update device push token or app version."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Curriculum & Textbooks
+# -------------------------------------------------------------------------
+@router.get("/books", response_model=BookListResponse, tags=["Curriculum"])
+async def list_books(request: Request) -> Response:
+    """Retrieve list of curriculum textbooks."""
+    return await forward_to_core(request)
+
+
+@router.get("/books/{book_id}", response_model=BookSummary, tags=["Curriculum"])
+async def get_book(book_id: uuid.UUID, request: Request) -> Response:
+    """Get metadata for a specific curriculum textbook."""
+    return await forward_to_core(request)
+
+
+@router.get("/books/{book_id}/chapters", response_model=ChapterListResponse, tags=["Curriculum"])
+async def get_book_chapters(book_id: uuid.UUID, request: Request) -> Response:
+    """Get ordered list of chapters for a given curriculum textbook."""
+    return await forward_to_core(request)
+
+
+@router.get("/chapters/{chapter_id}", response_model=ChapterDetailResponse, tags=["Curriculum"])
+async def get_chapter_detail(chapter_id: uuid.UUID, request: Request) -> Response:
+    """Get detailed chapter information including educational concepts and chunk counts."""
+    return await forward_to_core(request)
 
 
 # -------------------------------------------------------------------------

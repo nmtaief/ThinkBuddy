@@ -608,6 +608,160 @@
         }
       }
     },
+    "/v1/books": {
+      "get": {
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "List Books",
+        "description": "Retrieve list of curriculum textbooks.",
+        "operationId": "list_books_v1_books_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/books/{book_id}": {
+      "get": {
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "Get Book",
+        "description": "Get metadata for a specific curriculum textbook.",
+        "operationId": "get_book_v1_books__book_id__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/books/{book_id}/chapters": {
+      "get": {
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "Get Book Chapters",
+        "description": "Get ordered list of chapters for a given curriculum textbook.",
+        "operationId": "get_book_chapters_v1_books__book_id__chapters_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChapterListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chapters/{chapter_id}": {
+      "get": {
+        "tags": [
+          "Curriculum"
+        ],
+        "summary": "Get Chapter Detail",
+        "description": "Get detailed chapter information including educational concepts and chunk counts.",
+        "operationId": "get_chapter_detail_v1_chapters__chapter_id__get",
+        "parameters": [
+          {
+            "name": "chapter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Chapter Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChapterDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/teacher/queue": {
       "get": {
         "tags": [
@@ -869,6 +1023,230 @@
           "provider_token"
         ],
         "title": "AuthExchangeRequest"
+      },
+      "BookListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BookSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "BookListResponse"
+      },
+      "BookSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "class_level": {
+            "type": "integer",
+            "title": "Class Level"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "medium": {
+            "type": "string",
+            "title": "Medium"
+          },
+          "edition": {
+            "type": "string",
+            "title": "Edition"
+          },
+          "chapters_count": {
+            "type": "integer",
+            "title": "Chapters Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "class_level",
+          "subject",
+          "medium",
+          "edition"
+        ],
+        "title": "BookSummary"
+      },
+      "ChapterDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "book_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Book Id"
+          },
+          "book_title": {
+            "type": "string",
+            "title": "Book Title"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "printed_page_start": {
+            "type": "integer",
+            "title": "Printed Page Start"
+          },
+          "printed_page_end": {
+            "type": "integer",
+            "title": "Printed Page End"
+          },
+          "order_index": {
+            "type": "integer",
+            "title": "Order Index"
+          },
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/ConceptSummary"
+            },
+            "type": "array",
+            "title": "Concepts"
+          },
+          "chunks_count": {
+            "type": "integer",
+            "title": "Chunks Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "book_id",
+          "book_title",
+          "number",
+          "title",
+          "printed_page_start",
+          "printed_page_end",
+          "order_index",
+          "concepts",
+          "chunks_count"
+        ],
+        "title": "ChapterDetailResponse"
+      },
+      "ChapterListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChapterSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ChapterListResponse"
+      },
+      "ChapterSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "book_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Book Id"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "printed_page_start": {
+            "type": "integer",
+            "title": "Printed Page Start"
+          },
+          "printed_page_end": {
+            "type": "integer",
+            "title": "Printed Page End"
+          },
+          "order_index": {
+            "type": "integer",
+            "title": "Order Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "book_id",
+          "number",
+          "title",
+          "printed_page_start",
+          "printed_page_end",
+          "order_index"
+        ],
+        "title": "ChapterSummary"
+      },
+      "ConceptSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "chapter_id",
+          "title",
+          "kind"
+        ],
+        "title": "ConceptSummary"
       },
       "CreateFamilyRequest": {
         "properties": {
