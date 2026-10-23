@@ -4,14 +4,17 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Header, status
+from fastapi import FastAPI, HTTPException, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from core.common.logging import RequestIDMiddleware, setup_logging
+from core.common.logging import RequestIDMiddleware, request_id_ctx, setup_logging
 from core.common.redis import check_redis_ready, close_redis
 from core.common.telemetry import setup_telemetry
 from gateway.client import core_client
 from gateway.config import settings
+from gateway.middleware import ClientHeadersMiddleware
+from gateway.router import router as v1_router
 
 # Setup structured logging
 setup_logging(service_name=settings.OTEL_SERVICE_NAME, log_level=settings.LOG_LEVEL)
@@ -29,18 +32,58 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await close_redis()
 
 
+is_local = settings.is_local
+
 app = FastAPI(
     title="ThinkBuddy API Gateway",
     description="Edge API Gateway handling routing, rate limiting, and client config.",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if is_local else None,
+    redoc_url=None,  # Redoc disabled across all environments
+    openapi_url="/openapi.json" if is_local else None,
     lifespan=lifespan,
 )
 
 # Correlation ID and structured HTTP logging middleware
 app.add_middleware(RequestIDMiddleware)
+
+# Client headers enforcement middleware
+app.add_middleware(ClientHeadersMiddleware)
+
+
+@app.exception_handler(HTTPException)
+async def gateway_http_exception_handler(_request: Any, exc: HTTPException) -> JSONResponse:
+    request_id = request_id_ctx.get() or ""
+    detail: Any = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code", "ERROR")
+        message = detail.get("message", str(detail))
+    else:
+        code = "HTTP_ERROR"
+        message = str(detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": code, "message": message, "request_id": request_id}},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def gateway_validation_exception_handler(
+    _request: Any, exc: RequestValidationError
+) -> JSONResponse:
+    request_id = request_id_ctx.get() or ""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed.",
+                "details": exc.errors(),
+                "request_id": request_id,
+            }
+        },
+    )
 
 
 @app.get("/healthz", tags=["Health"])
@@ -69,41 +112,5 @@ async def readyz() -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
-@app.get("/v1/client/config", tags=["Client & Config"])
-async def get_client_config(
-    x_client_platform: str = Header(default="android", alias="X-Client-Platform"),
-    x_client_form_factor: str = Header(default="phone", alias="X-Client-Form-Factor"),
-    x_app_version: str = Header(default="0.1.0", alias="X-App-Version"),
-) -> dict[str, Any]:
-    """Dynamic client configuration endpoint per docs/04_API_CONTRACT.md §1 & §5.
-
-    Returns server-driven settings, minimum version thresholds, active feature flags,
-    and quiz security modes allowed per platform without code branching.
-    """
-    # Practice allowed everywhere; assessed quizzes restricted to hardened mobile apps
-    quiz_security_mode = (
-        "secure_app" if x_client_platform in ("android", "ios") else "practice_only"
-    )
-
-    return {
-        "min_supported_version": "0.1.0",
-        "force_update": False,
-        "feature_flags": {
-            "teacher_reviews": False,  # Beta flag: teacher features flagged off per architecture
-            "broad_questions_ai_assist": True,
-            "bangla_voice_input": False,
-        },
-        "entitlements": {
-            "daily_chat_quota": 50,
-            "max_active_subjects": 5,
-        },
-        "quiz_security": {
-            "allowed_mode": quiz_security_mode,
-            "screen_pinning_required": (x_client_platform == "android"),
-            "heartbeat_interval_seconds": 15,
-        },
-        "layout_hints": {
-            "dashboard_cards_order": ["today_tasks", "spaced_revision", "streak", "exam_countdown"],
-            "image_size_class": "lg" if x_client_form_factor in ("tablet", "desktop") else "md",
-        },
-    }
+# Mount public API routes
+app.include_router(v1_router)

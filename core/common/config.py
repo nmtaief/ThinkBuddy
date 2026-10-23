@@ -1,6 +1,6 @@
 """Core application configuration via pydantic-settings."""
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,11 +13,34 @@ class CoreSettings(BaseSettings):
         extra="ignore",
     )
 
-    ENVIRONMENT: str = Field(default="development", description="Runtime environment")
+    ENV: str = Field(
+        default="local",
+        validation_alias=AliasChoices("ENV", "ENVIRONMENT"),
+        description="Runtime environment (local, development, staging, production)",
+    )
+    ENVIRONMENT: str = Field(
+        default="local",
+        validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
+        description="Alias for runtime environment",
+    )
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
 
     CORE_HOST: str = Field(default="127.0.0.1", description="Core host address")
     CORE_PORT: int = Field(default=8001, description="Core port")
+
+    # Reverse proxy security
+    TRUSTED_PROXIES: list[str] = Field(
+        default=[
+            "127.0.0.1",
+            "::1",
+            "core",
+            "gateway",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+        ],
+        description="Trusted reverse proxy IP ranges or hostnames",
+    )
 
     # Internal service authentication
     INTERNAL_SERVICE_TOKEN: str = Field(
@@ -27,7 +50,7 @@ class CoreSettings(BaseSettings):
 
     # Database
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@localhost:5432/thinkbuddy",
+        default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy",
         description="Async PostgreSQL connection URL with pgvector",
     )
     DB_POOL_SIZE: int = Field(default=10, description="Database pool size")
@@ -35,7 +58,7 @@ class CoreSettings(BaseSettings):
 
     # Redis
     REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
+        default="redis://127.0.0.1:6379/0",
         description="Redis connection URL",
     )
 
@@ -73,23 +96,71 @@ class CoreSettings(BaseSettings):
     )
     OTEL_ENABLED: bool = Field(default=False, description="Enable OpenTelemetry tracing")
 
+    # Authentication & JWT
+    JWT_SECRET_KEY: str = Field(
+        default="dev_jwt_secret_key_change_in_production_9876543210123456789",
+        description="Secret key for signing access JWTs",
+    )
+    JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        default=15, description="Access token expiration in minutes"
+    )
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=30, description="Refresh token expiration in days"
+    )
+    LINK_CODE_EXPIRE_HOURS: int = Field(
+        default=24, description="Student link code expiration in hours"
+    )
+    LINK_CODE_SECRET: str = Field(
+        default="dev_link_code_hmac_secret_key_change_in_production",
+        description="Server-side secret used for HMAC-SHA256 hashing of student link codes",
+    )
+
+    # Feature Flags
+    TEACHER_REVIEW_ENABLED: bool = Field(
+        default=False, description="Teacher review feature flag (off in beta)"
+    )
+
+    @property
+    def is_local(self) -> bool:
+        """Return True only if running in local environment (ENV=local)."""
+        return self.ENV.lower() == "local"
+
     @model_validator(mode="after")
     def validate_non_local_secrets(self) -> "CoreSettings":
         """Refuse to start with placeholder secrets when environment is not local/development."""
-        env = self.ENVIRONMENT.lower()
-        is_local = env in {"local", "development", "dev", "test", "testing"}
-        if not is_local:
+        env = self.ENV.lower()
+        is_dev_or_local = env in {"local", "development", "dev", "test", "testing"}
+        if not is_dev_or_local:
             token_lower = self.INTERNAL_SERVICE_TOKEN.lower()
             if "placeholder" in token_lower or "dev_" in token_lower:
                 msg = (
-                    f"Refusing to start in environment '{self.ENVIRONMENT}' "
+                    f"Refusing to start in environment '{self.ENV}' "
                     "with placeholder INTERNAL_SERVICE_TOKEN."
                 )
                 raise ValueError(msg)
             if "thinkbuddy_dev_password" in self.DATABASE_URL.lower():
                 msg = (
-                    f"Refusing to start in environment '{self.ENVIRONMENT}' "
+                    f"Refusing to start in environment '{self.ENV}' "
                     "with default development database credentials."
+                )
+                raise ValueError(msg)
+            if (
+                "change_in_production" in self.JWT_SECRET_KEY.lower()
+                or "dev_" in self.JWT_SECRET_KEY.lower()
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}' "
+                    "with placeholder JWT_SECRET_KEY."
+                )
+                raise ValueError(msg)
+            if (
+                "change_in_production" in self.LINK_CODE_SECRET.lower()
+                or "dev_" in self.LINK_CODE_SECRET.lower()
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}' "
+                    "with placeholder LINK_CODE_SECRET."
                 )
                 raise ValueError(msg)
         return self

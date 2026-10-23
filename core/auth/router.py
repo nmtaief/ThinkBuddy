@@ -1,10 +1,396 @@
-"""API routes for auth module."""
+"""Authentication API endpoints for token exchange, session refresh, and logout."""
 
-from fastapi import APIRouter
+from __future__ import annotations
 
-router = APIRouter(prefix="/internal/auth", tags=["auth"])
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.audit.models import AuditLog
+from core.auth.dependencies import get_current_user
+from core.auth.models import Session as DbSession
+from core.auth.models import User
+from core.auth.provider import get_auth_provider
+from core.auth.tokens import create_access_jwt, generate_secure_token, hash_link_code, hash_token
+from core.common.config import settings
+from core.common.database import get_db_session
+from core.families.models import FamilyMember, ParentStudentLink, StudentProfile
+
+router = APIRouter(tags=["Auth"])
 
 
-@router.get("/status")
+def utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+class AuthExchangeRequest(BaseModel):
+    provider_token: str = Field(..., description="Firebase ID token or test token")
+    role: str = Field(default="student", description="Role: student or parent")
+    link_code: str | None = Field(
+        default=None,
+        description="Expiring invitation link code from parent (required for student registration)",
+    )
+    display_name: str | None = Field(default=None, description="User full name (Bangla/English)")
+    locale: str = Field(default="bn", description="Preferred locale: bn or en")
+    class_level: int | None = Field(default=None, description="Class level (6-8) for students")
+    medium: str = Field(default="bn", description="Medium: bn or en")
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(..., description="Active session refresh token")
+
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    auth_provider: str
+    auth_uid: str
+    role: str
+    display_name: str
+    phone: str | None = None
+    email: str | None = None
+    locale: str
+    status: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"  # noqa: S105
+    expires_in: int
+
+    user: UserResponse
+
+
+@router.post("/auth/exchange", response_model=TokenResponse)
+async def exchange_token(
+    payload: AuthExchangeRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> TokenResponse:
+    """Exchange a verified third-party provider credential for ThinkBuddy session tokens."""
+    provider = get_auth_provider()
+    try:
+        verified_user = await provider.verify_token(payload.provider_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_CREDENTIALS", "message": str(exc)},
+        ) from exc
+
+    # Enforce allowed roles
+    requested_role = payload.role.lower()
+    if requested_role not in {"student", "parent"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_ROLE",
+                "message": "Only 'student' or 'parent' roles can register.",
+            },
+        )
+
+    # Locate or create user record
+    stmt = select(User).where(User.auth_uid == verified_user.uid)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # Enforce that student cannot register without a parent link code
+        link: ParentStudentLink | None = None
+        if requested_role == "student":
+            if not payload.link_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "LINK_CODE_REQUIRED",
+                        "message": (
+                            "Student registration requires a valid parent invitation link code."
+                        ),
+                    },
+                )
+            code_hash = hash_link_code(payload.link_code)
+            link_stmt = select(ParentStudentLink).where(
+                ParentStudentLink.link_code_hash == code_hash,
+                ParentStudentLink.status == "pending",
+                ParentStudentLink.link_code_expires_at > utcnow(),
+            )
+            link_res = await db.execute(link_stmt)
+            link = link_res.scalar_one_or_none()
+            if not link:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "INVALID_OR_EXPIRED_CODE",
+                        "message": "Link code is invalid, expired, or already used.",
+                    },
+                )
+
+        display_name = payload.display_name or verified_user.display_name or "ThinkBuddy User"
+        user = User(
+            id=uuid.uuid4(),
+            auth_provider=verified_user.provider,
+            auth_uid=verified_user.uid,
+            role=requested_role,
+            display_name=display_name,
+            phone=verified_user.phone,
+            email=verified_user.email,
+            locale=payload.locale,
+            status="active",
+        )
+        db.add(user)
+        await db.flush()
+
+        # If registering as a student with verified parent link, configure profile & redeem link
+        if requested_role == "student" and link is not None:
+            # Check if parent pre-configured academic details on placeholder profile
+            parent_prof_stmt = select(StudentProfile).where(
+                StudentProfile.user_id == link.student_id
+            )
+            parent_prof_res = await db.execute(parent_prof_stmt)
+            parent_prof = parent_prof_res.scalar_one_or_none()
+
+            class_lvl = parent_prof.class_level if parent_prof else (payload.class_level or 7)
+            med = parent_prof.medium if parent_prof else payload.medium
+            sch = parent_prof.school if parent_prof else None
+            mins = parent_prof.daily_minutes if parent_prof else 45
+
+            profile = StudentProfile(
+                user_id=user.id,
+                class_level=class_lvl,
+                medium=med,
+                school=sch,
+                daily_minutes=mins,
+            )
+            db.add(profile)
+
+            # Establish and activate link
+            link.status = "active"
+            link.student_id = user.id
+            link.consent_at = utcnow()
+            link.link_code_hash = None  # Invalidate single-use code immediately
+
+            if link.family_id:
+                member = FamilyMember(
+                    id=uuid.uuid4(),
+                    family_id=link.family_id,
+                    user_id=user.id,
+                    relation="child",
+                )
+                db.add(member)
+
+            audit = AuditLog(
+                id=uuid.uuid4(),
+                actor_id=user.id,
+                action="family.student_registered_via_link",
+                target_type="parent_student_link",
+                target_id=str(link.id),
+                meta={"parent_id": str(link.parent_id), "student_id": str(user.id)},
+            )
+            db.add(audit)
+            await db.flush()
+
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCOUNT_INACTIVE", "message": "Account is inactive or suspended."},
+        )
+
+    # Create session with rotating refresh token
+    raw_refresh = generate_secure_token(32)
+    refresh_hash = hash_token(raw_refresh)
+    session_expiry = utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    new_session = DbSession(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        refresh_token_hash=refresh_hash,
+        expires_at=session_expiry,
+    )
+    db.add(new_session)
+    await db.flush()
+
+    access_token = create_access_jwt(user.id, user.role)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserResponse(
+            id=user.id,
+            auth_provider=user.auth_provider,
+            auth_uid=user.auth_uid,
+            role=user.role,
+            display_name=user.display_name,
+            phone=user.phone,
+            email=user.email,
+            locale=user.locale,
+            status=user.status,
+        ),
+    )
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_session(
+    payload: RefreshTokenRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> TokenResponse:
+    """Rotate refresh token and issue a new access token.
+
+    Detects refresh token reuse attacks: presenting an already-revoked refresh token
+    immediately revokes all active sessions for that user and records an audit log.
+    """
+    token_hash = hash_token(payload.refresh_token)
+
+    # 1. Search session by token hash WITHOUT filtering out revoked_at
+    stmt = select(DbSession).where(DbSession.refresh_token_hash == token_hash)
+    result = await db.execute(stmt)
+    old_session = result.scalar_one_or_none()
+
+    if not old_session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "Invalid refresh token.",
+            },
+        )
+
+    # 2. Check if token was already revoked/rotated -> REUSE ATTACK DETECTED!
+    if old_session.revoked_at is not None:
+        # Compromised refresh token reuse detected!
+        # Revoke ALL active sessions for this user immediately
+        revoke_all_stmt = (
+            update(DbSession)
+            .where(DbSession.user_id == old_session.user_id, DbSession.revoked_at.is_(None))
+            .values(revoked_at=utcnow())
+        )
+        await db.execute(revoke_all_stmt)
+
+        audit = AuditLog(
+            id=uuid.uuid4(),
+            actor_id=old_session.user_id,
+            action="auth.refresh_token_reuse_detected",
+            target_type="session",
+            target_id=str(old_session.id),
+            meta={
+                "security_event": "rotated_refresh_token_reused",
+                "action_taken": "all_user_sessions_revoked",
+            },
+        )
+        db.add(audit)
+        await db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "REFRESH_TOKEN_REUSE_DETECTED",
+                "message": (
+                    "Revoked refresh token reuse detected. "
+                    "All active sessions for this account have been terminated for security."
+                ),
+            },
+        )
+
+    # 3. Check expiration
+    if old_session.expires_at <= utcnow():
+        old_session.revoked_at = utcnow()
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "EXPIRED_REFRESH_TOKEN",
+                "message": "Refresh token has expired. Please sign in again.",
+            },
+        )
+
+    # Revoke old session immediately (token rotation)
+    old_session.revoked_at = utcnow()
+
+    # Load active user
+    user_stmt = select(User).where(User.id == old_session.user_id, User.deleted_at.is_(None))
+    user_result = await db.execute(user_stmt)
+    user = user_result.scalar_one_or_none()
+
+    if not user or user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "USER_INACTIVE", "message": "User account inactive."},
+        )
+
+    # Issue new refresh token
+    new_refresh = generate_secure_token(32)
+    new_session = DbSession(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        device_id=old_session.device_id,
+        refresh_token_hash=hash_token(new_refresh),
+        expires_at=utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    db.add(new_session)
+    await db.flush()
+
+    new_access = create_access_jwt(user.id, user.role)
+
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserResponse(
+            id=user.id,
+            auth_provider=user.auth_provider,
+            auth_uid=user.auth_uid,
+            role=user.role,
+            display_name=user.display_name,
+            phone=user.phone,
+            email=user.email,
+            locale=user.locale,
+            status=user.status,
+        ),
+    )
+
+
+@router.post("/auth/logout")
+async def logout_session(
+    payload: RefreshTokenRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, str]:
+    """Revoke refresh token session."""
+    token_hash = hash_token(payload.refresh_token)
+    stmt = select(DbSession).where(DbSession.refresh_token_hash == token_hash)
+    result = await db.execute(stmt)
+    sess = result.scalar_one_or_none()
+
+    if sess and sess.revoked_at is None:
+        sess.revoked_at = utcnow()
+        await db.flush()
+
+    return {"status": "logged_out"}
+
+
+@router.get("/me", response_model=UserResponse)
+@router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    """Return identity and profile of currently authenticated user."""
+    return UserResponse(
+        id=current_user.id,
+        auth_provider=current_user.auth_provider,
+        auth_uid=current_user.auth_uid,
+        role=current_user.role,
+        display_name=current_user.display_name,
+        phone=current_user.phone,
+        email=current_user.email,
+        locale=current_user.locale,
+        status=current_user.status,
+    )
+
+
+@router.get("/internal/auth/status")
+@router.get("/auth/status")
 async def auth_status() -> dict[str, str]:
+    """Module status endpoint for internal health and service verification."""
     return {"module": "auth", "status": "active"}

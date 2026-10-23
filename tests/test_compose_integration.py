@@ -94,11 +94,33 @@ def test_refuse_placeholder_secrets_in_production() -> None:
             INTERNAL_SERVICE_TOKEN="placeholder_token",
         )
 
+    # Production with placeholder JWT_SECRET_KEY -> must raise ValueError
+    with pytest.raises(ValueError, match="placeholder JWT_SECRET_KEY"):
+        CoreSettings(
+            ENVIRONMENT="production",
+            INTERNAL_SERVICE_TOKEN="prod_valid_high_entropy_token_4892374982374982374",
+            DATABASE_URL="postgresql+asyncpg://prod_user:prod_pass@prod-db:5432/thinkbuddy",
+            JWT_SECRET_KEY="dev_jwt_secret_key_change_in_production",
+            LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
+        )
+
+    # Production with placeholder LINK_CODE_SECRET -> must raise ValueError
+    with pytest.raises(ValueError, match="placeholder LINK_CODE_SECRET"):
+        CoreSettings(
+            ENVIRONMENT="production",
+            INTERNAL_SERVICE_TOKEN="prod_valid_high_entropy_token_4892374982374982374",
+            DATABASE_URL="postgresql+asyncpg://prod_user:prod_pass@prod-db:5432/thinkbuddy",
+            JWT_SECRET_KEY="prod_valid_high_entropy_jwt_secret_94827398472938472",
+            LINK_CODE_SECRET="dev_link_code_secret_change_in_production",
+        )
+
     # Production with legitimate credentials -> successfully instantiates
     prod_core = CoreSettings(
         ENVIRONMENT="production",
         INTERNAL_SERVICE_TOKEN="prod_valid_high_entropy_token_4892374982374982374",
         DATABASE_URL="postgresql+asyncpg://prod_user:prod_secure_pass_4738@prod-db:5432/thinkbuddy",
+        JWT_SECRET_KEY="prod_valid_high_entropy_jwt_secret_94827398472938472",
+        LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
     )
     assert prod_core.ENVIRONMENT == "production"
 
@@ -110,7 +132,7 @@ async def test_live_compose_services_connectivity() -> None:
     try:
         r = aioredis.from_url(core_settings.REDIS_URL, socket_timeout=1.0)
         await r.ping()
-        await r.close()
+        await r.aclose()
         redis_reachable = True
     except Exception as exc:  # noqa: BLE001
         _ = exc
