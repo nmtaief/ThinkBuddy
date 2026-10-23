@@ -60,14 +60,16 @@ async def test_client_config_android(gateway_client: AsyncClient) -> None:
         headers={
             "X-Client-Platform": "android",
             "X-Client-Form-Factor": "phone",
-            "X-App-Version": "0.1.0",
+            "X-App-Version": "1.0.0",
+            "X-Device-Id": "device-android-123",
+            "Accept-Language": "bn",
         },
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["min_supported_version"] == "0.1.0"
+    assert data["min_supported_version"] == "1.0.0"
     assert data["feature_flags"]["teacher_reviews"] is False  # Flagged off for beta
-    assert data["quiz_security"]["allowed_mode"] == "secure_app"
+    assert data["quiz_security"]["allowed_mode"] == "secure_kiosk"
     assert data["quiz_security"]["screen_pinning_required"] is True
     assert data["layout_hints"]["image_size_class"] == "md"
 
@@ -80,7 +82,9 @@ async def test_client_config_web(gateway_client: AsyncClient) -> None:
         headers={
             "X-Client-Platform": "web",
             "X-Client-Form-Factor": "desktop",
-            "X-App-Version": "0.1.0",
+            "X-App-Version": "1.0.0",
+            "X-Device-Id": "device-web-456",
+            "Accept-Language": "en",
         },
     )
     assert response.status_code == 200

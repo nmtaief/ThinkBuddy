@@ -18,9 +18,11 @@ class CoreServiceClient:
         self,
         base_url: str = settings.CORE_INTERNAL_URL,
         service_token: str = settings.INTERNAL_SERVICE_TOKEN,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.service_token = service_token
+        self.transport = transport
 
     def _get_headers(self, extra_headers: dict[str, str] | None = None) -> dict[str, str]:
         headers = {
@@ -34,7 +36,7 @@ class CoreServiceClient:
     async def check_core_ready(self) -> tuple[bool, str]:
         """Check if Core backend is alive and responding to health check."""
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(transport=self.transport, timeout=3.0) as client:
                 res = await client.get(f"{self.base_url}/healthz")
                 if res.status_code == 200:
                     return True, "Core service responding"
@@ -54,7 +56,7 @@ class CoreServiceClient:
         """Forward an internal request to Core."""
         url = f"{self.base_url}/{path.lstrip('/')}"
         merged_headers = self._get_headers(headers)
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(transport=self.transport, timeout=10.0) as client:
             return await client.request(
                 method=method,
                 url=url,

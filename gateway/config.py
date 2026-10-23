@@ -21,7 +21,7 @@ class GatewaySettings(BaseSettings):
 
     # Downstream Core connection
     CORE_INTERNAL_URL: str = Field(
-        default="http://localhost:8001",
+        default="http://127.0.0.1:8001",
         description="Internal URL to ThinkBuddy Core service",
     )
     INTERNAL_SERVICE_TOKEN: str = Field(
@@ -31,7 +31,7 @@ class GatewaySettings(BaseSettings):
 
     # Redis
     REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
+        default="redis://127.0.0.1:6379/0",
         description="Redis connection URL for rate limiting and cache",
     )
 

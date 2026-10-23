@@ -99,6 +99,7 @@ def test_refuse_placeholder_secrets_in_production() -> None:
         ENVIRONMENT="production",
         INTERNAL_SERVICE_TOKEN="prod_valid_high_entropy_token_4892374982374982374",
         DATABASE_URL="postgresql+asyncpg://prod_user:prod_secure_pass_4738@prod-db:5432/thinkbuddy",
+        JWT_SECRET_KEY="prod_valid_high_entropy_jwt_secret_94827398472938472",
     )
     assert prod_core.ENVIRONMENT == "production"
 

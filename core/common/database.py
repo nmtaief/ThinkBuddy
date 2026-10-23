@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from core.common.config import settings
 
@@ -24,13 +26,24 @@ class Base(DeclarativeBase):
 
 
 # Global engine and sessionmaker
+
+is_test = settings.ENVIRONMENT.lower() in {"testing", "test"}
+
+engine_kwargs: dict[str, Any] = {
+    "echo": (settings.ENVIRONMENT == "development" and settings.LOG_LEVEL == "DEBUG"),
+}
+if is_test:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_size"] = settings.DB_POOL_SIZE
+    engine_kwargs["max_overflow"] = settings.DB_MAX_OVERFLOW
+    engine_kwargs["pool_pre_ping"] = True
+
 engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
-    echo=(settings.ENVIRONMENT == "development" and settings.LOG_LEVEL == "DEBUG"),
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_pre_ping=True,
+    **engine_kwargs,
 )
+
 
 async_session_factory = async_sessionmaker(
     bind=engine,

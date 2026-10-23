@@ -87,7 +87,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "0.1.0",
+              "default": "1.0.0",
               "title": "X-App-Version"
             }
           }
@@ -117,10 +117,863 @@
           }
         }
       }
+    },
+    "/v1/auth/exchange": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Exchange Auth Token",
+        "description": "Exchange third-party provider credential for ThinkBuddy session tokens.\n\nStrictly rate limited to prevent credential guessing.",
+        "operationId": "exchange_auth_token_v1_auth_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Refresh Auth Token",
+        "description": "Rotate refresh token and issue a new access token.",
+        "operationId": "refresh_auth_token_v1_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "description": "Revoke refresh token session.",
+        "operationId": "logout_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get Me",
+        "description": "Return profile of currently authenticated user.",
+        "operationId": "get_me_v1_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families": {
+      "post": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "Create Family",
+        "description": "Parent creates a new family unit.",
+        "operationId": "create_family_v1_families_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFamilyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FamilyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{family_id}/students": {
+      "post": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "Add Child",
+        "description": "Parent adds child profile and generates expiring link code.",
+        "operationId": "add_child_v1_families__family_id__students_post",
+        "parameters": [
+          {
+            "name": "family_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Family Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddChildRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddChildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/links/redeem": {
+      "post": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "Redeem Link Code",
+        "description": "Student redeems link code to establish family connection.\n\nStrictly rate limited to prevent brute-force attacks on link codes.",
+        "operationId": "redeem_link_code_v1_links_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedeemLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/links/{link_id}/revoke": {
+      "post": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "Revoke Link",
+        "description": "Parent revokes student link, immediately cutting off access.",
+        "operationId": "revoke_link_v1_links__link_id__revoke_post",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/me/students": {
+      "get": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "List Parent Students",
+        "description": "List all active linked children for authenticated parent.",
+        "operationId": "list_parent_students_v1_parents_me_students_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LinkedStudentResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Parent Students V1 Parents Me Students Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}": {
+      "get": {
+        "tags": [
+          "Families"
+        ],
+        "summary": "Get Student Details",
+        "description": "Fetch student profile; requires ownership (student or linked parent).",
+        "operationId": "get_student_details_v1_students__student_id__get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices": {
+      "post": {
+        "tags": [
+          "Devices"
+        ],
+        "summary": "Register Device",
+        "description": "Register or refresh client device registration.",
+        "operationId": "register_device_v1_devices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices/{device_id}": {
+      "patch": {
+        "tags": [
+          "Devices"
+        ],
+        "summary": "Update Device",
+        "description": "Update device push token or app version.",
+        "operationId": "update_device_v1_devices__device_id__patch",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Device Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teacher/queue": {
+      "get": {
+        "tags": [
+          "Teacher Reviews (Feature Flagged)"
+        ],
+        "summary": "Get Teacher Queue",
+        "description": "Retrieve queue of broad submissions awaiting review.",
+        "operationId": "get_teacher_queue_v1_teacher_queue_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teacher/submissions/{submission_id}/review": {
+      "post": {
+        "tags": [
+          "Teacher Reviews (Feature Flagged)"
+        ],
+        "summary": "Submit Teacher Review",
+        "description": "Submit teacher evaluation and score.",
+        "operationId": "submit_teacher_review_v1_teacher_submissions__submission_id__review_post",
+        "parameters": [
+          {
+            "name": "submission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Submission Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSubmissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teacher/topics/flag": {
+      "post": {
+        "tags": [
+          "Teacher Reviews (Feature Flagged)"
+        ],
+        "summary": "Flag Teacher Topic",
+        "description": "Flag a difficult topic to adjust adaptive revision weights.",
+        "operationId": "flag_teacher_topic_v1_teacher_topics_flag_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlagTopicRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddChildRequest": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Student's name (Bangla or English)"
+          },
+          "class_level": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 6.0,
+            "title": "Class Level",
+            "description": "Class level (6-8)"
+          },
+          "medium": {
+            "type": "string",
+            "title": "Medium",
+            "description": "Medium: bn or en",
+            "default": "bn"
+          },
+          "school": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "School",
+            "description": "School name"
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "maximum": 180.0,
+            "minimum": 15.0,
+            "title": "Daily Minutes",
+            "description": "Daily study target",
+            "default": 45
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "class_level"
+        ],
+        "title": "AddChildRequest"
+      },
+      "AddChildResponse": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "link_code": {
+            "type": "string",
+            "title": "Link Code"
+          },
+          "link_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Link Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id",
+          "link_code",
+          "link_id",
+          "expires_at"
+        ],
+        "title": "AddChildResponse"
+      },
+      "AuthExchangeRequest": {
+        "properties": {
+          "provider_token": {
+            "type": "string",
+            "title": "Provider Token",
+            "description": "Firebase ID token or test token"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role: student or parent",
+            "default": "student"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "User full name (Bangla/English)"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "description": "Preferred locale: bn or en",
+            "default": "bn"
+          },
+          "class_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Level",
+            "description": "Class level (6-8) for students"
+          },
+          "medium": {
+            "type": "string",
+            "title": "Medium",
+            "description": "Medium: bn or en",
+            "default": "bn"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_token"
+        ],
+        "title": "AuthExchangeRequest"
+      },
+      "CreateFamilyRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Family name (e.g. 'রহমান পরিবার' or 'Rahman Family')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateFamilyRequest"
+      },
+      "DeviceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "form_factor": {
+            "type": "string",
+            "title": "Form Factor"
+          },
+          "app_version": {
+            "type": "string",
+            "title": "App Version"
+          },
+          "push_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push Token"
+          },
+          "integrity_status": {
+            "type": "string",
+            "title": "Integrity Status"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "platform",
+          "form_factor",
+          "app_version",
+          "integrity_status",
+          "last_seen_at"
+        ],
+        "title": "DeviceResponse"
+      },
+      "FamilyResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "owner_parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner Parent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "owner_parent_id",
+          "name",
+          "created_at"
+        ],
+        "title": "FamilyResponse"
+      },
+      "FlagTopicRequest": {
+        "properties": {
+          "topic_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Topic Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic_id"
+        ],
+        "title": "FlagTopicRequest"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -133,6 +986,334 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "LinkedStudentResponse": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "class_level": {
+            "type": "integer",
+            "title": "Class Level"
+          },
+          "medium": {
+            "type": "string",
+            "title": "Medium"
+          },
+          "school": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "School"
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "title": "Daily Minutes"
+          },
+          "link_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Link Id"
+          },
+          "linked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id",
+          "display_name",
+          "class_level",
+          "medium",
+          "daily_minutes",
+          "link_id"
+        ],
+        "title": "LinkedStudentResponse"
+      },
+      "RedeemLinkRequest": {
+        "properties": {
+          "link_code": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 4,
+            "title": "Link Code",
+            "description": "Alphanumeric link code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "link_code"
+        ],
+        "title": "RedeemLinkRequest"
+      },
+      "RedeemLinkResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "link_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Link Id"
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Parent Id"
+          },
+          "family_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "link_id",
+          "parent_id",
+          "student_id"
+        ],
+        "title": "RedeemLinkResponse"
+      },
+      "RefreshTokenRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token",
+            "description": "Active session refresh token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshTokenRequest"
+      },
+      "RegisterDeviceRequest": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "description": "Platform: android, ios, or web"
+          },
+          "form_factor": {
+            "type": "string",
+            "title": "Form Factor",
+            "description": "phone, tablet, desktop",
+            "default": "phone"
+          },
+          "push_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push Token",
+            "description": "FCM / APNs push token"
+          },
+          "app_version": {
+            "type": "string",
+            "title": "App Version",
+            "description": "App semantic version",
+            "default": "1.0.0"
+          }
+        },
+        "type": "object",
+        "required": [
+          "platform"
+        ],
+        "title": "RegisterDeviceRequest"
+      },
+      "ReviewSubmissionRequest": {
+        "properties": {
+          "score": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Score"
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Comment"
+          },
+          "flagged_topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Flagged Topics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "comment"
+        ],
+        "title": "ReviewSubmissionRequest"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "user"
+        ],
+        "title": "TokenResponse"
+      },
+      "UpdateDeviceRequest": {
+        "properties": {
+          "push_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push Token"
+          },
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          }
+        },
+        "type": "object",
+        "title": "UpdateDeviceRequest"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "auth_provider": {
+            "type": "string",
+            "title": "Auth Provider"
+          },
+          "auth_uid": {
+            "type": "string",
+            "title": "Auth Uid"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "auth_provider",
+          "auth_uid",
+          "role",
+          "display_name",
+          "locale",
+          "status"
+        ],
+        "title": "UserResponse"
       },
       "ValidationError": {
         "properties": {

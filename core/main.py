@@ -4,13 +4,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from core.common.auth import verify_internal_service_token
 from core.common.config import settings
 from core.common.database import check_database_ready
-from core.common.logging import RequestIDMiddleware, setup_logging
+from core.common.logging import RequestIDMiddleware, request_id_ctx, setup_logging
 from core.common.redis import check_redis_ready, close_redis
 from core.common.telemetry import setup_telemetry
 
@@ -107,7 +107,32 @@ internal_routers = [
     audit_router,
 ]
 
+
+@app.exception_handler(HTTPException)
+async def core_http_exception_handler(_request: Any, exc: HTTPException) -> JSONResponse:
+    request_id = request_id_ctx.get() or ""
+    detail: Any = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code", "ERROR")
+        message = detail.get("message", str(detail))
+    else:
+        code = "HTTP_ERROR"
+        message = str(detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": code, "message": message, "request_id": request_id}},
+        headers=getattr(exc, "headers", None),
+    )
+
+
 for router in internal_routers:
+    # Mount with /v1 prefix per docs/04_API_CONTRACT.md
+    app.include_router(
+        router,
+        prefix="/v1",
+        dependencies=[Depends(verify_internal_service_token)],
+    )
+    # Also mount at root for internal compatibility
     app.include_router(
         router,
         dependencies=[Depends(verify_internal_service_token)],

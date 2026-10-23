@@ -27,7 +27,7 @@ class CoreSettings(BaseSettings):
 
     # Database
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@localhost:5432/thinkbuddy",
+        default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy",
         description="Async PostgreSQL connection URL with pgvector",
     )
     DB_POOL_SIZE: int = Field(default=10, description="Database pool size")
@@ -35,7 +35,7 @@ class CoreSettings(BaseSettings):
 
     # Redis
     REDIS_URL: str = Field(
-        default="redis://localhost:6379/0",
+        default="redis://127.0.0.1:6379/0",
         description="Redis connection URL",
     )
 
@@ -73,6 +73,27 @@ class CoreSettings(BaseSettings):
     )
     OTEL_ENABLED: bool = Field(default=False, description="Enable OpenTelemetry tracing")
 
+    # Authentication & JWT
+    JWT_SECRET_KEY: str = Field(
+        default="dev_jwt_secret_key_change_in_production_9876543210123456789",
+        description="Secret key for signing access JWTs",
+    )
+    JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        default=15, description="Access token expiration in minutes"
+    )
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=30, description="Refresh token expiration in days"
+    )
+    LINK_CODE_EXPIRE_HOURS: int = Field(
+        default=24, description="Student link code expiration in hours"
+    )
+
+    # Feature Flags
+    TEACHER_REVIEW_ENABLED: bool = Field(
+        default=False, description="Teacher review feature flag (off in beta)"
+    )
+
     @model_validator(mode="after")
     def validate_non_local_secrets(self) -> "CoreSettings":
         """Refuse to start with placeholder secrets when environment is not local/development."""
@@ -90,6 +111,15 @@ class CoreSettings(BaseSettings):
                 msg = (
                     f"Refusing to start in environment '{self.ENVIRONMENT}' "
                     "with default development database credentials."
+                )
+                raise ValueError(msg)
+            if (
+                "change_in_production" in self.JWT_SECRET_KEY.lower()
+                or "dev_" in self.JWT_SECRET_KEY.lower()
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENVIRONMENT}' "
+                    "with placeholder JWT_SECRET_KEY."
                 )
                 raise ValueError(msg)
         return self
