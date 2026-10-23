@@ -26,7 +26,10 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /links/redeem` (student enters code), `POST /links/{id}/revoke`.
 
 ### Curriculum
-- `GET /books?class=&subject=`, `GET /books/{id}/chapters`, `GET /chapters/{id}`.
+- `GET /books?class_level=&subject=&medium=` – list textbooks with chapter counts.
+- `GET /books/{id}` – get textbook details.
+- `GET /books/{id}/chapters` – get ordered chapter list for textbook.
+- `GET /chapters/{id}` – get chapter details with concepts and chunk count.
 
 ### Planning
 - `PUT /students/{id}/study-setups/{subject}` – exam, syllabus selection, order, daily minutes (parent).

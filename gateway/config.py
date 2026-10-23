@@ -60,14 +60,29 @@ class GatewaySettings(BaseSettings):
     @model_validator(mode="after")
     def validate_non_local_secrets(self) -> "GatewaySettings":
         """Refuse to start with placeholder secrets when environment is not local/development."""
-        env = self.ENVIRONMENT.lower()
-        is_local = env in {"local", "development", "dev", "test", "testing"}
-        if not is_local:
+        env = self.ENV.lower()
+        is_dev_or_local = env in {"local", "development", "dev", "test", "testing"}
+        if not is_dev_or_local:
+            known_defaults = {
+                "dev_internal_service_token_placeholder_change_in_production",
+                "placeholder_token",
+            }
             token_lower = self.INTERNAL_SERVICE_TOKEN.lower()
-            if "placeholder" in token_lower or "dev_" in token_lower:
+            if (
+                "placeholder" in token_lower
+                or "dev_" in token_lower
+                or self.INTERNAL_SERVICE_TOKEN in known_defaults
+            ):
                 msg = (
-                    f"Refusing to start in environment '{self.ENVIRONMENT}' "
+                    f"Refusing to start in environment '{self.ENV}' "
                     "with placeholder INTERNAL_SERVICE_TOKEN."
+                )
+                raise ValueError(msg)
+
+            if len(self.INTERNAL_SERVICE_TOKEN) < 32:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "INTERNAL_SERVICE_TOKEN must have at least 32 characters."
                 )
                 raise ValueError(msg)
         return self

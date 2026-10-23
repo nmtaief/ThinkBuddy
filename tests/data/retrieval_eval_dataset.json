@@ -1,0 +1,56 @@
+[
+  {
+    "id": "eval-q01",
+    "question": "বর্গ ও বর্গমূলের ধারণা কী এবং কীভাবে বর্গ নির্ণয় করা হয়?",
+    "language": "bn",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 1,
+    "expected_printed_page": 2
+  },
+  {
+    "id": "eval-q02",
+    "question": "মৌলিক উৎপাদকের সাহায্যে বর্গমূল নির্ণয় করার নিয়ম কী?",
+    "language": "bn",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 1,
+    "expected_printed_page": 5
+  },
+  {
+    "id": "eval-q03",
+    "question": "সাধারণ ভগ্নাংশ এবং দশমিক ভগ্নাংশের বর্গমূল নির্ণয়ের উপায় কী?",
+    "language": "bn",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 1,
+    "expected_printed_page": 12
+  },
+  {
+    "id": "eval-q04",
+    "question": "বীজগণিতীয় রাশির গুণের সময় চিহ্নের গুণন বিধি এবং সূচকের নিয়ম কী?",
+    "language": "bn",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 2,
+    "expected_printed_page": 20
+  },
+  {
+    "id": "eval-q05",
+    "question": "বর্গের সূত্রাবলি (a + b)^2 এবং (a - b)^2 এর প্রয়োগ কীভাবে হয়?",
+    "language": "bn",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 2,
+    "expected_printed_page": 24
+  },
+  {
+    "id": "eval-q06",
+    "question": "How do you solve linear equations by isolating variables in algebra?",
+    "language": "en",
+    "class_level": 7,
+    "subject": "math",
+    "expected_chapter_number": 2,
+    "expected_printed_page": 28
+  }
+]

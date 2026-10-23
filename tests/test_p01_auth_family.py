@@ -611,7 +611,7 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
         # 2. Verify Alembic migration version in live Postgres
         res_version = await session.execute(text("SELECT version_num FROM alembic_version"))
         version = res_version.scalar_one()
-        assert version == "0002_p01_auth_roles_family"
+        assert version in ("0002_p01_auth_roles_family", "0003_p02_curriculum_rag")
 
         # 3. Test policy directly against live Postgres DB rows
         parent_id = uuid.uuid4()
