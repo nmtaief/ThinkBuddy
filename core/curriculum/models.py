@@ -75,6 +75,7 @@ class Chapter(Base):
     printed_page_start: Mapped[int] = mapped_column(Integer, nullable=False)
     printed_page_end: Mapped[int] = mapped_column(Integer, nullable=False)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    difficulty_factor: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

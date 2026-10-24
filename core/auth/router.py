@@ -37,7 +37,10 @@ class AuthExchangeRequest(BaseModel):
     )
     display_name: str | None = Field(default=None, description="User full name (Bangla/English)")
     locale: str = Field(default="bn", description="Preferred locale: bn or en")
-    class_level: int | None = Field(default=None, description="Class level (6-8) for students")
+    class_level: int | None = Field(default=None, description="Class level (6-12) for students")
+    group: str | None = Field(
+        default=None, description="Group for 9-12 (science, humanities, business_studies)"
+    )
     medium: str = Field(default="bn", description="Medium: bn or en")
 
 
@@ -155,11 +158,15 @@ async def exchange_token(
             class_lvl = parent_prof.class_level if parent_prof else (payload.class_level or 7)
             med = parent_prof.medium if parent_prof else payload.medium
             sch = parent_prof.school if parent_prof else None
+            grp = parent_prof.group if parent_prof else payload.group
+            opts = parent_prof.optional_subject_ids if parent_prof else []
             mins = parent_prof.daily_minutes if parent_prof else 45
 
             profile = StudentProfile(
                 user_id=user.id,
                 class_level=class_lvl,
+                group=grp,
+                optional_subject_ids=opts,
                 medium=med,
                 school=sch,
                 daily_minutes=mins,

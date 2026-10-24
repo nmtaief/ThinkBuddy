@@ -23,23 +23,39 @@ One person = one account = one role in beta. A family has one or more parents an
 | Review broad answers | ✗ | ✗ | ✔ |
 | Manage subscription | ✗ | ✔ | ✗ |
 
-## 3. Onboarding
+## 3. Onboarding & Configuration
 1. **Parent signs up** (phone OTP or Google), creates the family.
-2. Parent **adds a child**: name, class, medium (Bangla/English), school optional. System creates a student profile and a **link code** (or QR).
-3. Student installs the app, signs in, and enters the code; the link becomes `active`. (Alternative: parent signs the child in on the child's device.)
-4. Parent sets the **study setup**: subjects, syllabus (chapters included), exam name + date, preferred chapter order, daily study minutes, available days.
-5. System generates the **Week 1 plan** (see §4).
+2. Parent **adds a child**: name, class (6–12), medium (Bangla/English), group (Science, Humanities, Business Studies for 9–12), optional/4th subjects, school optional. System creates a student profile and a **link code** (or QR).
+3. Student installs the app, signs in, and enters the code; the link becomes `active`.
+4. Parent sets the **study setup & settings**:
+   - Setup: subjects, syllabus (chapters included), exam name + date, preferred chapter order.
+   - Settings: `school_day_minutes`, `holiday_minutes`, study window (e.g. 17:00–21:30), recurring unavailable blocks (coaching/tuition), blocked observances, custom blackout ranges (coarse reasons only: `family_event`, `travel`, `illness`, `school_event`, `other`), and subject priorities (`normal`, `main`, `difficult`).
+   - Privacy rule: **Religion is never stored**; observance selections from the catalog are the sole input.
+5. System resolves settings against admin class-band policies and generates the plan.
 
 ## 4. The learning loop
 
-### 4.1 Plan creation and updates
-- Inputs: syllabus (chapter list), exam date(s), chapter order, daily minutes, available days, current mastery (initially unknown → a short **diagnostic quiz** on day 1–2).
-- Output: a **timeline** (exam date backwards) and a **weekly plan**: each day has tasks of types `study`, `revision`, `homework`, `quiz`, `broad_question`.
-- Parent can change syllabus, exam date, or chapter order at any time. The system:
-  1. Versions the plan (`plan_version` +1), keeps history.
+### 4.1 Plan creation and updates (Planner v2)
+- **Inputs**: resolved 3-tier settings, syllabus (chapter list), exam date(s), chapter order, historical completed tasks, and `now` (student timezone, default `Asia/Dhaka`). Pure function: reads zero database or clock.
+- **Day Types**:
+  - `school_day`: standard weekday study budget.
+  - `holiday`: weekly off days (default Friday and Saturday) and national holidays; study days with holiday budget, not skipped days.
+  - `blackout`: zero study (national blackout holidays, parent-blocked observances, custom blackout ranges).
+  - `exam_day`: zero study tasks scheduled for subject exams.
+- **Dynamic Configuration Hierarchy**:
+  1. System Defaults $\rightarrow$ 2. Admin Policy by Class Band (`6-8`, `9-10`, `11-12`) and Group $\rightarrow$ 3. Parent Settings per Student.
+  - Parent values are clamped to Admin Hard Limits (`daily_minutes` 0–600, `max_block_minutes` 90 with break, `latest_end_time`) at planning time, emitting clamping notices to the parent.
+  - Warning emitted when minutes exceed recommended levels.
+- **Governance & Concurrency**:
+  - Admin changes follow `draft` $\rightarrow$ `impact preview` $\rightarrow$ `publish`. Drafts never touch plans. Publishing queues throttled idempotent regeneration for future days only, with coalesced notifications.
+  - Optimistic concurrency (`409 Conflict`) on every settings row via `version`.
+  - Students can propose change requests (`POST /study-settings/change-requests`), but cannot apply them.
+- **Timeline & Tasks**: Output timeline (exam date backwards) and daily schedule with task types `study`, `revision`, `homework`, `quiz`, `broad_question`.
+- **Rotation Rule**: No subject has study blocks on > 2 consecutive days when $\ge 3$ active subjects have remaining content (revision/quizzes exempt). Staggers subjects; relaxes with warning if infeasible.
+- Parent updates:
+  1. Versions the settings and plan (`version` +1), keeping audit log entries.
   2. Regenerates **only future days**; completed work is untouched.
-  3. Notifies the student (and parent confirmation).
-- Each task shows a clear guideline: what to read (book, chapter, printed pages), what to do, expected minutes, and how it will be checked.
+  3. Notifies the student.
 
 ### 4.2 Daily rhythm
 Each day the student sees:

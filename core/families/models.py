@@ -28,10 +28,16 @@ class StudentProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    class_level: Mapped[int] = mapped_column(Integer, nullable=False)  # 6-8 in beta
+    class_level: Mapped[int] = mapped_column(Integer, nullable=False)  # Classes 6-12
+    group: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )  # science, humanities, business_studies (9-12)
+    optional_subject_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     medium: Mapped[str] = mapped_column(String(10), default="bn", nullable=False)  # bn or en
     school: Mapped[str | None] = mapped_column(Text, nullable=True)  # Unicode Bangla-safe
     daily_minutes: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
+    time_zone: Mapped[str] = mapped_column(String(50), default="Asia/Dhaka", nullable=False)
+    plan_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     available_days: Mapped[list[str]] = mapped_column(
         JSONB, default=lambda: ["sat", "sun", "mon", "tue", "wed", "thu"], nullable=False
     )

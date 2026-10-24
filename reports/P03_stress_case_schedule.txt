@@ -1,0 +1,114 @@
+=============================================================================================================================
+THINKBUDDY ADAPTIVE STUDY PLANNER V2 - STRESS CASE (EXAM IN 20 DAYS, 1050 PAGES, 75M DAILY BUDGET)
+Class Band: 9-10 | Group: science | School Day: 75m | Holiday: 90m
+Study Window: 18:00 - 21:30 | Weekly Off Days (Study Days): ['fri', 'sat']
+Priorities: {'Mathematics': 'difficult', 'Physics': 'main', 'Chemistry': 'normal', 'Biology': 'normal'}
+Adaptive Mode: suggest
+=============================================================================================================================
+Day   | Date       | Day Type    | Subject            | Task Type  | Pages / Curriculum Ref                 |  Mins | Day Total
+-----------------------------------------------------------------------------------------------------------------------------
+D01   | 2026-10-23 | Study       | Mathematics        | Study      | Ch 1 (printed pp. 1-45)                |   38m |       81m
+      |            |             | Mathematics        | Homework   | Ch 1 (printed pp. 1-45)                |   20m |          
+      |            |             | Physics            | Study      | Ch 1 (printed pp. 1-32)                |   23m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D02   | 2026-10-24 | Study       | Chemistry          | Study      | Ch 1 (printed pp. 1-42)                |   20m |       80m
+      |            |             | Chemistry          | Homework   | Ch 1 (printed pp. 1-42)                |   20m |          
+      |            |             | Biology            | Study      | Ch 1 (printed pp. 1-42)                |   20m |          
+      |            |             | Biology            | Homework   | Ch 1 (printed pp. 1-42)                |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D03   | 2026-10-25 | Study       | Mathematics        | Revision   | Ch 1 (pp. 1-45) [Spaced +2d]           |   20m |       58m
+      |            |             | Mathematics        | Study      | Ch 1 (printed pp. 46-50)               |   38m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D04   | 2026-10-26 | Study       | Physics            | Revision   | Ch 1 (pp. 1-32) [Spaced +3d]           |   20m |       63m
+      |            |             | Physics            | Study      | Ch 1 (printed pp. 33-50)               |   23m |          
+      |            |             | Physics            | Homework   | Ch 1 (printed pp. 33-50)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D05   | 2026-10-27 | Study       | Chemistry          | Revision   | Ch 1 (pp. 1-42) [Spaced +3d]           |   20m |       60m
+      |            |             | Chemistry          | Study      | Ch 1 (printed pp. 43-50)               |   20m |          
+      |            |             | Chemistry          | Homework   | Ch 1 (printed pp. 43-50)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D06   | 2026-10-28 | Study       | Biology            | Revision   | Ch 1 (pp. 1-42) [Spaced +4d]           |   20m |       60m
+      |            |             | Biology            | Study      | Ch 1 (printed pp. 43-50)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 1 (printed pp. 43-50)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D07   | 2026-10-29 | Buffer      | [ZERO STUDY]       | -          | Reason: rest                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D08   | 2026-10-30 | Study       | Mathematics        | Revision   | Ch 1 (pp. 1-45) [Spaced +7d]           |   20m |       78m
+      |            |             | Mathematics        | Revision   | Ch 1 (pp. 46-50) [Spaced +5d]          |   20m |          
+      |            |             | Mathematics        | Study      | Ch 2 (printed pp. 51-95)               |   38m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D09   | 2026-10-31 | Study       | Physics            | Revision   | Ch 1 (pp. 1-32) [Spaced +8d]           |   20m |       83m
+      |            |             | Physics            | Revision   | Ch 1 (pp. 33-50) [Spaced +5d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 2 (printed pp. 51-90)               |   23m |          
+      |            |             | Physics            | Homework   | Ch 2 (printed pp. 51-90)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D10   | 2026-11-01 | Study       | Mathematics        | Revision   | Ch 1 (pp. 46-50) [Spaced +7d]          |   20m |       75m
+      |            |             | Mathematics        | Revision   | Ch 2 (pp. 51-95) [Spaced +2d]          |   20m |          
+      |            |             | Mathematics        | Study      | Ch 2 (printed pp. 96-100)              |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D11   | 2026-11-02 | Blackout    | [ZERO STUDY]       | -          | Reason: parent blackout                |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D12   | 2026-11-03 | Study       | Chemistry          | Revision   | Ch 1 (pp. 1-42) [Spaced +10d]          |   20m |       60m
+      |            |             | Chemistry          | Revision   | Ch 1 (pp. 43-50) [Spaced +7d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 2 (printed pp. 51-100)              |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D13   | 2026-11-04 | Study       | Biology            | Revision   | Ch 1 (pp. 1-42) [Spaced +11d]          |   20m |       60m
+      |            |             | Biology            | Revision   | Ch 1 (pp. 43-50) [Spaced +7d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 51-100)              |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D14   | 2026-11-05 | Study       | Mathematics        | Revision   | Ch 2 (pp. 51-95) [Spaced +6d]          |   20m |       75m
+      |            |             | Mathematics        | Revision   | Ch 2 (pp. 96-100) [Spaced +4d]         |   20m |          
+      |            |             | Mathematics        | Study      | Ch 3 (printed pp. 101-150)             |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D15   | 2026-11-06 | Buffer      | [ZERO STUDY]       | -          | Reason: rest                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D16   | 2026-11-07 | Study       | Physics            | Revision   | Ch 1 (pp. 33-50) [Spaced +12d]         |   20m |       83m
+      |            |             | Physics            | Revision   | Ch 2 (pp. 51-90) [Spaced +7d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 2 (printed pp. 91-100)              |   23m |          
+      |            |             | Physics            | Homework   | Ch 2 (printed pp. 91-100)              |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D17   | 2026-11-08 | Revision    | Mathematics        | Revision   | Ch 2 (pp. 51-95) [Spaced +9d]          |   20m |       60m
+      |            |             | Mathematics        | Revision   | Ch 2 (pp. 96-100) [Spaced +7d]         |   20m |          
+      |            |             | Mathematics        | Revision   | Ch 3 (pp. 101-150) [Spaced +3d]        |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D18   | 2026-11-09 | Study       | Chemistry          | Revision   | Ch 2 (pp. 51-100) [Spaced +6d]         |   20m |       60m
+      |            |             | Chemistry          | Study      | Ch 3 (printed pp. 101-150)             |   20m |          
+      |            |             | Chemistry          | Homework   | Ch 3 (printed pp. 101-150)             |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D19   | 2026-11-10 | Study       | Biology            | Revision   | Ch 2 (pp. 51-100) [Spaced +6d]         |   20m |       60m
+      |            |             | Biology            | Study      | Ch 3 (printed pp. 101-150)             |   20m |          
+      |            |             | Biology            | Homework   | Ch 3 (printed pp. 101-150)             |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D20   | 2026-11-11 | Study       | Physics            | Revision   | Ch 2 (pp. 91-100) [Spaced +4d]         |   20m |       63m
+      |            |             | Physics            | Study      | Ch 3 (printed pp. 101-150)             |   23m |          
+      |            |             | Physics            | Homework   | Ch 3 (printed pp. 101-150)             |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D21   | 2026-11-12 | Exam Day    | [ZERO STUDY]       | -          | Reason: exam                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+
+PLAN METRICS & VERIFICATION SUMMARY:
+Total Calendar Days: 21 (Active Study Days: 17, Zero-Study Days: 4)
+Zero-Study Day Breakdown: {'rest': 2, 'parent blackout': 1, 'exam': 1}
+Total Tasks Generated: 53
+Subject Allocation & Priority Multiplier Effect:
+  * Mathematics        [DIFFICULT]:  404 mins (34.9% share, 6 active days)
+  * Physics            [MAIN     ]:  315 mins (27.2% share, 5 active days)
+  * Chemistry          [NORMAL   ]:  220 mins (19.0% share, 4 active days)
+  * Biology            [NORMAL   ]:  220 mins (19.0% share, 4 active days)
+
+PER-SUBJECT SYLLABUS COVERAGE AUDIT (Before Exam):
+  Subject            | Exam Date  | Chapters   | Pages Covered    | Coverage % | Status
+  -------------------------------------------------------------------------------------
+  Biology            | 2026-11-12 | 3/5        | 150/250            |     60.0% | SHORTFALL (-100 pages)
+  Chemistry          | 2026-11-12 | 3/5        | 150/250            |     60.0% | SHORTFALL (-100 pages)
+  Mathematics        | 2026-11-12 | 3/6        | 150/300            |     50.0% | SHORTFALL (-150 pages)
+  Physics            | 2026-11-12 | 3/5        | 150/250            |     60.0% | SHORTFALL (-100 pages)
+
+Diagnostic Feedback & Warnings:
+  [INFO] CROSS_SUBJECT_FEASIBILITY_WARNING: Combined curriculum workload across 4 active subjects requires 5873 mins, exceeding total budget of 1590 mins across 20 usable days. Recommend increasing student daily study minutes (currently 75m) or adjusting exam dates.
+  [INFO] COVERAGE_SHORTFALL_MATHEMATICS: Only 150/300 pages (50.0%) scheduled before exam on 2026-11-12. Shortfall of 150 pages.
+  [INFO] COVERAGE_SHORTFALL_PHYSICS: Only 150/250 pages (60.0%) scheduled before exam on 2026-11-12. Shortfall of 100 pages.
+  [INFO] COVERAGE_SHORTFALL_CHEMISTRY: Only 150/250 pages (60.0%) scheduled before exam on 2026-11-12. Shortfall of 100 pages.
+  [INFO] COVERAGE_SHORTFALL_BIOLOGY: Only 150/250 pages (60.0%) scheduled before exam on 2026-11-12. Shortfall of 100 pages.
+=============================================================================================================================
+

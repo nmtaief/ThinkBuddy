@@ -15,7 +15,7 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 ## 2. Endpoint inventory
 
 ### Client & config
-- `GET /client/config` – flags, entitlements, min version, quiz security mode for this platform, layout hints.
+- `GET /client/config` – flags, entitlements, min version, quiz security mode, layout hints, observance catalog, and planner defaults & limits (no admin internals).
 - `POST /devices` / `PATCH /devices/{id}` – register push token, app version.
 
 ### Auth & identity
@@ -31,19 +31,49 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /books/{id}/chapters` – get ordered chapter list for textbook.
 - `GET /chapters/{id}` – get chapter details with concepts and chunk count.
 
-### Planning
-- `PUT /students/{id}/study-setups/{subject}` – exam, syllabus selection, order, daily minutes (parent).
-- `POST /students/{id}/study-setups/{subject}/change-requests` (student).
-- `GET /students/{id}/plan?from=&to=` – days + tasks.
-- `GET /students/{id}/today` – the home screen payload (tasks, revision, streak, exam countdown).
-- `PATCH /tasks/{id}` – status update.
+### Planning & Study Settings
+- `GET /students/{id}/study-settings` – get resolved study settings, parent preferences, and admin policy constraints.
+- `PUT /students/{id}/study-settings` – parent updates study settings (school_day_minutes, holiday_minutes, study window, unavailable blocks, blocked observances, coarse blackout dates, subject priorities) with optimistic locking (409) and limit clamping.
+- `POST /students/{id}/study-settings/change-requests` – student proposes study settings adjustments.
+- `PUT /students/{id}/study-setups/{subject}` – exam date, syllabus selection, chapter order (parent, with optimistic locking via `version`).
+- `GET /students/{id}/study-setups` – list all study setups for a student.
+- `POST /students/{id}/study-setups/{subject}/change-requests` (student submits change request for subject setup).
+- `POST /students/{id}/generate-plan` – generate or recalculate unified schedule across all active setups.
+- `PUT /students/{id}/daily-minutes` – parent updates legacy student-level daily minutes budget.
+- `GET /students/{id}/plan?from=&to=` – days + tasks with day types (`school_day`, `holiday`, `blackout`, `exam_day`), coverage reports, and plan provenance (`provider`, `model_version`, `contract_version`, `settings_version`, `generation_reason`; see `docs/07_AI_PLANNER_API.md`).
+- `GET /students/{id}/today` – home screen payload (tasks, revision, streak, exam countdown, remaining budget, student timezone, and `plan_provenance` with parent-facing rationale).
+- `PATCH /tasks/{id}` – status update (student only; parents read-only; ownership verified).
 
-### Quiz
-- `POST /quizzes/{id}/attempts` – start; returns `attempt_id`, `deadline_at`, `attempt_token`, first question.
-- `POST /attempts/{id}/items/{position}/answer` – submit one answer; returns next question (and correctness only if mode allows).
-- `POST /attempts/{id}/events` – integrity events from client.
-- `POST /attempts/{id}/submit` – finalize.
-- `GET /attempts/{id}/review` – only after `submitted`.
+### Admin Governance & Configuration (`/admin/*`, role: admin)
+- `GET /admin/policies` – list admin policies across class bands and groups.
+- `POST /admin/policies` – create draft policy for class band (`6-8`, `9-10`, `11-12`) and group.
+- `PUT /admin/policies/{id}` – update draft policy limits and planner parameters (audit logged).
+- `GET /admin/policies/{id}/preview` – preview affected students and active plans before publishing.
+- `POST /admin/policies/{id}/publish` – publish policy; queues throttled idempotent regeneration for affected students.
+- `GET /admin/holidays` – list holiday calendar entries.
+- `POST /admin/holidays` – create draft holiday (audit logged).
+- `POST /admin/holidays/import` – bulk import unverified draft holidays from JSON file (audit logged).
+- `PUT /admin/holidays/{id}` – update holiday (dates, type, blackout, verification, audit logged).
+- `GET /admin/holidays/{id}/preview` – preview affected plans and students for holiday date range.
+- `POST /admin/holidays/{id}/publish` – publish holiday calendar change; queues throttled idempotent regeneration.
+- `GET /admin/observances` – list observance catalog entries.
+
+### Quiz & Assessments (P04)
+- `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
+- `POST /quizzes/{id}/attempts` – start attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
+  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit (409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`).
+- `POST /attempts/{id}/items/{position}/answer` – submit one answer sequentially; returns `next_item` and `has_more`.
+  - In assessed mode, correctness feedback is strictly withheld until submit (`is_correct: null`).
+  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
+- `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state`.
+- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`). Idempotent on repeated calls.
+- `GET /attempts/{id}/review` – get attempt review with correct answers and explanations.
+  - Strictly blocked with 403 `ATTEMPT_NOT_SUBMITTED` while attempt is active/unsubmitted!
+
+### Admin Question Bank (`/admin/questions*`, role: admin)
+- `POST /admin/questions` – create question item and isolated question key in `question_keys` table (zero leak to student routes, audit logged).
+- `POST /admin/questions/import` – bulk import questions and isolated question keys from JSONL (audit logged).
+- `GET /admin/questions?chapter_id=&review_status=` – list question bank items.
 
 ### Broad questions
 - `POST /attempt-items/{id}/broad` (text or image upload refs), `GET /submissions/{id}`.

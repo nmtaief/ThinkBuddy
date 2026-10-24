@@ -41,6 +41,20 @@ from core.families.router import (
     RedeemLinkRequest,
     RedeemLinkResponse,
 )
+from core.planner.schemas import (
+    DailyMinutesResponse,
+    PlanResponse,
+    StudentChangeRequestInput,
+    StudentChangeRequestResponse,
+    StudentStudySettingsResponse,
+    StudySetupResponse,
+    TaskResponse,
+    TodayHomePayloadResponse,
+    UpdateDailyMinutesRequest,
+    UpdateStudentStudySettingsRequest,
+    UpdateTaskStatusRequest,
+    UpsertStudySetupRequest,
+)
 from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
 from gateway.client import core_client
 
@@ -132,6 +146,51 @@ async def get_client_config(
         "layout_hints": {
             "dashboard_cards_order": ["today_tasks", "spaced_revision", "streak", "exam_countdown"],
             "image_size_class": "lg" if form_factor in ("tablet", "desktop") else "md",
+        },
+        "observance_catalog": [
+            {"key": "eid_ul_fitr", "name_bn": "ঈদুল ফিতর", "name_en": "Eid-ul-Fitr"},
+            {"key": "eid_ul_adha", "name_bn": "ঈদুল আযহা", "name_en": "Eid-ul-Adha"},
+            {"key": "durga_puja", "name_bn": "দুর্গাপূজা", "name_en": "Durga Puja"},
+            {"key": "christmas", "name_bn": "বড়দিন", "name_en": "Christmas"},
+            {"key": "buddha_purnima", "name_bn": "বুদ্ধ পূর্ণিমা", "name_en": "Buddha Purnima"},
+            {"key": "shab_e_barat", "name_bn": "শবে বরাত", "name_en": "Shab-e-Barat"},
+            {"key": "shab_e_qadr", "name_bn": "শবে কদর", "name_en": "Shab-e-Qadr"},
+            {"key": "pohela_boishakh", "name_bn": "পহেলা বৈশাখ", "name_en": "Pohela Boishakh"},
+            {"key": "ashura", "name_bn": "আশুরা", "name_en": "Ashura"},
+            {"key": "saraswati_puja", "name_bn": "সরস্বতী পূজা", "name_en": "Saraswati Puja"},
+        ],
+        "planner_config": {
+            "weekly_off_days": ["fri", "sat"],
+            "class_band_limits": {
+                "6-8": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 90,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+                "9-10": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 150,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+                "11-12": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 210,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+            },
+            "default_parameters": {
+                "study_share": 0.65,
+                "revision_share": 0.25,
+                "homework_quiz_share": 0.10,
+                "max_consecutive_days_per_subject": 2,
+                "min_subject_daily_share": 0.10,
+            },
         },
     }
 
@@ -404,6 +463,88 @@ async def get_chapter_detail(chapter_id: uuid.UUID, request: Request) -> Respons
 
 
 # -------------------------------------------------------------------------
+# Planning & Study Setup
+# -------------------------------------------------------------------------
+@router.put(
+    "/students/{student_id}/study-setups/{subject}",
+    response_model=StudySetupResponse,
+    tags=["Planning"],
+)
+async def upsert_study_setup(
+    student_id: uuid.UUID,
+    subject: str,
+    payload: UpsertStudySetupRequest,
+    request: Request,
+) -> Response:
+    """Parent configures syllabus, exam date, and chapter order for student."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.put(
+    "/students/{student_id}/daily-minutes",
+    response_model=DailyMinutesResponse,
+    tags=["Planning"],
+)
+async def update_student_daily_minutes(
+    student_id: uuid.UUID,
+    payload: UpdateDailyMinutesRequest,
+    request: Request,
+) -> Response:
+    """Parent updates student-level daily minutes budget."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/students/{student_id}/study-setups/{subject}/change-requests",
+    response_model=StudentChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Planning"],
+)
+async def submit_student_change_request(
+    student_id: uuid.UUID,
+    subject: str,
+    payload: StudentChangeRequestInput,
+    request: Request,
+) -> Response:
+    """Student submits proposed schedule adjustment to their study setup."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.get(
+    "/students/{student_id}/plan",
+    response_model=PlanResponse,
+    tags=["Planning"],
+)
+async def get_student_plan(student_id: uuid.UUID, request: Request) -> Response:
+    """Fetch active versioned study plan and daily tasks."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/students/{student_id}/today",
+    response_model=TodayHomePayloadResponse,
+    tags=["Planning"],
+)
+async def get_today_payload(student_id: uuid.UUID, request: Request) -> Response:
+    """Home screen daily learning loop payload."""
+    return await forward_to_core(request)
+
+
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=TaskResponse,
+    tags=["Planning"],
+)
+async def update_task_status(
+    task_id: uuid.UUID,
+    payload: UpdateTaskStatusRequest,
+    request: Request,
+) -> Response:
+    """Update task completion status (student only)."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
 # Teacher Reviews (Feature Flagged Off in Beta)
 # -------------------------------------------------------------------------
 @router.get("/teacher/queue", tags=["Teacher Reviews (Feature Flagged)"])
@@ -426,3 +567,197 @@ async def submit_teacher_review(
 async def flag_teacher_topic(payload: FlagTopicRequest, request: Request) -> Response:
     """Flag a difficult topic to adjust adaptive revision weights."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Study Settings (Planner v2 Dynamic Configuration Layer)
+# -------------------------------------------------------------------------
+@router.get(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    tags=["Planning"],
+)
+async def get_student_study_settings(student_id: uuid.UUID, request: Request) -> Response:
+    """Get resolved study settings and admin limits for student."""
+    return await forward_to_core(request)
+
+
+@router.put(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    tags=["Planning"],
+)
+async def update_student_study_settings(
+    student_id: uuid.UUID,
+    payload: UpdateStudentStudySettingsRequest,
+    request: Request,
+) -> Response:
+    """Parent updates student study settings."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/students/{student_id}/study-settings/change-requests",
+    response_model=StudentChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Planning"],
+)
+async def submit_student_settings_change_request(
+    student_id: uuid.UUID,
+    payload: StudentChangeRequestInput,
+    request: Request,
+) -> Response:
+    """Student submits proposed adjustments to their study settings."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Quiz Engine (docs/04_API_CONTRACT.md §2, docs/05_SECURE_QUIZ.md)
+# -------------------------------------------------------------------------
+from core.quiz.schemas import (
+    AnswerItemRequest,
+    AnswerItemResponse,
+    AttemptEventRequest,
+    AttemptEventResponse,
+    AttemptReviewResponse,
+    StartAttemptRequest,
+    StartAttemptResponse,
+    SubmitAttemptResponse,
+)
+
+
+@router.post(
+    "/students/{student_id}/quizzes",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def create_student_quiz_gateway(student_id: uuid.UUID, request: Request) -> Response:
+    """Create a new quiz session for student."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/quizzes/{quiz_id}/attempts",
+    response_model=StartAttemptResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def start_quiz_attempt_gateway(
+    quiz_id: uuid.UUID,
+    payload: StartAttemptRequest,
+    request: Request,
+) -> Response:
+    """Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/items/{position}/answer",
+    response_model=AnswerItemResponse,
+    tags=["Quiz"],
+)
+async def answer_quiz_item_gateway(
+    attempt_id: uuid.UUID,
+    position: int,
+    payload: AnswerItemRequest,
+    request: Request,
+) -> Response:
+    """Submit answer for sequential quiz item with nonce and deadline verification."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/events",
+    response_model=AttemptEventResponse,
+    tags=["Quiz"],
+)
+async def record_attempt_event_gateway(
+    attempt_id: uuid.UUID,
+    payload: AttemptEventRequest,
+    request: Request,
+) -> Response:
+    """Record anti-cheat event from client."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/submit",
+    response_model=SubmitAttemptResponse,
+    tags=["Quiz"],
+)
+async def submit_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Finalize quiz attempt, calculate score, emit learning signals, and unlock review."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/attempts/{attempt_id}/review",
+    response_model=AttemptReviewResponse,
+    tags=["Quiz"],
+)
+async def review_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Review completed quiz attempt with explanations and answer keys."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2)
+# -------------------------------------------------------------------------
+
+
+@router.post(
+    "/chat/sessions",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Chat"],
+)
+async def create_chat_session_gateway(request: Request) -> Response:
+    """Create chat session (enforces quiz in-progress lockout)."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/chat/sessions/{session_id}/messages",
+    tags=["Chat"],
+)
+async def send_chat_message_gateway(session_id: uuid.UUID, request: Request) -> Response:
+    """Send chat message (enforces quiz in-progress lockout)."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Admin Configuration & Governance
+# -------------------------------------------------------------------------
+@router.get("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_get")
+async def forward_admin_get(path: str, request: Request) -> Response:
+    """Forward admin GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_post")
+async def forward_admin_post(path: str, request: Request) -> Response:
+    """Forward admin POST requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.put("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_put")
+async def forward_admin_put(path: str, request: Request) -> Response:
+    """Forward admin PUT requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.patch("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_patch")
+async def forward_admin_patch(path: str, request: Request) -> Response:
+    """Forward admin PATCH requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.delete("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_delete")
+async def forward_admin_delete(path: str, request: Request) -> Response:
+    """Forward admin DELETE requests downstream to Core Service."""
+    return await forward_to_core(request)
