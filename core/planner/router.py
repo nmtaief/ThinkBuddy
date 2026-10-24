@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from core.audit.models import AuditLog
 from core.auth.dependencies import get_current_user
 from core.auth.models import User
+from core.common.config import settings as app_settings
 from core.common.database import get_db_session
 from core.common.policy import can_access_student
 from core.common.rate_limit import RateLimiter
@@ -28,6 +29,11 @@ from core.planner.engine import (
     MultiSubjectPlanOutput,
     SubjectSetupInput,
     generate_student_plan,
+)
+from core.planner.provider import (
+    AiPlannerProvider,
+    PlanProviderContext,
+    get_plan_provider,
 )
 from core.planner.models import (
     Plan,
@@ -232,10 +238,11 @@ async def execute_student_plan_regeneration(
             completed_minutes_today=completed_minutes_today,
         )
 
-        # Run Pure Planner Engine
-        plan_out = generate_student_plan(
+        # Run Planner via PlanProvider Abstraction (P06a)
+        provider_ctx = PlanProviderContext(
             student_id=student_id,
             today=today_dhaka,
+            now_dhaka=now_dt,
             daily_study_minutes=resolved_settings.school_day_minutes,
             setups=engine_setups,
             available_days=profile.available_days,
@@ -243,6 +250,25 @@ async def execute_student_plan_regeneration(
             resolved_settings=resolved_settings,
             day_calendar=day_calendar,
         )
+
+        plan_provider = get_plan_provider(resolved_settings)
+        provider_result = await plan_provider.generate_plan(provider_ctx)
+        plan_out = provider_result.plan_out
+
+        # Shadow Mode: if enabled and primary is deterministic, evaluate AI planner in background
+        if app_settings.AI_PLANNER_SHADOW_MODE and provider_result.provider == "deterministic":
+            try:
+                ai_shadow_provider = AiPlannerProvider()
+                ai_shadow_res = await ai_shadow_provider.generate_plan(provider_ctx)
+                logger.info(
+                    "AI Planner Shadow Mode evaluated for student %s: valid=%s, provider=%s, reason=%s",
+                    student_id,
+                    ai_shadow_res.plan_out is not None,
+                    ai_shadow_res.provider,
+                    ai_shadow_res.generation_reason,
+                )
+            except Exception as shadow_exc:
+                logger.warning("AI Planner Shadow Mode execution error: %s", shadow_exc)
 
         all_warnings = (
             list(plan_out.warnings)
@@ -269,6 +295,11 @@ async def execute_student_plan_regeneration(
                 version=new_student_plan_version,
                 reason=plan_reason,
                 status="active",
+                provider=provider_result.provider,
+                model_version=provider_result.model_version,
+                contract_version=provider_result.contract_version,
+                settings_version=provider_result.settings_version,
+                generation_reason=provider_result.generation_reason,
                 params={
                     "warnings": all_warnings,
                     "clamping_notices": resolved_settings.clamping_notices,
@@ -279,6 +310,7 @@ async def execute_student_plan_regeneration(
                     "holiday_minutes": resolved_settings.holiday_minutes,
                     "daily_minutes": resolved_settings.school_day_minutes,
                     "today": str(today_dhaka),
+                    "rationale": provider_result.rationale,
                 },
             )
             db.add(new_plan)
@@ -772,6 +804,12 @@ async def get_student_plan(
         status=primary_plan.status,
         days=day_items,
         warnings=all_warnings,
+        provider=getattr(primary_plan, "provider", "deterministic") or "deterministic",
+        model_version=getattr(primary_plan, "model_version", "v2-rules") or "v2-rules",
+        contract_version=getattr(primary_plan, "contract_version", "p03-engine") or "p03-engine",
+        settings_version=getattr(primary_plan, "settings_version", 1) or 1,
+        generation_reason=getattr(primary_plan, "generation_reason", "deterministic_baseline") or "deterministic_baseline",
+        rationale=primary_plan.params.get("rationale", {}) if primary_plan.params else {},
     )
 
 
@@ -865,6 +903,23 @@ async def get_today_payload(
 
     completion_pct = (completed_mins / total_planned * 100.0) if total_planned > 0 else 0.0
 
+    # 4. Resolve active plan provenance and parent rationale
+    stmt_act_plan = (
+        select(Plan)
+        .where(Plan.student_id == student_id, Plan.status == "active")
+        .order_by(Plan.version.desc())
+    )
+    res_act = await db.execute(stmt_act_plan)
+    act_plan = res_act.scalars().first()
+
+    prov = getattr(act_plan, "provider", "deterministic") if act_plan else "deterministic"
+    gen_reason = getattr(act_plan, "generation_reason", "deterministic_baseline") if act_plan else "deterministic_baseline"
+    rationale_map = act_plan.params.get("rationale", {}) if act_plan and act_plan.params else {}
+    reason_for_parents = next(
+        iter(rationale_map.values()),
+        "Study plan optimized for syllabus coverage, priority appearance, and spaced retention.",
+    )
+
     return TodayHomePayloadResponse(
         date=today_date,
         student_id=student_id,
@@ -877,6 +932,9 @@ async def get_today_payload(
         completion_percentage=round(completion_pct, 1),
         exam_countdown_days=countdowns,
         streak=1,
+        provider=prov or "deterministic",
+        generation_reason=gen_reason or "deterministic_baseline",
+        reason_for_parents=reason_for_parents,
     )
 
 

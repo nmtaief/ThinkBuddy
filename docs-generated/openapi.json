@@ -2286,6 +2286,38 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "deterministic"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "default": "v2-rules"
+          },
+          "contract_version": {
+            "type": "string",
+            "title": "Contract Version",
+            "default": "p03-engine"
+          },
+          "settings_version": {
+            "type": "integer",
+            "title": "Settings Version",
+            "default": 1
+          },
+          "generation_reason": {
+            "type": "string",
+            "title": "Generation Reason",
+            "default": "deterministic_baseline"
+          },
+          "rationale": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Rationale"
           }
         },
         "type": "object",
@@ -3046,6 +3078,27 @@
             "type": "integer",
             "title": "Streak",
             "default": 0
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "deterministic"
+          },
+          "generation_reason": {
+            "type": "string",
+            "title": "Generation Reason",
+            "default": "deterministic_baseline"
+          },
+          "reason_for_parents": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason For Parents"
           }
         },
         "type": "object",

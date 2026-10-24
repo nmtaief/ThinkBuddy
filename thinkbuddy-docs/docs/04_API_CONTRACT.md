@@ -40,8 +40,8 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /students/{id}/study-setups/{subject}/change-requests` (student submits change request for subject setup).
 - `POST /students/{id}/generate-plan` – generate or recalculate unified schedule across all active setups.
 - `PUT /students/{id}/daily-minutes` – parent updates legacy student-level daily minutes budget.
-- `GET /students/{id}/plan?from=&to=` – days + tasks with day types (`school_day`, `holiday`, `blackout`, `exam_day`).
-- `GET /students/{id}/today` – home screen payload (tasks, revision, streak, exam countdown, remaining budget, student timezone).
+- `GET /students/{id}/plan?from=&to=` – days + tasks with day types (`school_day`, `holiday`, `blackout`, `exam_day`), coverage reports, and plan provenance (`provider`, `model_version`, `contract_version`, `settings_version`, `generation_reason`; see `docs/07_AI_PLANNER_API.md`).
+- `GET /students/{id}/today` – home screen payload (tasks, revision, streak, exam countdown, remaining budget, student timezone, and `plan_provenance` with parent-facing rationale).
 - `PATCH /tasks/{id}` – status update (student only; parents read-only; ownership verified).
 
 ### Admin Governance & Configuration (`/admin/*`, role: admin)

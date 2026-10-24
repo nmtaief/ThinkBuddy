@@ -1000,7 +1000,13 @@ def generate_student_plan(
             for t in active_for_day
             if (cur_date in t.rev_window_dates or t.finished_all_chapters)
         ]
-        rev_active.sort(key=subject_appearance_priority, reverse=True)
+        def rev_active_priority(t: SubjectStudyState) -> tuple[float, float, float, float]:
+            p = sub_priorities.get(t.setup.subject, "normal")
+            pm = prio_mapping.get(p, 1.0)
+            app_prio = subject_appearance_priority(t)
+            return (pm, app_prio[0], app_prio[1], app_prio[2])
+
+        rev_active.sort(key=rev_active_priority, reverse=True)
         if len(active_for_day) >= 3:
             max_daily_slots = 2 if day_cap <= 100 else min(3, len(active_for_day))
             rev_active = rev_active[:max_daily_slots]
@@ -1046,7 +1052,10 @@ def generate_student_plan(
             # 2. Practice & weak-point review rotating across all chapters:
             # Oldest or weakest first, never repeating an identical task on consecutive days
             if rem_fill >= min_study_block_minutes and tracker.sorted_chapters:
-                rev_mins = min(rem_fill, min_study_block_minutes + 15)
+                sub_prio = sub_priorities.get(tracker.setup.subject, "normal")
+                ch_prio_mult = prio_mapping.get(sub_prio, 1.0)
+                target_rev = math.floor((min_study_block_minutes + 15) * ch_prio_mult)
+                rev_mins = min(rem_fill, max(min_study_block_minutes, target_rev))
                 yesterday = cur_date - timedelta(days=1)
                 candidates = [
                     ch

@@ -147,6 +147,12 @@ class PlanResponse(BaseModel):
     status: str
     days: list[PlanDayResponse]
     warnings: list[str] = Field(default_factory=list)
+    provider: str = "deterministic"
+    model_version: str = "v2-rules"
+    contract_version: str = "p03-engine"
+    settings_version: int = 1
+    generation_reason: str = "deterministic_baseline"
+    rationale: dict[str, str] = Field(default_factory=dict)
 
 
 class TodayHomePayloadResponse(BaseModel):
@@ -163,6 +169,9 @@ class TodayHomePayloadResponse(BaseModel):
     completion_percentage: float
     exam_countdown_days: dict[str, int]
     streak: int = 0
+    provider: str = "deterministic"
+    generation_reason: str = "deterministic_baseline"
+    reason_for_parents: str | None = None
 
 
 class UpdateTaskStatusRequest(BaseModel):

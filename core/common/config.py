@@ -121,6 +121,40 @@ class CoreSettings(BaseSettings):
         default=False, description="Teacher review feature flag (off in beta)"
     )
 
+    # AI Planner Integration (P06a)
+    AI_PLANNER_ENABLED: bool = Field(
+        default=False,
+        description="Global kill switch for AI study planner integration (P06a)",
+    )
+    AI_PLANNER_SHADOW_MODE: bool = Field(
+        default=False,
+        description="Shadow mode: calls AI planner in background for evaluation without applying it",
+    )
+    AI_PLANNER_URL: str = Field(
+        default="http://localhost:8088",
+        description="Base URL for external AI planner service",
+    )
+    AI_PLANNER_API_KEY: str = Field(
+        default="ai_planner_dev_secret_key_placeholder",
+        description="Service authentication key for AI planner service",
+    )
+    AI_PLANNER_TIMEOUT_SECONDS: float = Field(
+        default=20.0,
+        description="HTTP timeout in seconds for AI planner routine proposal endpoint",
+    )
+    AI_PLANNER_MAX_RETRIES: int = Field(
+        default=2,
+        description="Maximum HTTP retries on transient errors with exponential backoff",
+    )
+    AI_PLANNER_CIRCUIT_BREAKER_FAILURES: int = Field(
+        default=3,
+        description="Number of consecutive failures before opening circuit breaker",
+    )
+    AI_PLANNER_CIRCUIT_BREAKER_RESET_SECONDS: float = Field(
+        default=30.0,
+        description="Cooldown duration in seconds before testing half-open state",
+    )
+
     # Ingestion & RAG Settings
     EMBEDDING_PROVIDER: str = Field(
         default="mock",
