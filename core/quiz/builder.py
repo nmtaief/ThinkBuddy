@@ -13,15 +13,13 @@ from __future__ import annotations
 import random
 import secrets
 import uuid
-from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.quiz.models import (
     AttemptItem,
     Question,
-    QuestionKey,
     Quiz,
     QuizAttempt,
 )
@@ -63,17 +61,22 @@ class QuizBuilderService:
     async def select_and_randomize_questions(
         self,
         question_count: int = 5,
+        student_id: uuid.UUID | None = None,
+        mode: str = "assessed",
         chapter_ids: list[uuid.UUID] | None = None,
         concept_ids: list[str] | None = None,
         difficulty_target: float = 0.5,
         seed: int | None = None,
     ) -> list[Question]:
-        """Query question bank, deduplicate variant groups, and randomize order."""
+        """Query question bank, filter by pool, exclude seen questions, deduplicate variants, and randomize order."""
         rng = random.Random(seed)
 
+        # 1. Base query filtered by mode pool ('both' or matching mode)
+        allowed_pools = [mode, "both"]
         stmt = select(Question).where(
             Question.review_status == "approved",
             Question.type.in_(["mcq", "short"]),
+            Question.pool.in_(allowed_pools),
         )
         if chapter_ids:
             stmt = stmt.where(Question.chapter_id.in_(chapter_ids))
@@ -84,16 +87,40 @@ class QuizBuilderService:
         candidates = list(res.scalars().all())
 
         if not candidates:
-            # Fallback to any approved questions if filter is too narrow
+            # Fallback to any approved questions in allowed pool
             fallback_res = await self.db.execute(
-                select(Question).where(
+                select(Question)
+                .where(
                     Question.review_status == "approved",
                     Question.type.in_(["mcq", "short"]),
-                ).limit(question_count * 3)
+                    Question.pool.in_(allowed_pools),
+                )
+                .limit(question_count * 3)
             )
             candidates = list(fallback_res.scalars().all())
 
-        # 1. Group by variant_group_id to enforce deduplication
+        # 2. Exclude questions the student has seen and answered in assessed quizzes
+        if student_id and mode == "assessed":
+            answered_stmt = (
+                select(AttemptItem.question_id)
+                .join(QuizAttempt, QuizAttempt.id == AttemptItem.attempt_id)
+                .where(
+                    QuizAttempt.student_id == student_id,
+                    AttemptItem.answered_at.is_not(None),
+                )
+            )
+            answered_res = await self.db.execute(answered_stmt)
+            answered_q_ids = set(answered_res.scalars().all())
+
+            unseen = [q for q in candidates if q.id not in answered_q_ids]
+            if len(unseen) >= question_count:
+                candidates = unseen
+            elif unseen:
+                # Prioritize unseen questions first, fill remaining from candidates
+                seen = [q for q in candidates if q.id in answered_q_ids]
+                candidates = unseen + seen
+
+        # 3. Group by variant_group_id to enforce deduplication
         variant_groups: dict[uuid.UUID, list[Question]] = {}
         standalones: list[Question] = []
 
@@ -109,7 +136,7 @@ class QuizBuilderService:
             chosen = rng.choice(group_questions)
             selected_pool.append(chosen)
 
-        # 2. Shuffle per student
+        # 4. Shuffle per student
         rng.shuffle(selected_pool)
 
         return selected_pool[:question_count]

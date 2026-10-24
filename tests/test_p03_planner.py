@@ -44,6 +44,7 @@ from core.planner.engine import (
     SubjectSetupInput,
     generate_student_plan,
 )
+from core.planner.models import PlanDay, Task
 from rag.ingest import CurriculumImporter
 
 CLIENT_HEADERS_ANDROID = {
@@ -664,10 +665,20 @@ async def test_p03_study_setup_and_planner_lifecycle(gateway_client: AsyncClient
 
     # C. Student 1 (the task owner) successfully marks task done
     # Select a task dated today so it satisfies student timezone date check
-    today_dhaka_str = str(datetime.now(ZoneInfo("Asia/Dhaka")).date())
+    today_dhaka_date = datetime.now(ZoneInfo("Asia/Dhaka")).date()
+    today_dhaka_str = str(today_dhaka_date)
     today_tasks = [t for d in plan_data["days"] if d["date"] <= today_dhaka_str for t in d["tasks"]]
     target_task = today_tasks[0] if today_tasks else test_task
     target_task_id = target_task["id"]
+
+    if not today_tasks:
+        async with AsyncSessionLocal() as session:
+            t_row = await session.get(Task, uuid.UUID(target_task_id))
+            if t_row:
+                pd_row = await session.get(PlanDay, t_row.plan_day_id)
+                if pd_row:
+                    pd_row.date = today_dhaka_date
+                    await session.commit()
 
     res_patch_done = await gateway_client.patch(
         f"/v1/tasks/{target_task_id}",

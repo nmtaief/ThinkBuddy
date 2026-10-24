@@ -20,11 +20,16 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.quiz.builder import QuizBuilderService
 from core.quiz.grading import QuizGradingService
-from core.quiz.integrity import IntegrityEngine
+from core.quiz.integrity import (
+    DeviceIntegrityVerdict,
+    IntegrityEngine,
+    evaluate_device_attestation,
+)
 from core.quiz.models import (
     AttemptEvent,
     AttemptItem,
@@ -57,7 +62,7 @@ def _format_attempt_question_public(q: Question, attempt_id: uuid.UUID) -> Quest
     if opts:
         # Deterministic shuffle per attempt item so different attempts receive different option order
         seed_str = f"{attempt_id}:{q.id}"
-        random.Random(seed_str).shuffle(opts)
+        random.Random(seed_str).shuffle(opts)  # noqa: S311
 
     return QuestionPublic(
         id=q.id,
@@ -67,10 +72,7 @@ def _format_attempt_question_public(q: Question, attempt_id: uuid.UUID) -> Quest
         difficulty=q.difficulty,
         language=q.language,
         stem=q.stem,
-        options=[
-            QuestionOptionPublic(id=opt["id"], text=opt["text"])
-            for opt in opts
-        ],
+        options=[QuestionOptionPublic(id=opt["id"], text=opt["text"]) for opt in opts],
     )
 
 
@@ -84,7 +86,7 @@ class QuizService:
 
     async def is_assessed_attempt_active(self, student_id: uuid.UUID) -> bool:
         """Return True if student currently has an active assessed attempt.
-        
+
         Used by chat and assistant endpoints to enforce anti-cheat lockout.
         """
         stmt = (
@@ -118,8 +120,10 @@ class QuizService:
         student_id: uuid.UUID,
         client_platform: str,
         device_id: str | None = None,
+        integrity_verdict: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> StartAttemptResponse:
-        """Start a new attempt enforcing platform restrictions and active attempt rules."""
+        """Start a new attempt enforcing platform, device integrity, and active attempt rules."""
         # 1. Fetch quiz definition
         quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))
         quiz = quiz_res.scalar_one_or_none()
@@ -135,11 +139,31 @@ class QuizService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": "WEB_PLATFORM_PRACTICE_ONLY",
-                    "message": "Assessed mode quizzes are strictly supported on mobile apps. Web is practice-only.",
+                    "message": "Assessed mode quizzes are mobile-only. Web is practice-only.",
                 },
             )
 
-        # 3. Check one-active-assessed-attempt rule
+        # 3. Check device integrity verdict for assessed mode (Play Integrity / App Attest)
+        if quiz.mode == "assessed":
+            attestation = evaluate_device_attestation(
+                platform=client_platform,
+                device_id=device_id,
+                integrity_verdict=integrity_verdict,
+                headers=headers,
+            )
+            if attestation == DeviceIntegrityVerdict.COMPROMISED:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "DEVICE_INTEGRITY_FAILED",
+                        "message": (
+                            "Assessed mode is not permitted on rooted or emulated devices. "
+                            "Please use practice mode."
+                        ),
+                    },
+                )
+
+        # 4. Check one-active-assessed-attempt rule
         if quiz.mode == "assessed":
             is_active = await self.is_assessed_attempt_active(student_id)
             if is_active:
@@ -160,20 +184,43 @@ class QuizService:
             student_id=student_id,
             device_id=device_id,
             state="active",
+            mode=quiz.mode,
             attempt_token=attempt_token,
             started_at=now,
             deadline_at=deadline,
             integrity_score=1.0,
         )
-        self.db.add(attempt)
-        await self.db.flush()
+        try:
+            self.db.add(attempt)
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
+                    "message": "You already have an active assessed attempt in progress.",
+                },
+            ) from None
 
         # 4. Select questions & initialize items
         questions = await self.builder.select_and_randomize_questions(
             question_count=quiz.question_count,
+            student_id=student_id,
+            mode=quiz.mode,
         )
         items = await self.builder.initialize_attempt_items(attempt, questions)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
+                    "message": "You already have an active assessed attempt in progress.",
+                },
+            ) from None
         await self.db.refresh(attempt)
 
         first_item_public: AttemptItemPublic | None = None
@@ -212,11 +259,11 @@ class QuizService:
         token: str,
     ) -> AnswerItemResponse:
         """Submit one answer in sequence with nonce & server deadline enforcement."""
-        # 1. Fetch attempt
+        # 1. Fetch attempt and check ownership
         stmt = (
             select(QuizAttempt)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
-            .where(QuizAttempt.id == attempt_id, QuizAttempt.student_id == student_id)
+            .where(QuizAttempt.id == attempt_id)
         )
         res = await self.db.execute(stmt)
         attempt = res.scalar_one_or_none()
@@ -224,6 +271,11 @@ class QuizService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+            )
+        if attempt.student_id != student_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Cannot answer another student's attempt."},
             )
 
         if attempt.attempt_token != token:
@@ -250,10 +302,14 @@ class QuizService:
                 detail={"code": "ATTEMPT_NOT_ACTIVE", "message": f"Attempt is {attempt.state}."},
             )
 
-        # 3. Fetch item by position
-        item_stmt = select(AttemptItem).where(
-            AttemptItem.attempt_id == attempt.id,
-            AttemptItem.position == position,
+        # 3. Fetch item by position with row-level lock
+        item_stmt = (
+            select(AttemptItem)
+            .where(
+                AttemptItem.attempt_id == attempt.id,
+                AttemptItem.position == position,
+            )
+            .with_for_update()
         )
         item_res = await self.db.execute(item_stmt)
         item = item_res.scalar_one_or_none()
@@ -267,7 +323,10 @@ class QuizService:
         if item.answered_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "ITEM_ALREADY_ANSWERED", "message": f"Item at position {position} has already been answered."},
+                detail={
+                    "code": "ITEM_ALREADY_ANSWERED",
+                    "message": f"Item at position {position} has already been answered.",
+                },
             )
 
         # Nonce verification
@@ -281,13 +340,20 @@ class QuizService:
         is_correct = await self.grading.grade_item(item, response, time_spent_ms)
         await self.db.flush()
 
-        # 5. Fetch next item
-        next_stmt = (
-            select(AttemptItem)
-            .where(
-                AttemptItem.attempt_id == attempt.id,
-                AttemptItem.position == position + 1,
+        # 5. Check server-side anomalies (time too fast, rapid answer after focus loss, streaks)
+        if attempt.mode == "assessed":
+            await IntegrityEngine.check_and_apply_anomalies(
+                db=self.db,
+                attempt=attempt,
+                item=item,
+                time_spent_ms=time_spent_ms,
+                is_correct=is_correct,
             )
+
+        # 6. Fetch next item
+        next_stmt = select(AttemptItem).where(
+            AttemptItem.attempt_id == attempt.id,
+            AttemptItem.position == position + 1,
         )
         next_res = await self.db.execute(next_stmt)
         next_item = next_res.scalar_one_or_none()
@@ -328,15 +394,21 @@ class QuizService:
         token: str,
     ) -> tuple[bool, float, str]:
         """Record anti-cheat event and evaluate grace / invalidation policy."""
-        stmt = select(QuizAttempt).where(
-            QuizAttempt.id == attempt_id, QuizAttempt.student_id == student_id
-        )
+        stmt = select(QuizAttempt).where(QuizAttempt.id == attempt_id)
         res = await self.db.execute(stmt)
         attempt = res.scalar_one_or_none()
         if not attempt:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+            )
+        if attempt.student_id != student_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "FORBIDDEN",
+                    "message": "Cannot record events for another student's attempt.",
+                },
             )
 
         event = AttemptEvent(
@@ -357,15 +429,18 @@ class QuizService:
         token: str,
     ) -> SubmitAttemptResponse:
         """Finalize attempt, grade all items, emit learning signals, and unlock review."""
-        stmt = select(QuizAttempt).where(
-            QuizAttempt.id == attempt_id, QuizAttempt.student_id == student_id
-        )
+        stmt = select(QuizAttempt).where(QuizAttempt.id == attempt_id)
         res = await self.db.execute(stmt)
         attempt = res.scalar_one_or_none()
         if not attempt:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+            )
+        if attempt.student_id != student_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Cannot submit another student's attempt."},
             )
 
         if attempt.attempt_token != token:
@@ -412,13 +487,20 @@ class QuizService:
     async def review_attempt(
         self,
         attempt_id: uuid.UUID,
-        student_id: uuid.UUID,
+        user: Any,
     ) -> AttemptReviewResponse:
-        """Get full attempt review with correct keys. Strictly forbidden while attempt is active."""
+        """Get full attempt review with correct keys. Strictly forbidden while attempt is active.
+
+        Enforces Standing Rule 9:
+        - Student themself: allowed (if attempt is submitted/expired).
+        - Linked parent: allowed (if attempt is submitted/expired). Unlinked parent: 403 FORBIDDEN.
+        - Cross-student access: 403 FORBIDDEN.
+        - Active attempt: 403 ATTEMPT_NOT_SUBMITTED (for both student and parent).
+        """
         stmt = (
             select(QuizAttempt)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
-            .where(QuizAttempt.id == attempt_id, QuizAttempt.student_id == student_id)
+            .where(QuizAttempt.id == attempt_id)
         )
         res = await self.db.execute(stmt)
         attempt = res.scalar_one_or_none()
@@ -428,13 +510,45 @@ class QuizService:
                 detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
             )
 
+        user_role = getattr(user, "role", "student")
+        user_id = getattr(user, "id", None)
+        if user_role != "admin" and attempt.student_id != user_id:
+            if user_role == "parent":
+                from core.families.models import ParentStudentLink
+
+                link_stmt = select(ParentStudentLink).where(
+                    ParentStudentLink.parent_id == user_id,
+                    ParentStudentLink.student_id == attempt.student_id,
+                    ParentStudentLink.status == "active",
+                    ParentStudentLink.revoked_at.is_(None),
+                )
+                link_res = await self.db.execute(link_stmt)
+                if not link_res.scalar_one_or_none():
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "FORBIDDEN",
+                            "message": "Parent is not linked to this student.",
+                        },
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "FORBIDDEN",
+                        "message": "Access denied to another student's attempt.",
+                    },
+                )
+
         # Rule 6 & docs/05_SECURE_QUIZ.md §5: Strictly reject if not submitted/expired!
         if attempt.state not in ("submitted", "expired", "invalidated"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "code": "ATTEMPT_NOT_SUBMITTED",
-                    "message": "Review and answer keys are accessible only after the attempt is submitted.",
+                    "message": (
+                        "Review and answer keys are accessible only after the attempt is submitted."
+                    ),
                 },
             )
 
@@ -450,9 +564,7 @@ class QuizService:
 
         review_items: list[AttemptItemReview] = []
         for it in items:
-            q_res = await self.db.execute(
-                select(Question).where(Question.id == it.question_id)
-            )
+            q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
             q = q_res.scalar_one()
 
             key_res = await self.db.execute(

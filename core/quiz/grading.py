@@ -10,7 +10,8 @@ Per docs/03_DATA_MODEL.md §4, §6 and docs/05_SECURE_QUIZ.md:
 from __future__ import annotations
 
 import logging
-import uuid
+import re
+import unicodedata
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,6 +28,27 @@ from core.quiz.models import (
 )
 
 logger = logging.getLogger("thinkbuddy.quiz.grading")
+
+
+BN_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff\u00a0]")
+
+
+def normalize_bangla_text(text: str | None) -> str:
+    """Normalize Bangla and English text for fair and robust short answer grading.
+
+    1. Unicode NFC normalization.
+    2. Strips zero-width and invisible control characters (\u200b, \u200c, \u200d, \ufeff).
+    3. Normalizes Bengali digits to ASCII digits so Bengali '৫' and '5' match.
+    4. Strips leading/trailing whitespace and collapses internal whitespace.
+    5. Case-folding for English characters.
+    """
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFC", str(text))
+    s = ZERO_WIDTH_CHARS.sub("", s)
+    s = s.translate(BN_DIGIT_MAP)
+    return " ".join(s.strip().lower().split())
 
 
 class QuizGradingService:
@@ -58,9 +80,7 @@ class QuizGradingService:
             return False
 
         # Fetch question details for type
-        q_res = await self.db.execute(
-            select(Question).where(Question.id == item.question_id)
-        )
+        q_res = await self.db.execute(select(Question).where(Question.id == item.question_id))
         question = q_res.scalar_one_or_none()
         q_type = question.type if question else "mcq"
 
@@ -74,9 +94,11 @@ class QuizGradingService:
             elif q_key.correct_text and selected_opt == str(q_key.correct_text).strip():
                 is_correct = True
         elif q_type == "short":
-            student_text = str(response.get("text", "")).strip().lower()
-            expected_text = str(q_key.correct_text or "").strip().lower()
-            is_correct = student_text == expected_text
+            norm_student = normalize_bangla_text(response.get("text"))
+            accepted = [normalize_bangla_text(q_key.correct_text)]
+            if q_key.accepted_answers:
+                accepted.extend([normalize_bangla_text(a) for a in q_key.accepted_answers if a])
+            is_correct = any(norm_student == acc for acc in accepted if acc)
         elif q_type == "broad":
             # Broad subjective answer: queue broad submission
             submission = BroadSubmission(
@@ -115,9 +137,7 @@ class QuizGradingService:
             # Mistake signal
             if it.is_correct is False:
                 # Fetch question concept/chapter
-                q_res = await self.db.execute(
-                    select(Question).where(Question.id == it.question_id)
-                )
+                q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
                     signal = LearningSignal(
@@ -132,9 +152,7 @@ class QuizGradingService:
 
             # Slow response signal (> 90s)
             if it.time_spent_ms > 90000:
-                q_res = await self.db.execute(
-                    select(Question).where(Question.id == it.question_id)
-                )
+                q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
                     signal_slow = LearningSignal(

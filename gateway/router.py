@@ -20,7 +20,7 @@ from core.auth.router import (
 )
 from core.auth.tokens import hash_link_code
 from core.common.logging import request_id_ctx
-from core.common.rate_limit import RateLimiter, get_trusted_client_ip
+from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.curriculum.schemas import (
     BookListResponse,
     BookSummary,
@@ -647,7 +647,29 @@ async def start_quiz_attempt_gateway(
     payload: StartAttemptRequest,
     request: Request,
 ) -> Response:
-    """Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving."""
+    """Start a quiz attempt. Enforces rate limits, platform rules, deadline, and sequential question serving."""
+    client_ip = get_trusted_client_ip(request)
+    device_id = payload.device_id or request.headers.get("X-Device-Id")
+    rate_key = build_rate_limit_key("start_attempt", client_ip, device_id)
+    allowed, retry_after = await RateLimiter.check_rate_limit(
+        key=rate_key,
+        max_requests=10,
+        window_seconds=60,
+    )
+    if not allowed:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many quiz attempt requests. Please wait before retrying.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
@@ -662,7 +684,28 @@ async def answer_quiz_item_gateway(
     payload: AnswerItemRequest,
     request: Request,
 ) -> Response:
-    """Submit answer for sequential quiz item with nonce and deadline verification."""
+    """Submit answer for sequential quiz item with rate limiting, nonce, and deadline verification."""
+    client_ip = get_trusted_client_ip(request)
+    rate_key = build_rate_limit_key("answer_item", client_ip, str(attempt_id))
+    allowed, retry_after = await RateLimiter.check_rate_limit(
+        key=rate_key,
+        max_requests=30,
+        window_seconds=60,
+    )
+    if not allowed:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many answer submissions. Please slow down.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 

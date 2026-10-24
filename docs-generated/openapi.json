@@ -1394,7 +1394,7 @@
           "Quiz"
         ],
         "summary": "Start Quiz Attempt Gateway",
-        "description": "Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving.",
+        "description": "Start a quiz attempt. Enforces rate limits, platform rules, deadline, and sequential question serving.",
         "operationId": "start_quiz_attempt_gateway_v1_quizzes__quiz_id__attempts_post",
         "parameters": [
           {
@@ -1448,7 +1448,7 @@
           "Quiz"
         ],
         "summary": "Answer Quiz Item Gateway",
-        "description": "Submit answer for sequential quiz item with nonce and deadline verification.",
+        "description": "Submit answer for sequential quiz item with rate limiting, nonce, and deadline verification.",
         "operationId": "answer_quiz_item_gateway_v1_attempts__attempt_id__items__position__answer_post",
         "parameters": [
           {
@@ -3051,6 +3051,11 @@
             "type": "string",
             "title": "Language"
           },
+          "pool": {
+            "type": "string",
+            "title": "Pool",
+            "default": "both"
+          },
           "stem": {
             "additionalProperties": true,
             "type": "object",
@@ -3260,6 +3265,28 @@
               }
             ],
             "title": "Device Id"
+          },
+          "integrity_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Verdict"
+          },
+          "integrity_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Token"
           }
         },
         "type": "object",

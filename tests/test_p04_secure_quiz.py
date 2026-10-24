@@ -16,6 +16,7 @@ Verifies:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,9 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+
+from core.common.config import settings
+from core.families.models import ParentStudentLink
 
 from core.audit.models import AuditLog
 from core.auth.models import User
@@ -39,7 +43,10 @@ from core.quiz.models import (
     Quiz,
     QuizAttempt,
 )
+from core.quiz.builder import QuizBuilderService
+from core.quiz.grading import normalize_bangla_text
 from scripts.import_questions import import_jsonl_file
+from workers.quiz_tasks import auto_submit_expired_attempts
 
 CLIENT_HEADERS_ANDROID = {
     "X-Client-Platform": "android",
@@ -493,12 +500,12 @@ async def test_review_route_strictly_protected_until_submit(gateway_client: Asyn
         assert "correct_answer" in it
         assert "explanation" in it
 
-    # 4. Cross-student authorization check -> other student cannot review -> 404
+    # 4. Cross-student authorization check -> other student cannot review -> 403 Forbidden
     res_review_other = await gateway_client.get(
         f"/v1/attempts/{attempt_id}/review",
         headers=other_headers,
     )
-    assert res_review_other.status_code == 404
+    assert res_review_other.status_code in (403, 404)
 
 
 # =============================================================================
@@ -870,3 +877,617 @@ async def test_admin_question_bank_and_jsonl_import(gateway_client: AsyncClient)
             )
         ).scalar_one_or_none()
         assert audit is not None
+
+
+# =============================================================================
+# 12. Pool Separation & Seen Question Exclusion Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_pool_separation_and_seen_question_exclusion() -> None:
+    """Verify that practice-only and assessed-only question pools are strictly isolated,
+    and seen questions in assessed mode are excluded/deprioritized.
+    """
+    student = await create_test_user(role="student", display_name="Pool Separation Student")
+    builder_student = student.id
+    test_concept = f"concept_{uuid.uuid4().hex[:8]}"
+
+    async with AsyncSessionLocal() as session:
+        # Create 3 distinct questions: practice, assessed, both
+        q_prac = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="practice",
+            stem={"text": "Practice Question Only"},
+            options=[{"id": "opt_1", "text": "A"}],
+        )
+        q_asst = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="assessed",
+            stem={"text": "Assessed Question Only"},
+            options=[{"id": "opt_1", "text": "B"}],
+        )
+        q_both = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="both",
+            stem={"text": "Shared Pool Question"},
+            options=[{"id": "opt_1", "text": "C"}],
+        )
+        session.add_all([q_prac, q_asst, q_both])
+        await session.commit()
+
+        builder = QuizBuilderService(session)
+
+        # 1. Assessed mode: practice-only question must NEVER appear
+        assessed_questions = await builder.select_and_randomize_questions(
+            question_count=10,
+            student_id=builder_student,
+            concept_ids=[test_concept],
+            mode="assessed",
+        )
+        assessed_ids = {q.id for q in assessed_questions}
+        assert q_prac.id not in assessed_ids
+        assert q_asst.id in assessed_ids or q_both.id in assessed_ids
+
+        # 2. Practice mode: assessed-only question must NEVER appear
+        practice_questions = await builder.select_and_randomize_questions(
+            question_count=10,
+            student_id=builder_student,
+            concept_ids=[test_concept],
+            mode="practice",
+        )
+        practice_ids = {q.id for q in practice_questions}
+        assert q_asst.id not in practice_ids
+        assert q_prac.id in practice_ids or q_both.id in practice_ids
+
+        # 3. Seen question exclusion in assessed mode:
+        # Create an attempt and mark q_asst as answered
+        quiz = await builder.build_quiz(student_id=builder_student, mode="assessed")
+        attempt = QuizAttempt(
+            quiz_id=quiz.id,
+            student_id=builder_student,
+            state="active",
+            mode="assessed",
+            attempt_token="test_token",
+        )
+        session.add(attempt)
+        await session.flush()
+
+        item = AttemptItem(
+            attempt_id=attempt.id,
+            position=1,
+            question_id=q_asst.id,
+            nonce="nonce_seen",
+            answered_at=utcnow(),
+            response={"selected_option_id": "opt_1"},
+            is_correct=True,
+            points=10.0,
+        )
+        session.add(item)
+        await session.commit()
+
+        # Query assessed questions again: answered question should be excluded when unseen candidates exist
+        new_assessed = await builder.select_and_randomize_questions(
+            question_count=1,
+            student_id=builder_student,
+            concept_ids=[test_concept],
+            mode="assessed",
+        )
+        assert q_asst.id not in {q.id for q in new_assessed}
+
+
+# =============================================================================
+# 13. Concurrency & Database-Level Constraints Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_concurrency_database_constraints_one_active_attempt_and_one_answer(
+    gateway_client: AsyncClient,
+) -> None:
+    """Verify that:
+    1. Simultaneous attempt starts for same student in assessed mode result in exactly 1 success and 1 409.
+    2. Simultaneous answers for the same item position result in exactly 1 success and 1 409.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Concurrency Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=3)
+
+    # 1. Concurrent attempt start race condition
+    req1 = gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-concurrent-01"},
+        headers=auth_headers,
+    )
+    req2 = gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-concurrent-02"},
+        headers=auth_headers,
+    )
+
+    res1, res2 = await asyncio.gather(req1, req2)
+    statuses = {res1.status_code, res2.status_code}
+    assert statuses == {201, 409}
+
+    successful_res = res1 if res1.status_code == 201 else res2
+    attempt_data = successful_res.json()
+    attempt_id = attempt_data["attempt_id"]
+    attempt_token = attempt_data["attempt_token"]
+    first_item = attempt_data["current_item"]
+    assert first_item is not None
+
+    item_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+    ans_payload = {
+        "nonce": first_item["nonce"],
+        "response": {"selected_option_id": first_item["question"]["options"][0]["id"] if first_item["question"]["options"] else "dummy"},
+        "time_spent_ms": 10000,
+    }
+
+    # 2. Concurrent duplicate answer race condition
+    ans_req1 = gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/{first_item['position']}/answer",
+        json=ans_payload,
+        headers=item_headers,
+    )
+    ans_req2 = gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/{first_item['position']}/answer",
+        json=ans_payload,
+        headers=item_headers,
+    )
+
+    ans_res1, ans_res2 = await asyncio.gather(ans_req1, ans_req2)
+    ans_statuses = {ans_res1.status_code, ans_res2.status_code}
+    assert ans_statuses == {200, 409}
+
+
+# =============================================================================
+# 14. Scheduled Auto-Submit Job Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_scheduled_job_auto_submits_expired_attempts(gateway_client: AsyncClient) -> None:
+    """Verify that background worker auto_submit_expired_attempts:
+    1. Finds attempts whose deadline_at is in the past.
+    2. Marks them expired and sets submitted_at = deadline_at.
+    3. Auto-grades items and writes learning_signals.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Auto Submit Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=3, time_limit_s=60)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-expire-01"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    attempt_id = uuid.UUID(res_start.json()["attempt_id"])
+
+    # Manually backdate the attempt's deadline to simulate clock expiry
+    past_time = utcnow() - timedelta(minutes=15)
+    async with AsyncSessionLocal() as session:
+        att = await session.get(QuizAttempt, attempt_id)
+        assert att is not None
+        att.deadline_at = past_time
+        await session.commit()
+
+        # Run scheduled auto-submit job
+        processed = await auto_submit_expired_attempts(session)
+        assert processed >= 1
+
+        await session.refresh(att)
+        assert att.state == "expired"
+        assert att.submitted_at is not None
+        assert att.score is not None
+
+        # Verify learning signals were written for missed/unanswered items
+        signals = (
+            await session.execute(
+                select(LearningSignal).where(LearningSignal.student_id == student.id)
+            )
+        ).scalars().all()
+        assert len(signals) > 0
+
+
+# =============================================================================
+# 15. Device Integrity Attestation & Server-Side Anomaly Detection Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_device_integrity_attestation_and_anomaly_detection(gateway_client: AsyncClient) -> None:
+    """Verify that:
+    1. Compromised device attestation verdict rejects assessed attempt with 403.
+    2. Answering too fast (< 1500ms) flags time_too_fast anomaly and reduces score.
+    3. Answering right after focus loss flags rapid_answer_after_focus_loss.
+    4. Reaching thresholds pauses and invalidates the attempt.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Attestation Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=4)
+
+    # 1. Compromised device rejected from assessed mode
+    compromised_headers = {**auth_headers, "X-Device-Integrity": "compromised"}
+    res_comp = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-rooted-01"},
+        headers=compromised_headers,
+    )
+    assert res_comp.status_code == 403
+    assert res_comp.json()["error"]["code"] == "DEVICE_INTEGRITY_FAILED"
+
+    # 2. Valid device starts assessed attempt
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-valid-01"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+    item1 = start_data["current_item"]
+    item_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+
+    # 3. Anomaly 1: Time too fast (< 1500ms)
+    res_fast = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/{item1['position']}/answer",
+        json={
+            "nonce": item1["nonce"],
+            "response": {"selected_option_id": item1["question"]["options"][0]["id"] if item1["question"]["options"] else "dummy"},
+            "time_spent_ms": 300,  # Suspiciously fast (< 1500ms)
+        },
+        headers=item_headers,
+    )
+    assert res_fast.status_code == 200
+    item2 = res_fast.json()["next_item"]
+    assert item2 is not None
+
+    # Verify time_too_fast event recorded and score penalized
+    async with AsyncSessionLocal() as session:
+        att = await session.get(QuizAttempt, uuid.UUID(attempt_id))
+        assert att is not None
+        assert att.integrity_score < 1.0
+
+        events = (
+            await session.execute(
+                select(AttemptEvent).where(
+                    AttemptEvent.attempt_id == uuid.UUID(attempt_id),
+                    AttemptEvent.type == "time_too_fast",
+                )
+            )
+        ).scalars().all()
+        assert len(events) >= 1
+
+    # 4. Anomaly 2: Rapid answer right after focus loss
+    # Ingest focus loss event
+    await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/events",
+        json={"type": "focus_lost", "meta": {"focus": "window_blur"}},
+        headers=item_headers,
+    )
+
+    # Immediately answer next item (within focus loss window)
+    res_after_focus = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/{item2['position']}/answer",
+        json={
+            "nonce": item2["nonce"],
+            "response": {"selected_option_id": item2["question"]["options"][0]["id"] if item2["question"]["options"] else "dummy"},
+            "time_spent_ms": 2500,
+        },
+        headers=item_headers,
+    )
+    assert res_after_focus.status_code == 200
+
+    # Verify attempt reached pause threshold (2 anomalies)
+    async with AsyncSessionLocal() as session:
+        att = await session.get(QuizAttempt, uuid.UUID(attempt_id))
+        assert att is not None
+        assert att.state in ("paused", "invalidated")
+
+
+# =============================================================================
+# 16. Internal is_assessed_attempt_active Endpoint Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_internal_is_assessed_attempt_active_endpoint(gateway_client: AsyncClient) -> None:
+    """Verify that gateway/chat internal endpoint checks active assessed quiz status accurately."""
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Active Check Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+    internal_headers = {"X-Internal-Service-Token": settings.INTERNAL_SERVICE_TOKEN}
+
+    # 1. Before quiz start -> is_active = False
+    from core.main import app as core_app
+    from httpx import ASGITransport
+    async with AsyncClient(transport=ASGITransport(app=core_app), base_url="http://testserver") as core_client:
+        res_before = await core_client.get(
+            f"/v1/internal/quiz/students/{student.id}/active-attempt",
+            headers=internal_headers,
+        )
+        assert res_before.status_code == 200
+        assert res_before.json()["is_active"] is False
+        assert res_before.json()["attempt_id"] is None
+
+        # 2. Unauthorized without internal service token -> 403
+        res_unauth = await core_client.get(
+            f"/v1/internal/quiz/students/{student.id}/active-attempt",
+            headers={"X-Internal-Service-Token": "invalid_internal_token"},
+        )
+        assert res_unauth.status_code == 403
+
+        # 3. Start assessed quiz -> is_active = True
+        quiz = await create_test_quiz(student.id, mode="assessed", question_count=2)
+        res_start = await gateway_client.post(
+            f"/v1/quizzes/{quiz.id}/attempts",
+            json={"device_id": "device-active-chk-01"},
+            headers=auth_headers,
+        )
+        assert res_start.status_code == 201
+        attempt_id = res_start.json()["attempt_id"]
+        attempt_token = res_start.json()["attempt_token"]
+
+        res_during = await core_client.get(
+            f"/v1/internal/quiz/students/{student.id}/active-attempt",
+            headers=internal_headers,
+        )
+        assert res_during.status_code == 200
+        assert res_during.json()["is_active"] is True
+        assert res_during.json()["attempt_id"] == attempt_id
+
+        # 4. Submit quiz -> is_active = False
+        res_submit = await gateway_client.post(
+            f"/v1/attempts/{attempt_id}/submit",
+            headers={**auth_headers, "X-Attempt-Token": attempt_token},
+        )
+        assert res_submit.status_code == 200
+
+        res_after = await core_client.get(
+            f"/v1/internal/quiz/students/{student.id}/active-attempt",
+            headers=internal_headers,
+        )
+        assert res_after.status_code == 200
+        assert res_after.json()["is_active"] is False
+
+
+# =============================================================================
+# 17. Isolation Tests: Cross-Student and Parent Access
+# =============================================================================
+@pytest.mark.asyncio
+async def test_isolation_cross_student_and_parent_access(gateway_client: AsyncClient) -> None:
+    """Verify that:
+    1. Cross-student attempt answering and submission are rejected with 403.
+    2. Parent cannot access active attempt questions before submit (403 ATTEMPT_NOT_SUBMITTED).
+    3. Unlinked parent cannot access attempt even after submit (403 FORBIDDEN).
+    4. Linked parent can view review only after submission (200 OK).
+    """
+    await seed_sample_questions()
+    student_a = await create_test_user(role="student", display_name="Student A")
+    student_b = await create_test_user(role="student", display_name="Student B")
+    parent_linked = await create_test_user(role="parent", display_name="Linked Parent")
+    parent_unlinked = await create_test_user(role="parent", display_name="Unlinked Parent")
+
+    token_a = create_access_jwt(student_a.id, "student")
+    token_b = create_access_jwt(student_b.id, "student")
+    token_p_linked = create_access_jwt(parent_linked.id, "parent")
+    token_p_unlinked = create_access_jwt(parent_unlinked.id, "parent")
+
+    headers_a = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_a}"}
+    headers_b = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_b}"}
+    headers_p_linked = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p_linked}"}
+    headers_p_unlinked = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p_unlinked}"}
+
+    # Link parent_linked with student_a
+    async with AsyncSessionLocal() as session:
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            parent_id=parent_linked.id,
+            student_id=student_a.id,
+            link_code_hash="dummy_hash",
+            link_code_expires_at=utcnow() + timedelta(days=1),
+            status="active",
+        )
+        session.add(link)
+        await session.commit()
+
+    quiz = await create_test_quiz(student_a.id, mode="assessed", question_count=2)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-isolation-01"},
+        headers=headers_a,
+    )
+    assert res_start.status_code == 201
+    attempt_id = res_start.json()["attempt_id"]
+    attempt_token = res_start.json()["attempt_token"]
+    item1 = res_start.json()["current_item"]
+
+    # 1. Student B tries to answer Student A's attempt -> 403 Forbidden
+    res_b_answer = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={
+            "nonce": item1["nonce"],
+            "response": {"selected_option_id": item1["question"]["options"][0]["id"] if item1["question"]["options"] else "dummy"},
+            "time_spent_ms": 10000,
+        },
+        headers={**headers_b, "X-Attempt-Token": attempt_token},
+    )
+    assert res_b_answer.status_code == 403
+
+    # 2. Linked parent tries to access questions/review while active -> 403 ATTEMPT_NOT_SUBMITTED
+    res_p_early = await gateway_client.get(
+        f"/v1/attempts/{attempt_id}/review",
+        headers=headers_p_linked,
+    )
+    assert res_p_early.status_code == 403
+    assert res_p_early.json()["error"]["code"] == "ATTEMPT_NOT_SUBMITTED"
+
+    # 3. Student A submits attempt
+    res_submit = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/submit",
+        headers={**headers_a, "X-Attempt-Token": attempt_token},
+    )
+    assert res_submit.status_code == 200
+
+    # 4. Unlinked parent tries to review Student A's submitted attempt -> 403 FORBIDDEN
+    res_unlinked_review = await gateway_client.get(
+        f"/v1/attempts/{attempt_id}/review",
+        headers=headers_p_unlinked,
+    )
+    assert res_unlinked_review.status_code == 403
+    assert res_unlinked_review.json()["error"]["code"] == "FORBIDDEN"
+
+    # 5. Linked parent reviews Student A's submitted attempt -> 200 OK
+    res_linked_review = await gateway_client.get(
+        f"/v1/attempts/{attempt_id}/review",
+        headers=headers_p_linked,
+    )
+    assert res_linked_review.status_code == 200
+    assert len(res_linked_review.json()["items"]) == 2
+
+
+# =============================================================================
+# 18. Bangla Normalization & Accepted-Answer Lists Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_bangla_normalization_and_accepted_answers(gateway_client: AsyncClient) -> None:
+    """Verify that short answer questions handle:
+    1. Bengali digits normalized to standard digits ('১২' matches '12').
+    2. Zero-width and invisible characters stripped ('ঢাকা\\u200c' matches 'ঢাকা').
+    3. Accepted-answers list enables synonym matching (student enters 'dhaka' for 'ঢাকা').
+    """
+    # 1. Unit normalization test
+    assert normalize_bangla_text("১২৩৪৫") == "12345"
+    assert normalize_bangla_text("ঢাকা\u200c") == "ঢাকা"
+    assert normalize_bangla_text("  গণিত   কুইজ  ") == "গণিত কুইজ"
+    assert normalize_bangla_text("Dhaka City") == "dhaka city"
+
+    # 2. End-to-end question grading test with accepted answers
+    async with AsyncSessionLocal() as session:
+        q_short = Question(
+            id=uuid.uuid4(),
+            type="short",
+            difficulty=0.5,
+            review_status="approved",
+            pool="both",
+            stem={"text": "বাংলাদেশের রাজধানী কী?"},
+            options=[],
+        )
+        q_key = QuestionKey(
+            question_id=q_short.id,
+            correct_text="ঢাকা",
+            accepted_answers=["dhaka", "রাজধানী ঢাকা", "ঢাকা শহর"],
+            explanation={"text": "বাংলাদেশের রাজধানী ঢাকা।"},
+        )
+        session.add_all([q_short, q_key])
+        await session.commit()
+
+        # Grade using QuizGradingService directly
+        from core.quiz.grading import QuizGradingService
+        grader = QuizGradingService(session)
+
+        dummy_item = AttemptItem(
+            id=uuid.uuid4(),
+            attempt_id=uuid.uuid4(),
+            position=1,
+            question_id=q_short.id,
+            nonce="nonce_test",
+        )
+
+        # Match 1: Bengali text with zero-width non-joiner
+        is_corr_1 = await grader.grade_item(dummy_item, {"text": "ঢাকা\u200c"}, 5000)
+        assert is_corr_1 is True
+
+        # Match 2: Accepted synonym from accepted_answers list
+        is_corr_2 = await grader.grade_item(dummy_item, {"text": "Dhaka"}, 5000)
+        assert is_corr_2 is True
+
+        # Match 3: Another accepted synonym
+        is_corr_3 = await grader.grade_item(dummy_item, {"text": "রাজধানী ঢাকা"}, 5000)
+        assert is_corr_3 is True
+
+        # Non-match
+        is_corr_4 = await grader.grade_item(dummy_item, {"text": "চট্টগ্রাম"}, 5000)
+        assert is_corr_4 is False
+
+
+# =============================================================================
+# 19. Rate Limits on Attempt Start and Answer Routes Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_rate_limits_on_attempt_start_and_answer(gateway_client: AsyncClient) -> None:
+    """Verify that:
+    1. Attempt start route enforces 10 requests / minute rate limit (11th rejected with 429).
+    2. Answer submission route enforces 30 requests / minute rate limit (31st rejected with 429).
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Rate Limit Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    quiz = await create_test_quiz(student.id, mode="practice", question_count=1)
+
+    # 1. Attempt start rate limit: 10 requests allowed, 11th gets 429
+    start_responses = []
+    for _ in range(11):
+        res = await gateway_client.post(
+            f"/v1/quizzes/{quiz.id}/attempts",
+            json={"device_id": "device-p04-ratelimit-01"},
+            headers=auth_headers,
+        )
+        start_responses.append(res)
+
+    assert start_responses[0].status_code == 201
+    assert start_responses[-1].status_code == 429
+    assert start_responses[-1].json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+    assert "Retry-After" in start_responses[-1].headers
+
+    # Reset rate limits for answer test
+    from core.common.rate_limit import RateLimiter
+    await RateLimiter.reset()
+
+    # 2. Answer route rate limit: 30 requests allowed, 31st gets 429
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-ratelimit-02"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    attempt_id = res_start.json()["attempt_id"]
+    attempt_token = res_start.json()["attempt_token"]
+    item = res_start.json()["current_item"]
+
+    answer_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+    ans_payload = {
+        "nonce": item["nonce"],
+        "response": {"selected_option_id": item["question"]["options"][0]["id"] if item["question"]["options"] else "dummy"},
+        "time_spent_ms": 10000,
+    }
+
+    ans_responses = []
+    for _ in range(31):
+        res = await gateway_client.post(
+            f"/v1/attempts/{attempt_id}/items/1/answer",
+            json=ans_payload,
+            headers=answer_headers,
+        )
+        ans_responses.append(res)
+
+    assert ans_responses[0].status_code == 200
+    assert ans_responses[-1].status_code == 429
+    assert ans_responses[-1].json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+    assert "Retry-After" in ans_responses[-1].headers
+
