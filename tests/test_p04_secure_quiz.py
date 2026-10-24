@@ -923,7 +923,22 @@ async def test_pool_separation_and_seen_question_exclusion() -> None:
             stem={"text": "Shared Pool Question"},
             options=[{"id": "opt_1", "text": "C"}],
         )
-        session.add_all([q_prac, q_asst, q_both])
+        k_prac = QuestionKey(
+            question_id=q_prac.id,
+            correct_option_id="opt_1",
+            explanation={"text": "Practice explanation"},
+        )
+        k_asst = QuestionKey(
+            question_id=q_asst.id,
+            correct_option_id="opt_1",
+            explanation={"text": "Assessed explanation"},
+        )
+        k_both = QuestionKey(
+            question_id=q_both.id,
+            correct_option_id="opt_1",
+            explanation={"text": "Both explanation"},
+        )
+        session.add_all([q_prac, q_asst, q_both, k_prac, k_asst, k_both])
         await session.commit()
 
         builder = QuizBuilderService(session)
