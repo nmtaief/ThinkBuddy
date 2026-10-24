@@ -146,26 +146,44 @@ All deliverables and architectural amendments specified for P03 have been implem
   ```
 
 ### 6.3 Gitleaks Secret Detection (`zricethezav/gitleaks:latest`)
-- **Status:** **PASS** (0 leaks)
-- **Scope:** Complete git commit history (10 commits scanned).
+- **Status:** **PASS** (0 secrets detected)
+- **Scope:** Complete git commit history (12 commits scanned across entire repository history).
 - **Results:**
   ```text
-  10 commits scanned.
-  scanned ~687397 bytes (687.40 KB) in 4.25s
+  12 commits scanned.
+  scanned ~1113270 bytes (1.11 MB) in 3.04s
   no leaks found
   ```
 
-### 6.4 Trivy Vulnerability & Secret Scan (`aquasec/trivy:latest`)
-- **Status:** **PASS** (0 findings)
-- **Targets:** Workspace filesystem (`/repo`).
+### 6.4 Trivy Container Image & Dependency Scan (`aquasec/trivy:latest`)
+- **Status:** **PASS** (0 CRITICAL, 0 HIGH Python application vulnerabilities)
+- **Targets:** Workspace filesystem (`/repo`) and built container images (`thinkbuddy-arc-core:latest`).
 - **Results:**
   ```text
-  Vulnerability scanning: No supported package lockfiles in /repo for language vuln scanner.
-  Secret scanning: No secrets detected across workspace repository.
-  Report Summary: Clean (0 findings).
+  Total Python application vulnerabilities: 0
+  Upstream base OS packages (Debian bookworm) documented in .trivyignore.
+  Secrets: 0 detected.
   ```
 
-### 6.5 Bandit AST Analysis (`bandit -r core gateway workers rag -ll`)
+### 6.5 pip-audit Dependency Scan
+- **Status:** **PASS** (0 known vulnerabilities)
+- **Target:** Production dependencies extracted from `poetry.lock`.
+- **Results:**
+  ```text
+  pip-audit -r locked-requirements.txt
+  No known vulnerabilities found
+  Exit code: 0
+  ```
+
+### 6.6 Semgrep SAST Scan (`semgrep/semgrep:latest`)
+- **Status:** **PASS** (0 findings)
+- **Config:** `--config auto` (official Semgrep default rulesets including OWASP Top 10, security audit, Python, Dockerfile).
+- **Results:**
+  ```text
+  Ran 328 rules on 136 files: 0 findings.
+  ```
+
+### 6.7 Bandit AST Analysis (`bandit -r core gateway workers rag -ll`)
 - **Status:** **PASS** (0 findings)
 - **Results:**
   ```text
@@ -176,10 +194,14 @@ All deliverables and architectural amendments specified for P03 have been implem
   Files skipped: 0
   ```
 
-### 6.6 CLI Admin Script Verification (`scripts/create_admin.py`)
+### 6.8 CLI Admin Script Verification (`scripts/create_admin.py`)
 - **Status:** **VERIFIED**
 - **Server-Only Isolation:** Confirmed `scripts/create_admin.py` is strictly a standalone CLI script. It is never imported, mounted, or reachable by any FastAPI router or HTTP API endpoint.
 - **Audit Logging:** Confirmed that every admin creation or promotion writes an immutable audit record to the `audit_log` table (`action="user.create_admin"` or `action="user.promote_admin"`) capturing `actor_id`, `target_id`, and `meta` (old role, new role, timestamp).
+
+### 6.9 Commit Hashes
+- **P03 Fix Round Commit Hash:** `64022ffc9c33dac6fc9a8651165251e15dd7282b`
+- **P06a AI Planner Integration Commit Hash:** `0fd4bdeb8df790f488f75f6e80e1ec07567ae2d5`
 
 ---
 
