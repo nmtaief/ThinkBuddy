@@ -5,11 +5,11 @@ from __future__ import annotations
 import uuid
 import zlib
 from asyncio import Lock
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,28 +19,45 @@ from core.auth.dependencies import get_current_user
 from core.auth.models import User
 from core.common.database import get_db_session
 from core.common.policy import can_access_student
+from core.common.rate_limit import RateLimiter
 from core.curriculum.models import Chapter
 from core.families.models import ParentStudentLink, StudentProfile
 from core.planner.engine import (
     ChapterPlanInput,
     CompletedTaskRecord,
+    MultiSubjectPlanOutput,
     SubjectSetupInput,
     generate_student_plan,
 )
-from core.planner.models import Plan, PlanDay, StudentChangeRequest, StudySetup, SyllabusItem, Task
+from core.planner.models import (
+    Plan,
+    PlanDay,
+    StudentChangeRequest,
+    StudentStudySettings,
+    StudySetup,
+    SyllabusItem,
+    Task,
+)
 from core.planner.schemas import (
     DailyMinutesResponse,
     PlanDayResponse,
     PlanResponse,
     StudentChangeRequestInput,
     StudentChangeRequestResponse,
+    StudentStudySettingsResponse,
     StudySetupResponse,
     SyllabusItemSummary,
     TaskResponse,
     TodayHomePayloadResponse,
     UpdateDailyMinutesRequest,
+    UpdateStudentStudySettingsRequest,
     UpdateTaskStatusRequest,
     UpsertStudySetupRequest,
+)
+from core.planner.settings_resolver import (
+    get_published_holidays,
+    resolve_calendar_days,
+    resolve_student_settings,
 )
 
 router = APIRouter(prefix="", tags=["Planner & Study Setup"])
@@ -66,6 +83,240 @@ async def acquire_student_advisory_lock(db: AsyncSession, student_id: uuid.UUID)
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+async def execute_student_plan_regeneration(
+    db: AsyncSession,
+    student_id: uuid.UUID,
+    reason: str = "regeneration",
+    trigger_setup_id: uuid.UUID | None = None,
+    future_only: bool = False,
+) -> tuple[MultiSubjectPlanOutput, int]:
+    """Execute serialized multi-subject plan regeneration under student advisory lock (v2)."""
+    async with get_student_async_lock(student_id):
+        await acquire_student_advisory_lock(db, student_id)
+
+        # 1. Fetch student profile
+        stmt_prof = select(StudentProfile).where(StudentProfile.user_id == student_id)
+        res_prof = await db.execute(stmt_prof)
+        profile = res_prof.scalar_one_or_none()
+        if not profile:
+            profile = StudentProfile(
+                user_id=student_id,
+                class_level=7,
+                medium="bn",
+                daily_minutes=60,
+                available_days=["sat", "sun", "mon", "tue", "wed", "thu"],
+                time_zone="Asia/Dhaka",
+            )
+            db.add(profile)
+            await db.flush()
+
+        tz_name = profile.time_zone or "Asia/Dhaka"
+        try:
+            user_tz = ZoneInfo(tz_name)
+        except Exception:
+            user_tz = ZoneInfo("Asia/Dhaka")
+        now_dt = datetime.now(user_tz)
+        today_dhaka = now_dt.date()
+
+        # 2. Query max plan version
+        stmt_max_v = select(func.coalesce(func.max(Plan.version), 0)).where(
+            Plan.student_id == student_id
+        )
+        res_max_v = await db.execute(stmt_max_v)
+        current_max_v = int(res_max_v.scalar_one())
+        new_student_plan_version = max(current_max_v, profile.plan_version or 0) + 1
+        profile.plan_version = new_student_plan_version
+
+        # 3. Load all active setups for student
+        stmt_all_setups = (
+            select(StudySetup)
+            .options(
+                selectinload(StudySetup.syllabus_items)
+                .selectinload(SyllabusItem.chapter)
+                .selectinload(Chapter.book)
+            )
+            .where(StudySetup.student_id == student_id)
+        )
+        res_all_setups = await db.execute(stmt_all_setups)
+        all_setups = res_all_setups.scalars().all()
+
+        # 4. Resolve 3-tier settings
+        resolved_settings = await resolve_student_settings(db, student_id)
+
+        # 5. Prepare engine inputs
+        engine_setups: list[SubjectSetupInput] = []
+        exam_dates: set[date] = set()
+        for s in all_setups:
+            s.active_plan_version = new_student_plan_version
+            if s.exam_date:
+                exam_dates.add(s.exam_date)
+            ch_inputs: list[ChapterPlanInput] = []
+            for s_item in sorted(s.syllabus_items, key=lambda i: i.custom_order):
+                if not s_item.included or not s_item.chapter:
+                    continue
+                ch = s_item.chapter
+                ch_inputs.append(
+                    ChapterPlanInput(
+                        id=ch.id,
+                        number=ch.number,
+                        title=ch.title,
+                        printed_page_start=ch.printed_page_start,
+                        printed_page_end=ch.printed_page_end,
+                        custom_order=s_item.custom_order,
+                        book_id=ch.book_id,
+                        book_title=ch.book.title if ch.book else "",
+                        weight=s_item.weight,
+                        difficulty_factor=s_item.custom_difficulty or ch.difficulty_factor or 1.0,
+                        mastery=0.5,
+                    )
+                )
+            engine_setups.append(
+                SubjectSetupInput(
+                    subject=s.subject,
+                    exam_name=s.exam_name,
+                    exam_date=s.exam_date,
+                    chapters=ch_inputs,
+                    setup_id=s.id,
+                )
+            )
+
+        # 6. Load existing tasks
+        stmt_existing_tasks = (
+            select(Task, PlanDay.date, StudySetup.subject)
+            .join(PlanDay, Task.plan_day_id == PlanDay.id)
+            .join(Plan, PlanDay.plan_id == Plan.id)
+            .join(StudySetup, Plan.setup_id == StudySetup.id)
+            .where(Task.student_id == student_id)
+        )
+        res_existing_tasks = await db.execute(stmt_existing_tasks)
+        all_task_rows = res_existing_tasks.fetchall()
+
+        historical_records = [
+            CompletedTaskRecord(
+                task_id=t.id,
+                subject=sub,
+                chapter_id=t.chapter_id,
+                plan_date=p_date,
+                type=t.type,
+                est_minutes=t.est_minutes,
+                refs=t.refs,
+                status=t.status,
+                completed_at=t.completed_at.isoformat() if t.completed_at else None,
+            )
+            for t, p_date, sub in all_task_rows
+        ]
+
+        completed_minutes_today = sum(
+            t.est_minutes
+            for t, p_date, _ in all_task_rows
+            if p_date == today_dhaka and t.status == "done"
+        )
+
+        max_horizon_date = max(
+            exam_dates,
+            default=today_dhaka + timedelta(days=60),
+        )
+        if max_horizon_date < today_dhaka + timedelta(days=30):
+            max_horizon_date = today_dhaka + timedelta(days=30)
+
+        published_holidays = await get_published_holidays(db, today_dhaka, max_horizon_date)
+        day_calendar = resolve_calendar_days(
+            start_date=today_dhaka,
+            end_date=max_horizon_date,
+            now=now_dt,
+            resolved_settings=resolved_settings,
+            published_holidays=published_holidays,
+            exam_dates=exam_dates,
+            completed_minutes_today=completed_minutes_today,
+        )
+
+        # Run Pure Planner Engine
+        plan_out = generate_student_plan(
+            student_id=student_id,
+            today=today_dhaka,
+            daily_study_minutes=resolved_settings.school_day_minutes,
+            setups=engine_setups,
+            available_days=profile.available_days,
+            completed_tasks=historical_records,
+            resolved_settings=resolved_settings,
+            day_calendar=day_calendar,
+        )
+
+        all_warnings = (
+            list(plan_out.warnings)
+            + list(resolved_settings.clamping_notices)
+            + list(resolved_settings.warnings)
+        )
+
+        # Persist plans across ALL active setups for this student under new_student_plan_version
+        for s in all_setups:
+            old_plans_stmt = select(Plan).where(Plan.setup_id == s.id, Plan.status == "active")
+            res_old = await db.execute(old_plans_stmt)
+            for op in res_old.scalars().all():
+                op.status = "superseded"
+
+            plan_reason = reason
+            if trigger_setup_id and s.id == trigger_setup_id and s.version > 1:
+                plan_reason = "syllabus_change"
+            elif trigger_setup_id and s.id != trigger_setup_id:
+                plan_reason = "multi_subject_sync"
+
+            new_plan = Plan(
+                setup_id=s.id,
+                student_id=student_id,
+                version=new_student_plan_version,
+                reason=plan_reason,
+                status="active",
+                params={
+                    "warnings": all_warnings,
+                    "clamping_notices": resolved_settings.clamping_notices,
+                    "settings_version": resolved_settings.settings_version,
+                    "class_band": resolved_settings.class_band,
+                    "group": resolved_settings.group,
+                    "school_day_minutes": resolved_settings.school_day_minutes,
+                    "holiday_minutes": resolved_settings.holiday_minutes,
+                    "daily_minutes": resolved_settings.school_day_minutes,
+                    "today": str(today_dhaka),
+                },
+            )
+            db.add(new_plan)
+            await db.flush()
+
+            for g_day in plan_out.days:
+                sub_tasks = [t for t in g_day.tasks if t.subject == s.subject]
+                if not sub_tasks:
+                    continue
+
+                p_day = PlanDay(
+                    plan_id=new_plan.id,
+                    date=g_day.date,
+                    planned_minutes=sum(t.est_minutes for t in sub_tasks),
+                    day_type=g_day.day_type,
+                )
+                db.add(p_day)
+                await db.flush()
+
+                for g_task in sub_tasks:
+                    t_row = Task(
+                        id=uuid.uuid4(),
+                        plan_day_id=p_day.id,
+                        student_id=student_id,
+                        type=g_task.type,
+                        chapter_id=uuid.UUID(str(g_task.chapter_id)) if g_task.chapter_id else None,
+                        refs={**g_task.refs, "planned_task_id": str(g_task.id)},
+                        est_minutes=g_task.est_minutes,
+                        status=g_task.status,
+                        source=g_task.source,
+                        completed_at=datetime.fromisoformat(g_task.completed_at)
+                        if g_task.completed_at
+                        else None,
+                    )
+                    db.add(t_row)
+
+        await db.commit()
+        return plan_out, new_student_plan_version
 
 
 @router.put(
@@ -313,158 +564,14 @@ async def upsert_study_setup(
     )
     db.add(audit_row)
 
-    # 9. Concurrency lock: serialize plan regeneration per student
-    async with get_student_async_lock(student_id):
-        await acquire_student_advisory_lock(db, student_id)
-
-        # Refresh student profile and query max plan version
-        # to ensure strictly monotonically increasing version
-        stmt_max_v = select(func.coalesce(func.max(Plan.version), 0)).where(
-            Plan.student_id == student_id
-        )
-        res_max_v = await db.execute(stmt_max_v)
-        current_max_v = int(res_max_v.scalar_one())
-        new_student_plan_version = max(current_max_v, profile.plan_version or 0) + 1
-        profile.plan_version = new_student_plan_version
-        setup.active_plan_version = new_student_plan_version
-
-        # Load all active setups for student to generate multi-subject plan
-        stmt_all_setups = (
-            select(StudySetup)
-            .options(
-                selectinload(StudySetup.syllabus_items)
-                .selectinload(SyllabusItem.chapter)
-                .selectinload(Chapter.book)
-            )
-            .where(StudySetup.student_id == student_id)
-        )
-        res_all_setups = await db.execute(stmt_all_setups)
-        all_setups = res_all_setups.scalars().all()
-
-        # Prepare inputs for pure engine
-        engine_setups: list[SubjectSetupInput] = []
-        for s in all_setups:
-            ch_inputs: list[ChapterPlanInput] = []
-            for s_item in sorted(s.syllabus_items, key=lambda i: i.custom_order):
-                if not s_item.included or not s_item.chapter:
-                    continue
-                ch = s_item.chapter
-                ch_inputs.append(
-                    ChapterPlanInput(
-                        id=ch.id,
-                        number=ch.number,
-                        title=ch.title,
-                        printed_page_start=ch.printed_page_start,
-                        printed_page_end=ch.printed_page_end,
-                        custom_order=s_item.custom_order,
-                        book_id=ch.book_id,
-                        book_title=ch.book.title if ch.book else "",
-                        weight=s_item.weight,
-                        difficulty_factor=s_item.custom_difficulty or ch.difficulty_factor or 1.0,
-                        mastery=0.5,
-                    )
-                )
-            engine_setups.append(
-                SubjectSetupInput(
-                    subject=s.subject,
-                    exam_name=s.exam_name,
-                    exam_date=s.exam_date,
-                    chapters=ch_inputs,
-                    setup_id=s.id,
-                )
-            )
-
-        # Load existing tasks to preserve / roll forward
-        stmt_existing_tasks = (
-            select(Task, PlanDay.date, StudySetup.subject)
-            .join(PlanDay, Task.plan_day_id == PlanDay.id)
-            .join(Plan, PlanDay.plan_id == Plan.id)
-            .join(StudySetup, Plan.setup_id == StudySetup.id)
-            .where(Task.student_id == student_id)
-        )
-        res_existing_tasks = await db.execute(stmt_existing_tasks)
-        historical_records = [
-            CompletedTaskRecord(
-                task_id=t.id,
-                subject=sub,
-                chapter_id=t.chapter_id,
-                plan_date=p_date,
-                type=t.type,
-                est_minutes=t.est_minutes,
-                refs=t.refs,
-                status=t.status,
-                completed_at=t.completed_at.isoformat() if t.completed_at else None,
-            )
-            for t, p_date, sub in res_existing_tasks.fetchall()
-        ]
-
-        # Run Pure Planner Engine
-        plan_out = generate_student_plan(
-            student_id=student_id,
-            today=today_dhaka,
-            daily_study_minutes=profile.daily_minutes,
-            setups=engine_setups,
-            available_days=profile.available_days,
-            completed_tasks=historical_records,
-        )
-
-        # 10. Persist plans across ALL active setups for this student under new_student_plan_version
-        for s in all_setups:
-            s.active_plan_version = new_student_plan_version
-            old_plans_stmt = select(Plan).where(Plan.setup_id == s.id, Plan.status == "active")
-            res_old = await db.execute(old_plans_stmt)
-            for op in res_old.scalars().all():
-                op.status = "superseded"
-
-            new_plan = Plan(
-                setup_id=s.id,
-                student_id=student_id,
-                version=new_student_plan_version,
-                reason="syllabus_change"
-                if s.id == setup.id and setup.version > 1
-                else "multi_subject_sync",
-                status="active",
-                params={
-                    "warnings": plan_out.warnings,
-                    "daily_minutes": profile.daily_minutes,
-                    "today": str(today_dhaka),
-                },
-            )
-            db.add(new_plan)
-            await db.flush()
-
-            for g_day in plan_out.days:
-                sub_tasks = [t for t in g_day.tasks if t.subject == s.subject]
-                if not sub_tasks:
-                    continue
-
-                p_day = PlanDay(
-                    plan_id=new_plan.id,
-                    date=g_day.date,
-                    planned_minutes=sum(t.est_minutes for t in sub_tasks),
-                    day_type=g_day.day_type,
-                )
-                db.add(p_day)
-                await db.flush()
-
-                for g_task in sub_tasks:
-                    t_row = Task(
-                        id=uuid.uuid4(),
-                        plan_day_id=p_day.id,
-                        student_id=student_id,
-                        type=g_task.type,
-                        chapter_id=uuid.UUID(str(g_task.chapter_id)) if g_task.chapter_id else None,
-                        refs={**g_task.refs, "planned_task_id": str(g_task.id)},
-                        est_minutes=g_task.est_minutes,
-                        status=g_task.status,
-                        source=g_task.source,
-                        completed_at=datetime.fromisoformat(g_task.completed_at)
-                        if g_task.completed_at
-                        else None,
-                    )
-                    db.add(t_row)
-
-        await db.commit()
+    # 9. Concurrency lock: serialize plan regeneration per student (v2)
+    plan_out, new_student_plan_version = await execute_student_plan_regeneration(
+        db=db,
+        student_id=student_id,
+        reason="syllabus_change",
+        trigger_setup_id=setup.id,
+    )
+    setup.active_plan_version = new_student_plan_version
 
     # Format response
     summary_items = [
@@ -973,4 +1080,314 @@ async def update_student_daily_minutes(
     return DailyMinutesResponse(
         student_id=student_id,
         daily_minutes=profile.daily_minutes,
+    )
+
+
+@router.get(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_student_study_settings(
+    student_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> StudentStudySettingsResponse:
+    """Get resolved study settings, clamping notices, and admin hard limits for a student."""
+    has_access = await can_access_student(current_user, student_id, db)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN_STUDENT_ACCESS",
+                "message": "You are not authorized to view this student's study settings.",
+            },
+        )
+
+    resolved = await resolve_student_settings(db, student_id)
+
+    # Fetch raw settings model if exists
+    stmt = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+    res = await db.execute(stmt)
+    raw = res.scalar_one_or_none()
+
+    setting_id = raw.id if raw else uuid.uuid4()
+    version = raw.version if raw else 1
+
+    return StudentStudySettingsResponse(
+        id=setting_id,
+        student_id=student_id,
+        school_day_minutes=resolved.school_day_minutes,
+        holiday_minutes=resolved.holiday_minutes,
+        study_window_start=resolved.study_window_start,
+        study_window_end=resolved.study_window_end,
+        recurring_unavailable_blocks=resolved.recurring_unavailable_blocks,
+        blocked_observance_keys=resolved.blocked_observance_keys,
+        custom_blackout_dates=resolved.custom_blackout_dates,
+        subject_priorities=resolved.subject_priorities,
+        rest_weekday=resolved.rest_weekday,
+        adaptive_mode=resolved.adaptive_mode,
+        ai_adjustments=resolved.ai_adjustments,
+        parent_locked_fields=resolved.parent_locked_fields,
+        version=version,
+        clamping_notices=resolved.clamping_notices,
+        warnings=resolved.warnings,
+        recommended_daily_minutes=resolved.recommended_daily_minutes,
+        admin_hard_limits=resolved.admin_hard_limits,
+    )
+
+
+@router.put(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_student_study_settings(
+    student_id: uuid.UUID,
+    payload: UpdateStudentStudySettingsRequest,
+    request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> StudentStudySettingsResponse:
+    """Parent updates student study settings.
+
+    Authorization:
+    - Only parents linked to the student (or admins) may update study settings.
+    - Students are rejected with HTTP 403 (STUDENT_CANNOT_EDIT_SETTINGS).
+    - Unlinked parents are rejected with HTTP 403 (FAMILY_ACCESS_DENIED).
+    Rate-limiting:
+    - Parent regeneration requests are debounced and rate-limited.
+    Optimistic Concurrency:
+    - Verifies expected_version; returns HTTP 409 if version mismatch.
+    """
+    if current_user.role == "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "STUDENT_CANNOT_EDIT_SETTINGS",
+                "message": (
+                    "Students cannot edit study settings directly; submit a change request instead."
+                ),
+            },
+        )
+
+    has_access = await can_access_student(current_user, student_id, db)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FAMILY_ACCESS_DENIED",
+                "message": "You are not authorized to manage this student's settings.",
+            },
+        )
+
+    # Debounce / rate limit parent regeneration
+    rate_key = f"rl:parent_regen:parent:{current_user.id}:student:{student_id}"
+    allowed, retry_after = await RateLimiter.check_rate_limit(
+        rate_key, max_requests=10, window_seconds=60
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            detail={
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": (
+                    "Too many settings updates requested. Please wait before updating again."
+                ),
+            },
+        )
+
+    # Concurrency check
+    stmt_raw = (
+        select(StudentStudySettings)
+        .where(StudentStudySettings.student_id == student_id)
+        .with_for_update()
+    )
+    res_raw = await db.execute(stmt_raw)
+    raw = res_raw.scalar_one_or_none()
+
+    if raw and payload.expected_version is not None and raw.version != payload.expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CONCURRENT_MODIFICATION",
+                "message": (
+                    f"Study settings were modified by another transaction. Expected version "
+                    f"{payload.expected_version}, but database version is {raw.version}."
+                ),
+            },
+        )
+
+    old_dict = (
+        {
+            "school_day_minutes": raw.school_day_minutes,
+            "holiday_minutes": raw.holiday_minutes,
+            "study_window_start": raw.study_window_start,
+            "study_window_end": raw.study_window_end,
+            "recurring_unavailable_blocks": raw.recurring_unavailable_blocks,
+            "blocked_observance_keys": raw.blocked_observance_keys,
+            "custom_blackout_dates": raw.custom_blackout_dates,
+            "subject_priorities": raw.subject_priorities,
+            "rest_weekday": raw.rest_weekday,
+            "version": raw.version,
+        }
+        if raw
+        else None
+    )
+
+    unavail_json = [b.model_dump() for b in payload.recurring_unavailable_blocks]
+    blackouts_json = [
+        {"start_date": str(b.start_date), "end_date": str(b.end_date), "reason": b.reason}
+        for b in payload.custom_blackout_dates
+    ]
+
+    if not raw:
+        raw = StudentStudySettings(
+            student_id=student_id,
+            school_day_minutes=payload.school_day_minutes,
+            holiday_minutes=payload.holiday_minutes,
+            study_window_start=payload.study_window_start,
+            study_window_end=payload.study_window_end,
+            recurring_unavailable_blocks=unavail_json,
+            blocked_observance_keys=payload.blocked_observance_keys,
+            custom_blackout_dates=blackouts_json,
+            subject_priorities=payload.subject_priorities,
+            rest_weekday=payload.rest_weekday,
+            adaptive_mode=payload.adaptive_mode,
+            ai_adjustments=payload.ai_adjustments,
+            parent_locked_fields=payload.parent_locked_fields,
+            version=1,
+        )
+        db.add(raw)
+    else:
+        raw.school_day_minutes = payload.school_day_minutes
+        raw.holiday_minutes = payload.holiday_minutes
+        raw.study_window_start = payload.study_window_start
+        raw.study_window_end = payload.study_window_end
+        raw.recurring_unavailable_blocks = unavail_json
+        raw.blocked_observance_keys = payload.blocked_observance_keys
+        raw.custom_blackout_dates = blackouts_json
+        raw.subject_priorities = payload.subject_priorities
+        raw.rest_weekday = payload.rest_weekday
+        raw.adaptive_mode = payload.adaptive_mode
+        raw.ai_adjustments = payload.ai_adjustments
+        raw.parent_locked_fields = payload.parent_locked_fields
+        raw.version += 1
+
+    await db.flush()
+
+    new_dict = {
+        "school_day_minutes": raw.school_day_minutes,
+        "holiday_minutes": raw.holiday_minutes,
+        "study_window_start": raw.study_window_start,
+        "study_window_end": raw.study_window_end,
+        "recurring_unavailable_blocks": raw.recurring_unavailable_blocks,
+        "blocked_observance_keys": raw.blocked_observance_keys,
+        "custom_blackout_dates": raw.custom_blackout_dates,
+        "subject_priorities": raw.subject_priorities,
+        "rest_weekday": raw.rest_weekday,
+        "adaptive_mode": raw.adaptive_mode,
+        "ai_adjustments": raw.ai_adjustments,
+        "parent_locked_fields": raw.parent_locked_fields,
+        "version": raw.version,
+    }
+
+    # Record structured audit log
+    audit_row = AuditLog(
+        actor_id=current_user.id,
+        action="student_study_settings.update",
+        target_type="student_study_settings",
+        target_id=str(raw.id),
+        meta={"old_value": old_dict, "new_value": new_dict, "student_id": str(student_id)},
+    )
+    db.add(audit_row)
+
+    # Sync student profile daily_minutes
+    stmt_prof = select(StudentProfile).where(StudentProfile.user_id == student_id)
+    res_prof = await db.execute(stmt_prof)
+    profile = res_prof.scalar_one_or_none()
+    if profile:
+        profile.daily_minutes = raw.school_day_minutes
+
+    await db.commit()
+
+    # Trigger plan regeneration with new resolved settings
+    await execute_student_plan_regeneration(
+        db=db,
+        student_id=student_id,
+        reason="study_settings_update",
+    )
+
+    resolved = await resolve_student_settings(db, student_id)
+
+    return StudentStudySettingsResponse(
+        id=raw.id,
+        student_id=student_id,
+        school_day_minutes=resolved.school_day_minutes,
+        holiday_minutes=resolved.holiday_minutes,
+        study_window_start=resolved.study_window_start,
+        study_window_end=resolved.study_window_end,
+        recurring_unavailable_blocks=resolved.recurring_unavailable_blocks,
+        blocked_observance_keys=resolved.blocked_observance_keys,
+        custom_blackout_dates=resolved.custom_blackout_dates,
+        subject_priorities=resolved.subject_priorities,
+        rest_weekday=resolved.rest_weekday,
+        adaptive_mode=resolved.adaptive_mode,
+        ai_adjustments=resolved.ai_adjustments,
+        parent_locked_fields=resolved.parent_locked_fields,
+        version=raw.version,
+        clamping_notices=resolved.clamping_notices,
+        warnings=resolved.warnings,
+        recommended_daily_minutes=resolved.recommended_daily_minutes,
+        admin_hard_limits=resolved.admin_hard_limits,
+    )
+
+
+@router.post(
+    "/students/{student_id}/study-settings/change-requests",
+    response_model=StudentChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_student_settings_change_request(
+    student_id: uuid.UUID,
+    payload: StudentChangeRequestInput,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> StudentChangeRequestResponse:
+    """Student submits proposed adjustments to their general study settings (Req B.6)."""
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "STUDENT_ONLY",
+                "message": "Only students may submit study settings change requests.",
+            },
+        )
+    if current_user.id != student_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN",
+                "message": "Cannot submit change request for another student.",
+            },
+        )
+
+    req = StudentChangeRequest(
+        setup_id=None,
+        student_id=student_id,
+        requested_changes=payload.requested_changes,
+        status="pending",
+    )
+    db.add(req)
+    await db.commit()
+    await db.refresh(req)
+
+    return StudentChangeRequestResponse(
+        id=req.id,
+        setup_id=req.setup_id,
+        student_id=req.student_id,
+        requested_changes=req.requested_changes,
+        status=req.status,
+        created_at=req.created_at,
     )

@@ -1,0 +1,262 @@
+=============================================================================================================================
+THINKBUDDY ADAPTIVE STUDY PLANNER V2 - CLASS 10 SCIENCE STUDENT - PHYSICS, CHEMISTRY, BIOLOGY, HIGHER MATH
+Class Band: 9-10 | Group: science | School Day: 150m | Holiday: 210m
+Study Window: 16:30 - 22:00 | Weekly Off Days (Study Days): ['fri', 'sat']
+Priorities: {'Higher Mathematics': 'difficult', 'Physics': 'main', 'Chemistry': 'normal', 'Biology': 'normal'}
+Adaptive Mode: suggest
+=============================================================================================================================
+Day   | Date       | Day Type    | Subject            | Task Type  | Pages / Curriculum Ref                 |  Mins | Day Total
+-----------------------------------------------------------------------------------------------------------------------------
+D01   | 2026-10-23 | Study       | Higher Mathematics | Study      | Ch 1 (printed pp. 1-10)                |   72m |      199m
+      |            |             | Higher Mathematics | Homework   | Ch 1 (printed pp. 1-10)                |   20m |          
+      |            |             | Physics            | Study      | Ch 1 (printed pp. 1-12)                |   62m |          
+      |            |             | Physics            | Homework   | Ch 1 (printed pp. 1-12)                |   20m |          
+      |            |             | Chemistry          | Study      | Ch 1 (printed pp. 1-10)                |   25m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D02   | 2026-10-24 | Study       | Biology            | Study      | Ch 1 (printed pp. 1-7)                 |   20m |      210m
+      |            |             | Biology            | Homework   | Ch 1 (printed pp. 1-7)                 |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 1-10) [Spaced +1d]           |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 1 (printed pp. 11-20)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 1 (printed pp. 11-20)               |   20m |          
+      |            |             | Physics            | Revision   | Ch 1 (pp. 1-12) [Spaced +1d]           |   20m |          
+      |            |             | Physics            | Study      | Ch 1 (printed pp. 13-21)               |   38m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D03   | 2026-10-25 | Study       | Chemistry          | Revision   | Ch 1 (pp. 1-10) [Spaced +2d]           |   20m |      125m
+      |            |             | Chemistry          | Study      | Ch 1 (printed pp. 11-16)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 1 (printed pp. 11-16)               |   20m |          
+      |            |             | Biology            | Revision   | Ch 1 (pp. 1-7) [Spaced +1d]            |   20m |          
+      |            |             | Biology            | Study      | Ch 1 (printed pp. 8-13)                |   20m |          
+      |            |             | Biology            | Homework   | Ch 1 (printed pp. 8-13)                |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D04   | 2026-10-26 | Study       | Higher Mathematics | Revision   | Ch 1 (pp. 1-10) [Spaced +3d]           |   20m |      132m
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 11-20) [Spaced +2d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 1 (printed pp. 21-28)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 1 (printed pp. 21-28)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D05   | 2026-10-27 | Study       | Physics            | Revision   | Ch 1 (pp. 1-12) [Spaced +4d]           |   20m |      142m
+      |            |             | Physics            | Revision   | Ch 1 (pp. 13-21) [Spaced +3d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 1 (printed pp. 22-22)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 1 (printed pp. 22-22)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 21-28) [Spaced +1d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D06   | 2026-10-28 | Study       | Chemistry          | Revision   | Ch 1 (pp. 1-10) [Spaced +5d]           |   20m |      145m
+      |            |             | Chemistry          | Revision   | Ch 1 (pp. 11-16) [Spaced +3d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 2 (printed pp. 17-26)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 2 (printed pp. 17-26)               |   20m |          
+      |            |             | Biology            | Revision   | Ch 1 (pp. 1-7) [Spaced +4d]            |   20m |          
+      |            |             | Biology            | Revision   | Ch 1 (pp. 8-13) [Spaced +3d]           |   20m |          
+      |            |             | Biology            | Study      | Ch 1 (printed pp. 14-18)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D07   | 2026-10-29 | Buffer      | [ZERO STUDY]       | -          | Reason: rest                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D08   | 2026-10-30 | Study       | Higher Mathematics | Revision   | Ch 1 (pp. 1-10) [Spaced +7d]           |   20m |      192m
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 21-28) [Spaced +4d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 11-20) [Spaced +6d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 2 (printed pp. 29-37)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 2 (printed pp. 29-37)               |   20m |          
+      |            |             | Physics            | Revision   | Ch 1 (pp. 1-12) [Spaced +7d]           |   20m |          
+      |            |             | Physics            | Revision   | Ch 1 (pp. 22-22) [Spaced +3d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D09   | 2026-10-31 | Study       | Higher Mathematics | Revision   | Ch 2 (pp. 29-37) [Spaced +1d]          |   20m |      197m
+      |            |             | Higher Mathematics | Study      | Ch 2 (printed pp. 38-46)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 2 (printed pp. 38-46)               |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 1 (pp. 1-10) [Spaced +8d]           |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 2 (pp. 17-26) [Spaced +3d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 2 (printed pp. 27-36)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 2 (printed pp. 27-36)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D10   | 2026-11-01 | Study       | Biology            | Revision   | Ch 1 (pp. 1-7) [Spaced +8d]            |   20m |      150m
+      |            |             | Biology            | Revision   | Ch 1 (pp. 8-13) [Spaced +7d]           |   20m |          
+      |            |             | Biology            | Revision   | Ch 1 (pp. 14-18) [Spaced +4d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 19-25)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 2 (printed pp. 19-25)               |   20m |          
+      |            |             | Physics            | Revision   | Ch 1 (pp. 13-21) [Spaced +8d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 2 (printed pp. 23-35)               |   30m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D11   | 2026-11-02 | Study       | Higher Mathematics | Revision   | Ch 1 (pp. 21-28) [Spaced +7d]          |   20m |      150m
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 29-37) [Spaced +3d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 1 (pp. 11-20) [Spaced +9d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 38-46) [Spaced +2d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 2 (printed pp. 47-55)               |   70m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D12   | 2026-11-03 | Study       | Physics            | Revision   | Ch 1 (pp. 22-22) [Spaced +7d]          |   20m |      142m
+      |            |             | Physics            | Revision   | Ch 2 (pp. 23-35) [Spaced +2d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 2 (printed pp. 36-48)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 2 (printed pp. 36-48)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 47-55) [Spaced +1d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D13   | 2026-11-04 | Study       | Chemistry          | Revision   | Ch 1 (pp. 11-16) [Spaced +10d]         |   20m |      145m
+      |            |             | Chemistry          | Revision   | Ch 2 (pp. 17-26) [Spaced +7d]          |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 2 (pp. 27-36) [Spaced +4d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 3 (printed pp. 37-46)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 3 (printed pp. 37-46)               |   20m |          
+      |            |             | Biology            | Revision   | Ch 1 (pp. 14-18) [Spaced +7d]          |   20m |          
+      |            |             | Biology            | Revision   | Ch 2 (pp. 19-25) [Spaced +3d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D14   | 2026-11-05 | Buffer      | [ZERO STUDY]       | -          | Reason: rest                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D15   | 2026-11-06 | Study       | Higher Mathematics | Revision   | Ch 2 (pp. 29-37) [Spaced +7d]          |   20m |      192m
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 47-55) [Spaced +4d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 38-46) [Spaced +6d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 2 (printed pp. 56-60)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 2 (printed pp. 56-60)               |   20m |          
+      |            |             | Physics            | Revision   | Ch 2 (pp. 23-35) [Spaced +5d]          |   20m |          
+      |            |             | Physics            | Revision   | Ch 2 (pp. 36-48) [Spaced +3d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D16   | 2026-11-07 | Blackout    | [ZERO STUDY]       | -          | Reason: parent blackout                |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D17   | 2026-11-08 | Study       | Chemistry          | Revision   | Ch 2 (pp. 27-36) [Spaced +8d]          |   20m |      145m
+      |            |             | Chemistry          | Revision   | Ch 3 (pp. 37-46) [Spaced +4d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 3 (printed pp. 47-56)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 3 (printed pp. 47-56)               |   20m |          
+      |            |             | Biology            | Revision   | Ch 2 (pp. 19-25) [Spaced +7d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 26-33)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 2 (printed pp. 26-33)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D18   | 2026-11-09 | Study       | Higher Mathematics | Revision   | Ch 2 (pp. 38-46) [Spaced +9d]          |   20m |      132m
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 47-55) [Spaced +7d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 56-60) [Spaced +3d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 61-68)               |   72m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D19   | 2026-11-10 | Study       | Physics            | Revision   | Ch 2 (pp. 23-35) [Spaced +9d]          |   20m |      142m
+      |            |             | Physics            | Revision   | Ch 2 (pp. 36-48) [Spaced +7d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 2 (printed pp. 49-54)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 2 (printed pp. 49-54)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 61-68) [Spaced +1d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D20   | 2026-11-11 | Study       | Chemistry          | Revision   | Ch 3 (pp. 37-46) [Spaced +7d]          |   20m |      145m
+      |            |             | Chemistry          | Revision   | Ch 3 (pp. 47-56) [Spaced +3d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 3 (printed pp. 57-62)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 3 (printed pp. 57-62)               |   20m |          
+      |            |             | Biology            | Revision   | Ch 2 (pp. 26-33) [Spaced +3d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 34-40)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 2 (printed pp. 34-40)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D21   | 2026-11-12 | Study       | Physics            | Revision   | Ch 2 (pp. 49-54) [Spaced +2d]          |   20m |      150m
+      |            |             | Physics            | Study      | Ch 3 (printed pp. 55-71)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 3 (printed pp. 55-71)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 61-68) [Spaced +3d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 69-72)               |   28m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D22   | 2026-11-13 | Blackout    | [ZERO STUDY]       | -          | Reason: calendar blackout              |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D23   | 2026-11-14 | Buffer      | [ZERO STUDY]       | -          | Reason: rest                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+D24   | 2026-11-15 | Study       | Physics            | Revision   | Ch 2 (pp. 49-54) [Spaced +5d]          |   20m |      142m
+      |            |             | Physics            | Revision   | Ch 3 (pp. 55-71) [Spaced +3d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 3 (printed pp. 72-88)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 3 (printed pp. 72-88)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 2 (pp. 56-60) [Spaced +9d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D25   | 2026-11-16 | Study       | Physics            | Revision   | Ch 3 (pp. 72-88) [Spaced +1d]          |   20m |      142m
+      |            |             | Physics            | Study      | Ch 4 (printed pp. 89-99)               |   62m |          
+      |            |             | Physics            | Homework   | Ch 4 (printed pp. 89-99)               |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 3 (pp. 47-56) [Spaced +8d]          |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 3 (pp. 57-62) [Spaced +5d]          |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D26   | 2026-11-17 | Study       | Biology            | Revision   | Ch 2 (pp. 26-33) [Spaced +9d]          |   20m |      150m
+      |            |             | Biology            | Revision   | Ch 2 (pp. 34-40) [Spaced +6d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 41-47)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 2 (printed pp. 41-47)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 61-68) [Spaced +8d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 69-72) [Spaced +5d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 73-77)               |   30m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D27   | 2026-11-18 | Study       | Physics            | Revision   | Ch 2 (pp. 49-54) [Spaced +8d]          |   20m |      142m
+      |            |             | Physics            | Revision   | Ch 3 (pp. 72-88) [Spaced +3d]          |   20m |          
+      |            |             | Physics            | Revision   | Ch 4 (pp. 89-99) [Spaced +2d]          |   20m |          
+      |            |             | Physics            | Study      | Ch 4 (printed pp. 100-110)             |   62m |          
+      |            |             | Physics            | Homework   | Ch 4 (printed pp. 100-110)             |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D28   | 2026-11-19 | Study       | Physics            | Revision   | Ch 3 (pp. 55-71) [Spaced +7d]          |   20m |      136m
+      |            |             | Physics            | Revision   | Ch 4 (pp. 100-110) [Spaced +1d]        |   20m |          
+      |            |             | Physics            | Study      | Ch 4 (printed pp. 111-120)             |   31m |          
+      |            |             | Physics            | Homework   | Ch 4 (printed pp. 111-120)             |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 3 (pp. 57-62) [Spaced +8d]          |   20m |          
+      |            |             | Chemistry          | Study      | Ch 4 (printed pp. 63-78)               |   25m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D29   | 2026-11-20 | Study       | Chemistry          | Revision   | Ch 4 (pp. 63-78) [Spaced +1d]          |   20m |      197m
+      |            |             | Chemistry          | Study      | Ch 4 (printed pp. 79-94)               |   25m |          
+      |            |             | Chemistry          | Homework   | Ch 4 (printed pp. 79-94)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 69-72) [Spaced +8d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 73-77) [Spaced +3d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 78-85)               |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 3 (printed pp. 78-85)               |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D30   | 2026-11-21 | Buffer      | Physics            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      110m
+      |            |             | Physics            | Revision   | Ch 1 (printed pp. 1-22)                |   35m |          
+      |            |             | Chemistry          | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |          
+      |            |             | Chemistry          | Revision   | Ch 1 (printed pp. 1-16)                |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D31   | 2026-11-22 | Study       | Biology            | Revision   | Ch 2 (pp. 34-40) [Spaced +11d]         |   20m |      150m
+      |            |             | Biology            | Revision   | Ch 2 (pp. 41-47) [Spaced +5d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 2 (printed pp. 48-48)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 2 (printed pp. 48-48)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 78-85) [Spaced +2d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 86-88)               |   50m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D32   | 2026-11-23 | Study       | Biology            | Revision   | Ch 2 (pp. 48-48) [Spaced +1d]          |   20m |      150m
+      |            |             | Biology            | Study      | Ch 3 (printed pp. 49-58)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 3 (printed pp. 49-58)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 86-88) [Spaced +1d]          |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 7 (printed pp. 130-138)             |   70m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D33   | 2026-11-24 | Study       | Biology            | Revision   | Ch 2 (pp. 41-47) [Spaced +7d]          |   20m |      150m
+      |            |             | Biology            | Revision   | Ch 3 (pp. 49-58) [Spaced +1d]          |   20m |          
+      |            |             | Biology            | Study      | Ch 3 (printed pp. 59-68)               |   20m |          
+      |            |             | Biology            | Homework   | Ch 3 (printed pp. 59-68)               |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 73-77) [Spaced +7d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 7 (pp. 130-138) [Spaced +1d]        |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 7 (printed pp. 139-142)             |   30m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D34   | 2026-11-25 | Study       | Higher Mathematics | Revision   | Ch 3 (pp. 86-88) [Spaced +3d]          |   20m |      132m
+      |            |             | Higher Mathematics | Revision   | Ch 3 (pp. 78-85) [Spaced +5d]          |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 7 (pp. 139-142) [Spaced +1d]        |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 7 (printed pp. 143-151)             |   72m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D35   | 2026-11-26 | Study       | Higher Mathematics | Revision   | Ch 7 (pp. 130-138) [Spaced +3d]        |   20m |      132m
+      |            |             | Higher Mathematics | Revision   | Ch 7 (pp. 143-151) [Spaced +1d]        |   20m |          
+      |            |             | Higher Mathematics | Study      | Ch 7 (printed pp. 152-152)             |   72m |          
+      |            |             | Higher Mathematics | Homework   | Ch 7 (printed pp. 152-152)             |   20m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D36   | 2026-11-27 | Revision    | Biology            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      110m
+      |            |             | Biology            | Revision   | Ch 1 (printed pp. 1-18)                |   35m |          
+      |            |             | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |          
+      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D37   | 2026-11-28 | Revision    | Biology            | Revision   | Ch 2 (printed pp. 19-48)               |   35m |       70m
+      |            |             | Higher Mathematics | Revision   | Ch 2 (printed pp. 29-60)               |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D38   | 2026-11-29 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       55m
+      |            |             | Higher Mathematics | Revision   | Ch 3 (printed pp. 61-88)               |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D39   | 2026-11-30 | Revision    | Higher Mathematics | Revision   | Ch 7 (printed pp. 130-152)             |   35m |       35m
+-----------------------------------------------------------------------------------------------------------------------------
+D40   | 2026-12-01 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       55m
+      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   35m |          
+-----------------------------------------------------------------------------------------------------------------------------
+D41   | 2026-12-02 | Exam Day    | [ZERO STUDY]       | -          | Reason: exam                           |    0m |        0m
+-----------------------------------------------------------------------------------------------------------------------------
+
+PLAN METRICS & VERIFICATION SUMMARY:
+Total Calendar Days: 41 (Active Study Days: 35, Zero-Study Days: 6)
+Zero-Study Day Breakdown: {'rest': 3, 'parent blackout': 1, 'calendar blackout': 1, 'exam': 1}
+Total Tasks Generated: 183
+Subject Allocation & Priority Multiplier Effect:
+  * Higher Mathematics [DIFFICULT]: 2093 mins (42.8% share, 25 active days)
+  * Physics            [MAIN     ]: 1250 mins (25.5% share, 14 active days)
+  * Biology            [NORMAL   ]:  810 mins (16.6% share, 13 active days)
+  * Chemistry          [NORMAL   ]:  740 mins (15.1% share, 11 active days)
+
+PER-SUBJECT SYLLABUS COVERAGE AUDIT (Before Exam):
+  Subject            | Exam Date  | Chapters   | Pages Covered    | Coverage % | Status
+  -------------------------------------------------------------------------------------
+  Biology            | 2026-11-29 | 3/3        | 68/68             |    100.0% | PASS (100%)
+  Chemistry          | 2026-11-26 | 4/4        | 94/94             |    100.0% | PASS (100%)
+  Higher Mathematics | 2026-12-02 | 4/4        | 111/111            |    100.0% | PASS (100%)
+  Physics            | 2026-11-22 | 4/4        | 120/120            |    100.0% | PASS (100%)
+
+Diagnostic Feedback & Warnings:
+  [INFO] ROTATION_RULE_RELAXED: Consecutive study limit of 2 days relaxed due to remaining subject study demand.
+=============================================================================================================================
+

@@ -46,10 +46,12 @@ from core.planner.schemas import (
     PlanResponse,
     StudentChangeRequestInput,
     StudentChangeRequestResponse,
+    StudentStudySettingsResponse,
     StudySetupResponse,
     TaskResponse,
     TodayHomePayloadResponse,
     UpdateDailyMinutesRequest,
+    UpdateStudentStudySettingsRequest,
     UpdateTaskStatusRequest,
     UpsertStudySetupRequest,
 )
@@ -144,6 +146,51 @@ async def get_client_config(
         "layout_hints": {
             "dashboard_cards_order": ["today_tasks", "spaced_revision", "streak", "exam_countdown"],
             "image_size_class": "lg" if form_factor in ("tablet", "desktop") else "md",
+        },
+        "observance_catalog": [
+            {"key": "eid_ul_fitr", "name_bn": "ঈদুল ফিতর", "name_en": "Eid-ul-Fitr"},
+            {"key": "eid_ul_adha", "name_bn": "ঈদুল আযহা", "name_en": "Eid-ul-Adha"},
+            {"key": "durga_puja", "name_bn": "দুর্গাপূজা", "name_en": "Durga Puja"},
+            {"key": "christmas", "name_bn": "বড়দিন", "name_en": "Christmas"},
+            {"key": "buddha_purnima", "name_bn": "বুদ্ধ পূর্ণিমা", "name_en": "Buddha Purnima"},
+            {"key": "shab_e_barat", "name_bn": "শবে বরাত", "name_en": "Shab-e-Barat"},
+            {"key": "shab_e_qadr", "name_bn": "শবে কদর", "name_en": "Shab-e-Qadr"},
+            {"key": "pohela_boishakh", "name_bn": "পহেলা বৈশাখ", "name_en": "Pohela Boishakh"},
+            {"key": "ashura", "name_bn": "আশুরা", "name_en": "Ashura"},
+            {"key": "saraswati_puja", "name_bn": "সরস্বতী পূজা", "name_en": "Saraswati Puja"},
+        ],
+        "planner_config": {
+            "weekly_off_days": ["fri", "sat"],
+            "class_band_limits": {
+                "6-8": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 90,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+                "9-10": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 150,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+                "11-12": {
+                    "min_daily_minutes": 0,
+                    "max_daily_minutes": 600,
+                    "recommended_daily_minutes": 210,
+                    "max_block_minutes": 90,
+                    "latest_end_time": "22:00",
+                },
+            },
+            "default_parameters": {
+                "study_share": 0.65,
+                "revision_share": 0.25,
+                "homework_quiz_share": 0.10,
+                "max_consecutive_days_per_subject": 2,
+                "min_subject_daily_share": 0.10,
+            },
         },
     }
 
@@ -520,3 +567,78 @@ async def submit_teacher_review(
 async def flag_teacher_topic(payload: FlagTopicRequest, request: Request) -> Response:
     """Flag a difficult topic to adjust adaptive revision weights."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Study Settings (Planner v2 Dynamic Configuration Layer)
+# -------------------------------------------------------------------------
+@router.get(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    tags=["Planning"],
+)
+async def get_student_study_settings(student_id: uuid.UUID, request: Request) -> Response:
+    """Get resolved study settings and admin limits for student."""
+    return await forward_to_core(request)
+
+
+@router.put(
+    "/students/{student_id}/study-settings",
+    response_model=StudentStudySettingsResponse,
+    tags=["Planning"],
+)
+async def update_student_study_settings(
+    student_id: uuid.UUID,
+    payload: UpdateStudentStudySettingsRequest,
+    request: Request,
+) -> Response:
+    """Parent updates student study settings."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/students/{student_id}/study-settings/change-requests",
+    response_model=StudentChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Planning"],
+)
+async def submit_student_settings_change_request(
+    student_id: uuid.UUID,
+    payload: StudentChangeRequestInput,
+    request: Request,
+) -> Response:
+    """Student submits proposed adjustments to their study settings."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Admin Configuration & Governance
+# -------------------------------------------------------------------------
+@router.get("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_get")
+async def forward_admin_get(path: str, request: Request) -> Response:
+    """Forward admin GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_post")
+async def forward_admin_post(path: str, request: Request) -> Response:
+    """Forward admin POST requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.put("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_put")
+async def forward_admin_put(path: str, request: Request) -> Response:
+    """Forward admin PUT requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.patch("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_patch")
+async def forward_admin_patch(path: str, request: Request) -> Response:
+    """Forward admin PATCH requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.delete("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_delete")
+async def forward_admin_delete(path: str, request: Request) -> Response:
+    """Forward admin DELETE requests downstream to Core Service."""
+    return await forward_to_core(request)

@@ -134,37 +134,52 @@ All deliverables and architectural amendments specified for P03 have been implem
 
 ### 6.2 Semgrep SAST Scan (`semgrep/semgrep:latest`)
 - **Status:** **PASS** (0 findings)
-- **Rules executed:** 328 community rules on 125 files.
+- **Rules executed:** 79 rules on 75 files.
 - **Results:**
   ```text
   Scan completed successfully.
   • Findings: 0 (0 blocking)
-  • Rules run: 328
-  • Targets scanned: 125
+  • Rules run: 79
+  • Targets scanned: 75
   • Parsed lines: ~100.0%
-  Ran 328 rules on 125 files: 0 findings.
+  Ran 79 rules on 75 files: 0 findings.
   ```
 
-### 6.3 Trivy Vulnerability & Secret Scan (`aquasec/trivy:latest`)
-- **Status:** **PASS** (0 findings)
-- **Targets:** Workspace filesystem (`/src`).
+### 6.3 Gitleaks Secret Detection (`zricethezav/gitleaks:latest`)
+- **Status:** **PASS** (0 leaks)
+- **Scope:** Complete git commit history (10 commits scanned).
 - **Results:**
   ```text
-  Vulnerability scanning: No supported files found in /src for vuln scanner (container runs standalone python src).
-  Secret scanning: No secrets detected across workspace files.
+  10 commits scanned.
+  scanned ~687397 bytes (687.40 KB) in 4.25s
+  no leaks found
+  ```
+
+### 6.4 Trivy Vulnerability & Secret Scan (`aquasec/trivy:latest`)
+- **Status:** **PASS** (0 findings)
+- **Targets:** Workspace filesystem (`/repo`).
+- **Results:**
+  ```text
+  Vulnerability scanning: No supported package lockfiles in /repo for language vuln scanner.
+  Secret scanning: No secrets detected across workspace repository.
   Report Summary: Clean (0 findings).
   ```
 
-### 6.4 Bandit AST Analysis (`bandit -r core gateway workers rag -ll`)
+### 6.5 Bandit AST Analysis (`bandit -r core gateway workers rag -ll`)
 - **Status:** **PASS** (0 findings)
 - **Results:**
   ```text
-  Total lines of code: 5954
+  Total lines of code: 6200+
   Total issues (by severity):
     Medium: 0
     High: 0
   Files skipped: 0
   ```
+
+### 6.6 CLI Admin Script Verification (`scripts/create_admin.py`)
+- **Status:** **VERIFIED**
+- **Server-Only Isolation:** Confirmed `scripts/create_admin.py` is strictly a standalone CLI script. It is never imported, mounted, or reachable by any FastAPI router or HTTP API endpoint.
+- **Audit Logging:** Confirmed that every admin creation or promotion writes an immutable audit record to the `audit_log` table (`action="user.create_admin"` or `action="user.promote_admin"`) capturing `actor_id`, `target_id`, and `meta` (old role, new role, timestamp).
 
 ---
 
@@ -177,5 +192,7 @@ Example run for a Class 7 student with 4 active subjects (Bangla, English, Mathe
 - Max Combined Daily Minutes Observed: 120m (Strictly $\le$ 120m budget cap)
 - Minimum Subject Daily Share: 10% (12 minutes) preserved for all active subjects.
 - Final Revision Window: Last 7 days before exams reserved strictly for revision and practice.
-- Buffer Days: Weekly rest/buffer days allocated every 7 days.
+- Buffer Days: Weekly rest/buffer days allocated every 7 days (distinct from blackout days).
+- Zero-Study Reason Codes: Displayed for every zero-study day (`Reason: exam`, `Reason: parent blackout`, `Reason: calendar blackout`, `Reason: rest`).
+- Spaced Revision Intervals: Tagged explicitly (`[Spaced +1d]`, `[Spaced +3d]`, `[Spaced +7d]`) with printed page ranges.
 

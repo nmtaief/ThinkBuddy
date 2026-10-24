@@ -15,7 +15,7 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 ## 2. Endpoint inventory
 
 ### Client & config
-- `GET /client/config` – flags, entitlements, min version, quiz security mode for this platform, layout hints.
+- `GET /client/config` – flags, entitlements, min version, quiz security mode, layout hints, observance catalog, and planner defaults & limits (no admin internals).
 - `POST /devices` / `PATCH /devices/{id}` – register push token, app version.
 
 ### Auth & identity
@@ -31,15 +31,32 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /books/{id}/chapters` – get ordered chapter list for textbook.
 - `GET /chapters/{id}` – get chapter details with concepts and chunk count.
 
-### Planning
-- `PUT /students/{id}/study-setups/{subject}` – exam date, syllabus selection, chapter order, student-level daily minutes budget (parent, with optimistic locking via `version`).
+### Planning & Study Settings
+- `GET /students/{id}/study-settings` – get resolved study settings, parent preferences, and admin policy constraints.
+- `PUT /students/{id}/study-settings` – parent updates study settings (school_day_minutes, holiday_minutes, study window, unavailable blocks, blocked observances, coarse blackout dates, subject priorities) with optimistic locking (409) and limit clamping.
+- `POST /students/{id}/study-settings/change-requests` – student proposes study settings adjustments.
+- `PUT /students/{id}/study-setups/{subject}` – exam date, syllabus selection, chapter order (parent, with optimistic locking via `version`).
 - `GET /students/{id}/study-setups` – list all study setups for a student.
-- `POST /students/{id}/study-setups/{subject}/change-requests` (student submits change request).
+- `POST /students/{id}/study-setups/{subject}/change-requests` (student submits change request for subject setup).
 - `POST /students/{id}/generate-plan` – generate or recalculate unified schedule across all active setups.
-- `PUT /students/{id}/daily-minutes` – parent updates student-level daily minutes budget.
-- `GET /students/{id}/plan?from=&to=` – days + tasks.
-- `GET /students/{id}/today` – the home screen payload (tasks, revision, streak, exam countdown, localized to student timezone).
+- `PUT /students/{id}/daily-minutes` – parent updates legacy student-level daily minutes budget.
+- `GET /students/{id}/plan?from=&to=` – days + tasks with day types (`school_day`, `holiday`, `blackout`, `exam_day`).
+- `GET /students/{id}/today` – home screen payload (tasks, revision, streak, exam countdown, remaining budget, student timezone).
 - `PATCH /tasks/{id}` – status update (student only; parents read-only; ownership verified).
+
+### Admin Governance & Configuration (`/admin/*`, role: admin)
+- `GET /admin/policies` – list admin policies across class bands and groups.
+- `POST /admin/policies` – create draft policy for class band (`6-8`, `9-10`, `11-12`) and group.
+- `PUT /admin/policies/{id}` – update draft policy limits and planner parameters (audit logged).
+- `GET /admin/policies/{id}/preview` – preview affected students and active plans before publishing.
+- `POST /admin/policies/{id}/publish` – publish policy; queues throttled idempotent regeneration for affected students.
+- `GET /admin/holidays` – list holiday calendar entries.
+- `POST /admin/holidays` – create draft holiday (audit logged).
+- `POST /admin/holidays/import` – bulk import unverified draft holidays from JSON file (audit logged).
+- `PUT /admin/holidays/{id}` – update holiday (dates, type, blackout, verification, audit logged).
+- `GET /admin/holidays/{id}/preview` – preview affected plans and students for holiday date range.
+- `POST /admin/holidays/{id}/publish` – publish holiday calendar change; queues throttled idempotent regeneration.
+- `GET /admin/observances` – list observance catalog entries.
 
 ### Quiz
 - `POST /quizzes/{id}/attempts` – start; returns `attempt_id`, `deadline_at`, `attempt_token`, first question.

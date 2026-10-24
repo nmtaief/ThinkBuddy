@@ -2,17 +2,31 @@
 
 Principle: **deterministic rules decide what to study and when; the LLM only writes explanations, rubrics feedback, and (grounded) question drafts.** This keeps behavior testable and cheap.
 
-## 1. Planner
-Inputs: exam date(s), included chapters with order and weights, daily minutes, available days, current mastery.
+## 1. Planner (v2)
+Inputs: resolved settings (from 3-tier hierarchy), day calendar, active subject setups, completed tasks, and `now` (Asia/Dhaka). Pure library: never reads database or system clock.
 
 Algorithm outline:
-1. Count usable study days between now and the exam (honor available days).
-2. Reserve a **final revision window** (default last 15% of days, minimum 3 days) and a buffer day each week.
-3. Estimate chapter effort = pages × difficulty factor × (1 + (1 − mastery)). Unknown mastery uses 0.5.
-4. Allocate chapters in the parent's order into days, respecting daily minutes. Split long chapters across days.
-5. Per day, add: study task, a daily revision slot (from §3), homework, and a short quiz.
-6. Output plan + warnings (e.g., "exam too close for full coverage – compressed plan").
-Regeneration rules: change in syllabus/exam/order → regenerate **future** days only; keep completed tasks; bump `plan_version`.
+1. **Calendar & Day Types**:
+   - `school_day`: standard weekday budget (`school_day_minutes`).
+   - `holiday`: weekly off days (default Friday and Saturday) and national holidays (`holiday_minutes`).
+   - `blackout`: zero study tasks (national blackout, parent-blocked observances, custom blackout ranges).
+   - `exam_day`: zero study tasks scheduled for subject exams.
+2. **Today's Budget (Requirement D.11)**:
+   - Budget is the remaining time in `study_window` (`study_window_start` to `study_window_end`) after `now`, minus `completed_minutes_today` and remaining recurring unavailable blocks (coaching/tuition), clamped to the day's base budget.
+3. **Priority Multipliers (Requirement D.12)**:
+   - Subject priorities (`normal`: 1.0, `main`: 1.3, `difficult`: 1.6) multiply chapter workload in the pace formula, granting main/difficult subjects proportionally more study time.
+4. **Subject Rotation Rule (Requirement D.13)**:
+   - No subject has study blocks on more than the configured maximum consecutive days (default 2) when 3 or more subjects are active with remaining syllabus.
+   - Revision and quiz items are exempt.
+   - Subjects are staggered to ensure rest days; if mathematically infeasible, the rule is relaxed with a `ROTATION_RULE_RELAXED` warning.
+5. **Reserve Windows**:
+   - Final revision window (default last 15% of days, minimum 3 days) dedicated to comprehensive review and mock quizzes.
+   - Weekly buffer day (every 7th day) reserved for catch-up and revision.
+6. **Task Partitioning**:
+   - Long chapters partitioned contiguously across study slices (clamped to max block minutes, default 90m).
+   - Each study day produces: study reading (with printed page bounds), spaced revision slot, homework practice, and quiz check.
+7. **Regeneration Rules**:
+   - Change in settings, syllabus, exam, or policy publish $\rightarrow$ serialize with advisory lock, regenerate **future** days only, preserve completed tasks, bump `plan_version`.
 
 ## 2. Signals → mastery
 Signals (`learning_signals`) and starting weights (tune with data):

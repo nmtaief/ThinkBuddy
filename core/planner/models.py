@@ -15,6 +15,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -137,6 +138,15 @@ class Plan(Base):
         String(20), default="active", nullable=False
     )  # pending, active, superseded
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    provider: Mapped[str] = mapped_column(
+        String(32), default="deterministic", nullable=False
+    )  # deterministic, ai_planner, ai_mock
+    model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    contract_version: Mapped[str] = mapped_column(String(16), default="1.0.0", nullable=False)
+    settings_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    generation_reason: Mapped[str | None] = mapped_column(
+        String(255), default="Standard deterministic plan generated", nullable=True
+    )
 
     # Relationships
     setup: Mapped[StudySetup] = relationship("StudySetup", back_populates="plans")
@@ -234,10 +244,10 @@ class StudentChangeRequest(Base):
     __tablename__ = "student_change_requests"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    setup_id: Mapped[uuid.UUID] = mapped_column(
+    setup_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("study_setups.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
@@ -261,3 +271,127 @@ class StudentChangeRequest(Base):
     reviewed_by: Mapped[User | None] = relationship("User", foreign_keys=[reviewed_by_id])
 
     __table_args__ = (Index("ix_change_requests_setup_status", "setup_id", "status"),)
+
+
+class ObservanceCatalog(Base):
+    """Catalog of religious, cultural, and national observances for optional blackouts."""
+
+    __tablename__ = "observance_catalog"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name_bn: Mapped[str] = mapped_column(String(100), nullable=False)
+    name_en: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class Holiday(Base):
+    """System-level and national holidays with blackout and observance links."""
+
+    __tablename__ = "holidays"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    holiday_type: Mapped[str] = mapped_column(String(32), default="national", nullable=False)
+    study_blackout: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    observance_key: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("observance_catalog.key", ondelete="SET NULL"), nullable=True
+    )
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="draft", nullable=False
+    )  # draft, published
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    __table_args__ = (Index("ix_holidays_dates_status", "start_date", "end_date", "status"),)
+
+
+class AdminPolicy(Base):
+    """Admin-controlled policy constraints and defaults by class band and group."""
+
+    __tablename__ = "admin_policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    class_band: Mapped[str] = mapped_column(String(16), nullable=False)  # "6-8", "9-10", "11-12"
+    group: Mapped[str] = mapped_column(
+        String(32), default="general", nullable=False
+    )  # "general", "science", "humanities", "business_studies"
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="published", nullable=False
+    )  # draft, published
+    min_daily_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_daily_minutes: Mapped[int] = mapped_column(Integer, default=600, nullable=False)
+    recommended_daily_minutes: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    max_block_minutes: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    latest_end_time: Mapped[str] = mapped_column(String(8), default="22:00", nullable=False)
+    weekly_off_days: Mapped[list[str]] = mapped_column(
+        JSONB, default=lambda: ["fri", "sat"], nullable=False
+    )
+    planner_parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "class_band", "group", "version", name="uq_admin_policies_band_group_version"
+        ),
+        Index("ix_admin_policies_band_status", "class_band", "group", "status"),
+    )
+
+
+class StudentStudySettings(Base):
+    """Parent-configured study settings per student, clamped to admin hard limits."""
+
+    __tablename__ = "student_study_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    school_day_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    holiday_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
+    study_window_start: Mapped[str] = mapped_column(String(8), default="17:00", nullable=False)
+    study_window_end: Mapped[str] = mapped_column(String(8), default="21:30", nullable=False)
+    recurring_unavailable_blocks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, nullable=False
+    )
+    blocked_observance_keys: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    custom_blackout_dates: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, nullable=False
+    )
+    subject_priorities: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict, nullable=False)
+    rest_weekday: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    adaptive_mode: Mapped[str] = mapped_column(
+        String(32), default="suggest", nullable=False
+    )  # manual, suggest, auto_within_limits
+    ai_adjustments: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    parent_locked_fields: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    student: Mapped[User] = relationship("User")
+
+    __table_args__ = (Index("ix_student_study_settings_student_id", "student_id"),)

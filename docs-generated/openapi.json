@@ -1195,6 +1195,353 @@
           }
         }
       }
+    },
+    "/v1/students/{student_id}/study-settings": {
+      "get": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Get Student Study Settings",
+        "description": "Get resolved study settings and admin limits for student.",
+        "operationId": "get_student_study_settings_v1_students__student_id__study_settings_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentStudySettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Update Student Study Settings",
+        "description": "Parent updates student study settings.",
+        "operationId": "update_student_study_settings_v1_students__student_id__study_settings_put",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStudentStudySettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentStudySettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/study-settings/change-requests": {
+      "post": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Submit Student Settings Change Request",
+        "description": "Student submits proposed adjustments to their study settings.",
+        "operationId": "submit_student_settings_change_request_v1_students__student_id__study_settings_change_requests_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentChangeRequestInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentChangeRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/{path}": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Forward Admin Get",
+        "description": "Forward admin GET requests downstream to Core Service.",
+        "operationId": "gateway_admin_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Forward Admin Post",
+        "description": "Forward admin POST requests downstream to Core Service.",
+        "operationId": "gateway_admin_post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Forward Admin Put",
+        "description": "Forward admin PUT requests downstream to Core Service.",
+        "operationId": "gateway_admin_put",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Forward Admin Patch",
+        "description": "Forward admin PATCH requests downstream to Core Service.",
+        "operationId": "gateway_admin_patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Forward Admin Delete",
+        "description": "Forward admin DELETE requests downstream to Core Service.",
+        "operationId": "gateway_admin_delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1208,16 +1555,36 @@
           },
           "class_level": {
             "type": "integer",
-            "maximum": 8.0,
+            "maximum": 12.0,
             "minimum": 6.0,
             "title": "Class Level",
-            "description": "Class level (6-8)"
+            "description": "Class level (6-12)"
           },
           "medium": {
             "type": "string",
             "title": "Medium",
             "description": "Medium: bn or en",
             "default": "bn"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group",
+            "description": "Group for 9-12 (science, humanities, business_studies)"
+          },
+          "optional_subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Optional Subject Ids",
+            "description": "Optional or 4th subject identifiers"
           },
           "school": {
             "anyOf": [
@@ -1233,8 +1600,8 @@
           },
           "daily_minutes": {
             "type": "integer",
-            "maximum": 180.0,
-            "minimum": 15.0,
+            "maximum": 600.0,
+            "minimum": 0.0,
             "title": "Daily Minutes",
             "description": "Daily study target",
             "default": 45
@@ -1331,7 +1698,19 @@
               }
             ],
             "title": "Class Level",
-            "description": "Class level (6-8) for students"
+            "description": "Class level (6-12) for students"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group",
+            "description": "Group for 9-12 (science, humanities, business_studies)"
           },
           "medium": {
             "type": "string",
@@ -1584,6 +1963,38 @@
         ],
         "title": "CreateFamilyRequest"
       },
+      "CustomBlackoutDate": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "travel",
+              "family_event",
+              "school_event",
+              "other"
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "reason"
+        ],
+        "title": "CustomBlackoutDate",
+        "description": "Parent custom blackout date range with coarse reason choices only (no free text)."
+      },
       "DailyMinutesResponse": {
         "properties": {
           "student_id": {
@@ -1738,6 +2149,24 @@
             "type": "string",
             "title": "Medium"
           },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "optional_subject_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Optional Subject Ids"
+          },
           "school": {
             "anyOf": [
               {
@@ -1871,6 +2300,40 @@
         ],
         "title": "PlanResponse",
         "description": "Full versioned study plan."
+      },
+      "RecurringUnavailableBlock": {
+        "properties": {
+          "day_of_week": {
+            "type": "string",
+            "pattern": "^(sat|sun|mon|tue|wed|thu|fri)$",
+            "title": "Day Of Week"
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Start Time"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "End Time"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day_of_week",
+          "start_time",
+          "end_time",
+          "label"
+        ],
+        "title": "RecurringUnavailableBlock",
+        "description": "Recurring weekly unavailable window (coaching, tuition, etc.)."
       },
       "RedeemLinkRequest": {
         "properties": {
@@ -2035,8 +2498,15 @@
             "title": "Id"
           },
           "setup_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Setup Id"
           },
           "student_id": {
@@ -2062,7 +2532,6 @@
         "type": "object",
         "required": [
           "id",
-          "setup_id",
           "student_id",
           "requested_changes",
           "status",
@@ -2070,6 +2539,151 @@
         ],
         "title": "StudentChangeRequestResponse",
         "description": "Change request submission record."
+      },
+      "StudentStudySettingsResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "school_day_minutes": {
+            "type": "integer",
+            "title": "School Day Minutes"
+          },
+          "holiday_minutes": {
+            "type": "integer",
+            "title": "Holiday Minutes"
+          },
+          "study_window_start": {
+            "type": "string",
+            "title": "Study Window Start"
+          },
+          "study_window_end": {
+            "type": "string",
+            "title": "Study Window End"
+          },
+          "recurring_unavailable_blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Recurring Unavailable Blocks"
+          },
+          "blocked_observance_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocked Observance Keys"
+          },
+          "custom_blackout_dates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Custom Blackout Dates"
+          },
+          "subject_priorities": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Subject Priorities"
+          },
+          "rest_weekday": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rest Weekday"
+          },
+          "adaptive_mode": {
+            "type": "string",
+            "title": "Adaptive Mode",
+            "default": "suggest"
+          },
+          "ai_adjustments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ai Adjustments"
+          },
+          "parent_locked_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parent Locked Fields"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "clamping_notices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Clamping Notices"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "recommended_daily_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended Daily Minutes"
+          },
+          "admin_hard_limits": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Hard Limits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "student_id",
+          "school_day_minutes",
+          "holiday_minutes",
+          "study_window_start",
+          "study_window_end",
+          "recurring_unavailable_blocks",
+          "blocked_observance_keys",
+          "custom_blackout_dates",
+          "subject_priorities",
+          "version"
+        ],
+        "title": "StudentStudySettingsResponse",
+        "description": "Resolved student study settings with clamping notices and admin bounds."
       },
       "StudySetupResponse": {
         "properties": {
@@ -2183,6 +2797,20 @@
               }
             ],
             "title": "Custom Difficulty"
+          },
+          "mastery": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery",
+            "description": "Chapter mastery score (0-1), None = unknown"
           }
         },
         "type": "object",
@@ -2249,6 +2877,17 @@
               }
             ],
             "title": "Custom Difficulty"
+          },
+          "mastery": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mastery"
           }
         },
         "type": "object",
@@ -2501,6 +3140,121 @@
         },
         "type": "object",
         "title": "UpdateDeviceRequest"
+      },
+      "UpdateStudentStudySettingsRequest": {
+        "properties": {
+          "school_day_minutes": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "School Day Minutes",
+            "description": "Minutes on school days"
+          },
+          "holiday_minutes": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Holiday Minutes",
+            "description": "Minutes on holidays/weekends"
+          },
+          "study_window_start": {
+            "type": "string",
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Study Window Start",
+            "default": "17:00"
+          },
+          "study_window_end": {
+            "type": "string",
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Study Window End",
+            "default": "21:30"
+          },
+          "recurring_unavailable_blocks": {
+            "items": {
+              "$ref": "#/components/schemas/RecurringUnavailableBlock"
+            },
+            "type": "array",
+            "title": "Recurring Unavailable Blocks"
+          },
+          "blocked_observance_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocked Observance Keys"
+          },
+          "custom_blackout_dates": {
+            "items": {
+              "$ref": "#/components/schemas/CustomBlackoutDate"
+            },
+            "type": "array",
+            "title": "Custom Blackout Dates"
+          },
+          "subject_priorities": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Subject Priorities",
+            "description": "subject -> normal/main/difficult"
+          },
+          "rest_weekday": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rest Weekday",
+            "description": "Designated rest weekday (e.g. fri, sat, sun)"
+          },
+          "adaptive_mode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "suggest",
+              "auto_within_limits"
+            ],
+            "title": "Adaptive Mode",
+            "description": "Adaptive planning mode",
+            "default": "suggest"
+          },
+          "ai_adjustments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ai Adjustments",
+            "description": "Versioned AI adjustment overrides"
+          },
+          "parent_locked_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parent Locked Fields",
+            "description": "Fields explicitly locked by parent against AI overrides"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version",
+            "description": "Current version for optimistic concurrency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "school_day_minutes",
+          "holiday_minutes"
+        ],
+        "title": "UpdateStudentStudySettingsRequest",
+        "description": "Parent-configured study settings for a student."
       },
       "UpdateTaskStatusRequest": {
         "properties": {

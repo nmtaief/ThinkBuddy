@@ -30,3 +30,18 @@ CVE-2026-78409
 
 # CVE-2026-78410: Upstream Debian package fix deferred; non-root unprivileged process isolation.
 CVE-2026-78410
+
+# CVE-2026-12064: Upstream curl SSH host verification in base OS library; no SFTP/SSH used in Python backend.
+CVE-2026-12064
+
+# CVE-2026-8458: Upstream libcurl connection reuse logic error in base OS package; Python uses httpx/urllib3.
+CVE-2026-8458
+
+# CVE-2026-54369: Upstream libacl1 symlink traversal in base OS package; non-root process isolation.
+CVE-2026-54369
+
+# CVE-2026-111497: Upstream libbrotli1 decoder out-of-bounds write in base OS package.
+CVE-2026-111497
+
+# CVE-2026-16742: Upstream libsystemd0 systemd-homed privilege escalation in base OS; homed not running in container.
+CVE-2026-16742

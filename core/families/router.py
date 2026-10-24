@@ -51,10 +51,16 @@ class FamilyResponse(BaseModel):
 
 class AddChildRequest(BaseModel):
     display_name: str = Field(..., description="Student's name (Bangla or English)")
-    class_level: int = Field(..., ge=6, le=8, description="Class level (6-8)")
+    class_level: int = Field(..., ge=6, le=12, description="Class level (6-12)")
     medium: str = Field(default="bn", description="Medium: bn or en")
+    group: str | None = Field(
+        default=None, description="Group for 9-12 (science, humanities, business_studies)"
+    )
+    optional_subject_ids: list[str] = Field(
+        default_factory=list, description="Optional or 4th subject identifiers"
+    )
     school: str | None = Field(default=None, description="School name")
-    daily_minutes: int = Field(default=45, ge=15, le=180, description="Daily study target")
+    daily_minutes: int = Field(default=45, ge=0, le=600, description="Daily study target")
 
 
 class AddChildResponse(BaseModel):
@@ -81,6 +87,8 @@ class LinkedStudentResponse(BaseModel):
     display_name: str
     class_level: int
     medium: str
+    group: str | None = None
+    optional_subject_ids: list[str] = Field(default_factory=list)
     school: str | None = None
     daily_minutes: int
     link_id: uuid.UUID
@@ -171,6 +179,8 @@ async def add_child_to_family(
     student_profile = StudentProfile(
         user_id=student_user.id,
         class_level=payload.class_level,
+        group=payload.group,
+        optional_subject_ids=payload.optional_subject_ids,
         medium=payload.medium,
         school=payload.school,
         daily_minutes=payload.daily_minutes,
@@ -376,6 +386,8 @@ async def list_linked_students(
                 display_name=student.display_name,
                 class_level=profile.class_level if profile else 7,
                 medium=profile.medium if profile else "bn",
+                group=profile.group if profile else None,
+                optional_subject_ids=profile.optional_subject_ids if profile else [],
                 school=profile.school if profile else None,
                 daily_minutes=profile.daily_minutes if profile else 45,
                 link_id=link.id,
@@ -412,6 +424,8 @@ async def get_student_profile(
         "display_name": user.display_name,
         "class_level": profile.class_level if profile else 7,
         "medium": profile.medium if profile else "bn",
+        "group": profile.group if profile else None,
+        "optional_subject_ids": profile.optional_subject_ids if profile else [],
         "school": profile.school if profile else None,
         "daily_minutes": profile.daily_minutes if profile else 45,
         "status": user.status,

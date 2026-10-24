@@ -6,7 +6,7 @@ Conventions: UUID primary keys (`uuid7` if available), `created_at`/`updated_at`
 | Table | Key columns |
 |---|---|
 | `users` | id, auth_provider, auth_uid (unique), role (`student`/`parent`/`teacher`/`admin`), display_name, phone, email, locale (`bn`/`en`), status |
-| `student_profiles` | user_id (pk/fk), class_level (6–8 for beta), medium (`bn`/`en`), school, daily_minutes, available_days (bitmask or array) |
+| `student_profiles` | user_id (pk/fk), class_level (6–12), group (`science`/`humanities`/`business_studies`/`general`), optional_subject_ids (jsonb), medium (`bn`/`en`), school, daily_minutes, available_days |
 | `families` | id, owner_parent_id |
 | `family_members` | family_id, user_id, relation |
 | `parent_student_links` | id, parent_id, student_id, status (`pending`/`active`/`revoked`), link_code_hash, consent_at, revoked_at |
@@ -27,12 +27,17 @@ Conventions: UUID primary keys (`uuid7` if available), `created_at`/`updated_at`
 
 Indexes: HNSW on `chunks.embedding`, GIN on `chunks.tsv`, btree on (class_level via book, subject, chapter_id). Only chunks with `validation_flags` clean are `retrievable = true`.
 
-## 3. Planning
+## 3. Planning & Dynamic Configuration
 | Table | Key columns |
 |---|---|
-| `study_setups` | id, student_id, subject, exam_name, exam_date, set_by_user_id, active_plan_version |
+| `observance_catalog` | key (pk), name_bn, name_en, description, created_at |
+| `holidays` | id, start_date, end_date, name, holiday_type, study_blackout (bool), observance_key (fk), verified (bool), status (`draft`/`published`), version, created_at, updated_at |
+| `admin_policies` | id, class_band (`6-8`/`9-10`/`11-12`), group, version, status (`draft`/`published`), min_daily_minutes, max_daily_minutes, recommended_daily_minutes, max_block_minutes, latest_end_time, weekly_off_days (jsonb), planner_parameters (jsonb) |
+| `student_study_settings` | id, student_id (fk, unique), school_day_minutes, holiday_minutes, study_window_start, study_window_end, recurring_unavailable_blocks (jsonb), blocked_observance_keys (jsonb), custom_blackout_dates (jsonb), subject_priorities (jsonb), version, updated_by_user_id (fk) |
+| `student_change_requests` | id, setup_id (fk, nullable), student_id (fk), requested_changes (jsonb), status (`pending`/`approved`/`rejected`), created_at, reviewed_at, reviewed_by_id |
+| `study_setups` | id, student_id, subject, exam_name, exam_date, set_by_user_id, active_plan_version, version |
 | `syllabus_items` | id, setup_id, chapter_id, included bool, custom_order int, weight |
-| `plans` | id, setup_id, version, generated_at, reason (`initial`/`syllabus_change`/`exam_change`/`adaptive`/`missed_work`), params jsonb |
+| `plans` | id, setup_id, student_id, version, generated_at, reason (`initial`/`syllabus_change`/`exam_change`/`policy_publish`/`settings_change`/`multi_subject_sync`/`adaptive`), params jsonb (includes `settings_version`, `class_band`, `group`, day calendar) |
 | `plan_days` | id, plan_id, date, planned_minutes |
 | `tasks` | id, plan_day_id, student_id, type (`study`/`revision`/`homework`/`quiz`/`broad`/`review_quiz`), chapter_id, refs jsonb (book/page ranges), est_minutes, status (`todo`/`in_progress`/`done`/`skipped`/`rolled`), source (`planner`/`adaptive`/`teacher`), completed_at |
 
