@@ -10,12 +10,16 @@ Per docs/05_SECURE_QUIZ.md §2, §4, §5:
 
 from __future__ import annotations
 
+import logging
 import random
 import secrets
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from core.quiz.models import (
     AttemptItem,
@@ -102,23 +106,43 @@ class QuizBuilderService:
         # 2. Exclude questions the student has seen and answered in assessed quizzes
         if student_id and mode == "assessed":
             answered_stmt = (
-                select(AttemptItem.question_id)
+                select(AttemptItem.question_id, AttemptItem.answered_at)
                 .join(QuizAttempt, QuizAttempt.id == AttemptItem.attempt_id)
                 .where(
                     QuizAttempt.student_id == student_id,
                     AttemptItem.answered_at.is_not(None),
                 )
+                .order_by(AttemptItem.answered_at.asc())
             )
             answered_res = await self.db.execute(answered_stmt)
-            answered_q_ids = set(answered_res.scalars().all())
+            answered_rows = list(answered_res.all())
+            answered_q_ids = {r[0] for r in answered_rows}
 
             unseen = [q for q in candidates if q.id not in answered_q_ids]
             if len(unseen) >= question_count:
                 candidates = unseen
-            elif unseen:
-                # Prioritize unseen questions first, fill remaining from candidates
-                seen = [q for q in candidates if q.id in answered_q_ids]
-                candidates = unseen + seen
+            else:
+                # Fallback for exhausted assessed pools:
+                # 1. Take all available unseen questions
+                # 2. Recycle oldest-answered questions (LRU) from candidates (never practice-only)
+                needed = question_count - len(unseen)
+                logger.warning(
+                    "Assessed question pool exhausted for student %s (unseen=%d, needed=%d). "
+                    "Applying LRU recycling fallback within allowed pool %s.",
+                    student_id,
+                    len(unseen),
+                    needed,
+                    allowed_pools,
+                )
+                earliest_answered: dict[uuid.UUID, datetime] = {}
+                for q_id, ans_at in answered_rows:
+                    if q_id not in earliest_answered and ans_at:
+                        earliest_answered[q_id] = ans_at
+
+                seen_candidates = [q for q in candidates if q.id in answered_q_ids]
+                seen_candidates.sort(key=lambda q: earliest_answered.get(q.id, datetime.min))
+                recycled = seen_candidates[:needed]
+                candidates = unseen + recycled
 
         # 3. Group by variant_group_id to enforce deduplication
         variant_groups: dict[uuid.UUID, list[Question]] = {}

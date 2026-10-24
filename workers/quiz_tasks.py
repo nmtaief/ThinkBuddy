@@ -20,7 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from core.common.database import AsyncSessionLocal
 from core.quiz.grading import QuizGradingService
-from core.quiz.models import QuizAttempt
+from core.quiz.models import OPEN_ATTEMPT_STATES, QuizAttempt
 from workers.celery_app import celery_app
 
 logger = logging.getLogger("thinkbuddy.workers.quiz_tasks")
@@ -40,7 +40,7 @@ async def auto_submit_expired_attempts(db: AsyncSession | None = None) -> int:
 
 
 async def _process_expired_attempts(session: AsyncSession) -> int:
-    """Internal implementation for processing expired attempts within an active session."""
+    """Internal implementation for processing expired attempts using FOR UPDATE SKIP LOCKED."""
     now = utcnow()
     stmt = (
         select(QuizAttempt)
@@ -49,8 +49,9 @@ async def _process_expired_attempts(session: AsyncSession) -> int:
             QuizAttempt.submitted_at.is_(None),
             QuizAttempt.deadline_at.is_not(None),
             QuizAttempt.deadline_at <= now,
-            QuizAttempt.state.in_(["active", "created", "paused"]),
+            QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
         )
+        .with_for_update(skip_locked=True)
     )
     res = await session.execute(stmt)
     expired_attempts = list(res.scalars().all())
@@ -62,6 +63,10 @@ async def _process_expired_attempts(session: AsyncSession) -> int:
     count = 0
 
     for attempt in expired_attempts:
+        # Idempotency check: if another process submitted in the interim
+        if attempt.submitted_at is not None:
+            continue
+
         attempt.state = "expired"
         attempt.submitted_at = attempt.deadline_at or now
 

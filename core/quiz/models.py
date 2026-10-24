@@ -189,11 +189,14 @@ class QuizAttempt(Base):
     )
 
 
+OPEN_ATTEMPT_STATES: tuple[str, ...] = ("created", "active", "warned", "paused")
+
+
 Index(
     "uq_quiz_attempts_active_student_assessed",
     QuizAttempt.student_id,
     unique=True,
-    postgresql_where=text("state = 'active' AND mode = 'assessed'"),
+    postgresql_where=text("state IN ('created', 'active', 'warned', 'paused') AND mode = 'assessed'"),
 )
 
 

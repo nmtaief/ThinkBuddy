@@ -18,7 +18,7 @@ from core.auth.router import (
     TokenResponse,
     UserResponse,
 )
-from core.auth.tokens import hash_link_code
+from core.auth.tokens import decode_access_jwt, hash_link_code
 from core.common.logging import request_id_ctx
 from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.curriculum.schemas import (
@@ -615,6 +615,7 @@ async def submit_student_settings_change_request(
 # Quiz Engine (docs/04_API_CONTRACT.md §2, docs/05_SECURE_QUIZ.md)
 # -------------------------------------------------------------------------
 from core.quiz.schemas import (
+    AllowAttemptRequest,
     AnswerItemRequest,
     AnswerItemResponse,
     AttemptEventRequest,
@@ -624,6 +625,28 @@ from core.quiz.schemas import (
     StartAttemptResponse,
     SubmitAttemptResponse,
 )
+
+
+def _get_authenticated_user_id(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ").strip()
+        try:
+            claims = decode_access_jwt(token)
+            return claims.get("sub")
+        except Exception:
+            return None
+    return None
+
+
+@router.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@router.api_route("/v1/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def block_gateway_internal_routes(path: str) -> Response:
+    """Public gateway strictly refuses to proxy internal routes."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"error": {"code": "NOT_FOUND", "message": "Resource not found."}},
+    )
 
 
 @router.post(
@@ -647,24 +670,49 @@ async def start_quiz_attempt_gateway(
     payload: StartAttemptRequest,
     request: Request,
 ) -> Response:
-    """Start a quiz attempt. Enforces rate limits, platform rules, deadline, and sequential question serving."""
+    """Start a quiz attempt with dual user and IP rate limits."""
     client_ip = get_trusted_client_ip(request)
     device_id = payload.device_id or request.headers.get("X-Device-Id")
-    rate_key = build_rate_limit_key("start_attempt", client_ip, device_id)
-    allowed, retry_after = await RateLimiter.check_rate_limit(
-        key=rate_key,
-        max_requests=10,
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (5 requests / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("start_attempt_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=5,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many quiz attempt requests for this user account. Please wait.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (25 requests / min per IP)
+    ip_rate_key = build_rate_limit_key("start_attempt_ip", client_ip, device_id)
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=25,
         window_seconds=60,
     )
-    if not allowed:
+    if not ip_ok:
         req_id = request_id_ctx.get() or ""
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(ip_retry)},
             content={
                 "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Too many quiz attempt requests. Please wait before retrying.",
+                    "message": "Too many requests from this IP network. Please wait.",
                     "request_id": req_id,
                 }
             },
@@ -684,28 +732,66 @@ async def answer_quiz_item_gateway(
     payload: AnswerItemRequest,
     request: Request,
 ) -> Response:
-    """Submit answer for sequential quiz item with rate limiting, nonce, and deadline verification."""
+    """Submit answer for sequential quiz item with dual user and IP rate limits."""
     client_ip = get_trusted_client_ip(request)
-    rate_key = build_rate_limit_key("answer_item", client_ip, str(attempt_id))
-    allowed, retry_after = await RateLimiter.check_rate_limit(
-        key=rate_key,
-        max_requests=30,
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (20 answers / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("answer_item_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=20,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many answer submissions for this user account. Please slow down.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (60 answers / min per IP)
+    ip_rate_key = build_rate_limit_key("answer_item_ip", client_ip, str(attempt_id))
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=60,
         window_seconds=60,
     )
-    if not allowed:
+    if not ip_ok:
         req_id = request_id_ctx.get() or ""
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after)},
+            headers={"Retry-After": str(ip_retry)},
             content={
                 "error": {
                     "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Too many answer submissions. Please slow down.",
+                    "message": "Too many answer submissions from this network. Please slow down.",
                     "request_id": req_id,
                 }
             },
         )
 
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/allow",
+    tags=["Quiz"],
+)
+async def allow_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    payload: AllowAttemptRequest,
+    request: Request,
+) -> Response:
+    """Parent or admin override to allow an attempt that was warned, paused, or invalidated."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 

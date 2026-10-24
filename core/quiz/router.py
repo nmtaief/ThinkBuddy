@@ -10,15 +10,17 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.dependencies import get_current_user, require_role
 from core.auth.models import User
 from core.common.database import get_db_session
-from core.quiz.models import QuizAttempt
+from core.common.service_token import require_internal_service_token
+from core.quiz.models import OPEN_ATTEMPT_STATES, QuizAttempt
 from core.quiz.schemas import (
+    AllowAttemptRequest,
     AnswerItemRequest,
     AnswerItemResponse,
     AttemptEventRequest,
@@ -112,6 +114,7 @@ async def start_quiz_attempt(
     payload: StartAttemptRequest,
     current_user: Annotated[User, Depends(require_role("student"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    request: Request,
     x_client_platform: str = Header("android", alias="X-Client-Platform"),
     x_device_id: str | None = Header(None, alias="X-Device-Id"),
     x_device_integrity: str | None = Header(None, alias="X-Device-Integrity"),
@@ -131,6 +134,7 @@ async def start_quiz_attempt(
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
         integrity_verdict=payload.integrity_verdict or x_device_integrity,
+        headers=dict(request.headers),
     )
 
 
@@ -241,6 +245,30 @@ async def review_quiz_attempt(
     )
 
 
+@router.post(
+    "/attempts/{attempt_id}/allow",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    tags=["Quiz"],
+)
+async def allow_quiz_attempt(
+    attempt_id: uuid.UUID,
+    payload: AllowAttemptRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Parent or admin override to allow an attempt that was warned, paused, or invalidated."""
+    service = QuizService(db)
+    attempt = await service.allow_attempt(attempt_id, current_user, payload.reason)
+    return {
+        "attempt_id": str(attempt.id),
+        "state": attempt.state,
+        "integrity_score": attempt.integrity_score,
+        "invalid_reason": attempt.invalid_reason,
+        "allowed": True,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Internal Gateway & Chat Support Endpoints
 # ---------------------------------------------------------------------------
@@ -254,26 +282,39 @@ async def review_quiz_attempt(
 async def is_assessed_attempt_active(
     student_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    _service_token: Annotated[dict[str, Any], Depends(require_internal_service_token)],
 ) -> dict[str, Any]:
     """Internal service endpoint used by gateway/chat to detect active assessed attempts."""
     service = QuizService(db)
     is_active = await service.is_assessed_attempt_active(student_id)
-    attempt_id = None
+    attempt_info: dict[str, Any] = {
+        "student_id": str(student_id),
+        "is_active": is_active,
+        "attempt_id": None,
+        "deadline_at": None,
+        "mode": None,
+        "state": None,
+    }
     if is_active:
         stmt = (
-            select(QuizAttempt.id)
+            select(QuizAttempt)
             .where(
                 QuizAttempt.student_id == student_id,
-                QuizAttempt.submitted_at.is_(None),
+                QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
                 QuizAttempt.mode == "assessed",
             )
             .limit(1)
         )
         res = await db.execute(stmt)
-        attempt_id = res.scalar_one_or_none()
+        attempt = res.scalar_one_or_none()
+        if attempt:
+            attempt_info.update(
+                {
+                    "attempt_id": str(attempt.id),
+                    "deadline_at": attempt.deadline_at.isoformat() if attempt.deadline_at else None,
+                    "mode": attempt.mode,
+                    "state": attempt.state,
+                }
+            )
 
-    return {
-        "student_id": str(student_id),
-        "is_active": is_active,
-        "attempt_id": str(attempt_id) if attempt_id else None,
-    }
+    return attempt_info

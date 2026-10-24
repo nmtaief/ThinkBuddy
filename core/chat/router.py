@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth.dependencies import get_current_user, require_role
 from core.auth.models import User
 from core.common.database import get_db_session
-from core.quiz.models import AttemptEvent, Quiz, QuizAttempt
+from core.quiz.models import OPEN_ATTEMPT_STATES, AttemptEvent, Quiz, QuizAttempt
 from core.quiz.service import QuizService
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -29,13 +29,13 @@ async def _assert_no_active_assessed_quiz(student_id: uuid.UUID, db: AsyncSessio
     quiz_service = QuizService(db)
     is_active = await quiz_service.is_assessed_attempt_active(student_id)
     if is_active:
-        # Fetch active attempt to record the telemetry violation
+        # Fetch active attempt across all open states to record the telemetry violation
         stmt = (
             select(QuizAttempt)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
             .where(
                 QuizAttempt.student_id == student_id,
-                QuizAttempt.submitted_at.is_(None),
+                QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
                 Quiz.mode == "assessed",
             )
         )

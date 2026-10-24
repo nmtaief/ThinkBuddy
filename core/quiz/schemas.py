@@ -137,6 +137,10 @@ class AttemptReviewResponse(BaseModel):
     items: list[AttemptItemReview]
 
 
+class AllowAttemptRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500, description="Parent or admin reason for allowing the attempt")
+
+
 # ---------------------------------------------------------------------------
 # Admin Question Bank Import Schemas
 # ---------------------------------------------------------------------------

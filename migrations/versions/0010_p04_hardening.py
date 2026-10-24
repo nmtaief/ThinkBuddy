@@ -33,13 +33,13 @@ def upgrade() -> None:
         sa.Column("mode", sa.String(length=16), nullable=False, server_default="assessed"),
     )
 
-    # 2. Database-level constraint: partial unique index for active assessed attempts
+    # 2. Database-level constraint: partial unique index for open assessed attempts (created, active, warned, paused)
     op.create_index(
         "uq_quiz_attempts_active_student_assessed",
         "quiz_attempts",
         ["student_id"],
         unique=True,
-        postgresql_where=sa.text("state = 'active' AND mode = 'assessed'"),
+        postgresql_where=sa.text("state IN ('created', 'active', 'warned', 'paused') AND mode = 'assessed'"),
     )
 
     # 3. Add pool column to questions table

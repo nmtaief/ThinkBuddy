@@ -61,19 +61,20 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
 - `POST /quizzes/{id}/attempts` – start attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
-  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit (409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`).
-  - Device Integrity: Evaluates `X-Device-Integrity` header (pluggable device attestation); rejects compromised/untrusted devices with 403 `DEVICE_INTEGRITY_FAILED`.
-  - Rate limit: 10 requests / minute per client IP.
+  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit across all open states (`created`, `active`, `warned`, `paused`) via 409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`.
+  - Device Integrity: Evaluates Play Integrity tokens with package name (`com.thinkbuddy.app`), nonce, and freshness (< 5 min) checks; stubs report `UNVERIFIED` and are forbidden outside `ENV=local`; non-Play devices receive `LOW_TRUST` with scrutiny.
+  - Dual Rate limits: 5 requests / min per authenticated user plus higher 25 requests / min per-IP ceiling.
 - `POST /attempts/{id}/items/{position}/answer` – submit one answer sequentially; returns `next_item` and `has_more`.
   - In assessed mode, correctness feedback is strictly withheld until submit (`is_correct: null`).
-  - Server-side anomaly detection: checks for too-fast responses, unnatural answer submission after focus loss, and suspicious streaks, emitting security signals and updating integrity score / state.
-  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
-  - Rate limit: 30 requests / minute per client IP.
-- `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state` (`in_progress`, `warned`, `paused`, `invalidated`).
-- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`). Idempotent on repeated calls.
+  - Server-side anomaly detection: checks too-fast responses (scaled by question type and stem character length), unnatural answer submission right after focus loss, and suspicious streaks. Invalidation strictly requires $\ge 2$ distinct anomaly signals; deadline never extends on pause.
+  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 403 `ATTEMPT_PAUSED`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
+  - Dual Rate limits: 15 requests / min per authenticated user plus 60 requests / min per-IP ceiling.
+- `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state`.
+- `POST /attempts/{id}/allow` – linked parent or admin override to allow an attempt that was warned, paused, or invalidated (verifies linked parent ownership; resets state, restores score, and records immutable `AuditLog` entry).
+- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`) idempotently.
 - `GET /attempts/{id}/review` – get attempt review with correct answers and explanations.
   - Strictly blocked with 403 `ATTEMPT_NOT_SUBMITTED` while attempt is active/unsubmitted!
-- `GET /internal/quiz/students/{id}/active-attempt` – internal gateway/service route checking whether student has an active assessed attempt (returns `{ "is_active": boolean, "attempt_id": UUID | null, "deadline_at": datetime | null, "mode": str | null }`).
+- `GET /internal/quiz/students/{id}/active-attempt` – internal service route checking whether student has an open assessed attempt (`created`, `active`, `warned`, `paused`). Strictly rejected by gateway with 404; requires signed HS256 JWT service token.
 
 ### Admin Question Bank (`/admin/questions*`, role: admin)
 - `POST /admin/questions` – create question item and isolated question key in `question_keys` table (zero leak to student routes, audit logged).

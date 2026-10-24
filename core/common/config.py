@@ -47,6 +47,14 @@ class CoreSettings(BaseSettings):
         default="dev_internal_service_token_placeholder_change_in_production",
         description="Shared secret for gateway-to-core communication",
     )
+    INTERNAL_SERVICE_SECRET: str = Field(
+        default="dev_internal_service_hmac_secret_32bytes_min_key!",
+        description="HMAC secret key for signing inter-service JWTs",
+    )
+    QUESTION_KEY_ENCRYPTION_KEY: str = Field(
+        default="dev_question_key_aes_gcm_32bytes_secret_key!",
+        description="AES-GCM key for encrypting question keys at rest",
+    )
 
     # Database
     DATABASE_URL: str = Field(

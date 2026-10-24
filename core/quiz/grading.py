@@ -132,7 +132,7 @@ class QuizGradingService:
         final_score = round((total_points / max_points) * 100.0, 1) if max_points > 0 else 0.0
         attempt.score = final_score
 
-        # Emit learning signals for mistakes and slow responses
+        # Emit learning signals for mistakes and slow responses (idempotent check)
         for it in items:
             # Mistake signal
             if it.is_correct is False:
@@ -140,30 +140,44 @@ class QuizGradingService:
                 q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    signal = LearningSignal(
-                        student_id=attempt.student_id,
-                        source="quiz_wrong",
-                        chapter_id=q.chapter_id,
-                        concept_id=q.concept_id,
-                        weight=1.0,
-                        ref_id=str(it.id),
+                    existing_wrong = await self.db.execute(
+                        select(LearningSignal.id).where(
+                            LearningSignal.ref_id == str(it.id),
+                            LearningSignal.source == "quiz_wrong",
+                        )
                     )
-                    self.db.add(signal)
+                    if not existing_wrong.scalar_one_or_none():
+                        signal = LearningSignal(
+                            student_id=attempt.student_id,
+                            source="quiz_wrong",
+                            chapter_id=q.chapter_id,
+                            concept_id=q.concept_id,
+                            weight=1.0,
+                            ref_id=str(it.id),
+                        )
+                        self.db.add(signal)
 
             # Slow response signal (> 90s)
             if it.time_spent_ms > 90000:
                 q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    signal_slow = LearningSignal(
-                        student_id=attempt.student_id,
-                        source="quiz_slow",
-                        chapter_id=q.chapter_id,
-                        concept_id=q.concept_id,
-                        weight=0.5,
-                        ref_id=str(it.id),
+                    existing_slow = await self.db.execute(
+                        select(LearningSignal.id).where(
+                            LearningSignal.ref_id == str(it.id),
+                            LearningSignal.source == "quiz_slow",
+                        )
                     )
-                    self.db.add(signal_slow)
+                    if not existing_slow.scalar_one_or_none():
+                        signal_slow = LearningSignal(
+                            student_id=attempt.student_id,
+                            source="quiz_slow",
+                            chapter_id=q.chapter_id,
+                            concept_id=q.concept_id,
+                            weight=0.5,
+                            ref_id=str(it.id),
+                        )
+                        self.db.add(signal_slow)
 
         await self.db.flush()
         return final_score

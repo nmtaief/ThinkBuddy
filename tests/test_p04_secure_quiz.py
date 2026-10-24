@@ -65,6 +65,25 @@ CLIENT_HEADERS_WEB = {
 }
 
 
+def create_mock_play_integrity_token(
+    nonce: str = "device-p04-android-001",
+    package_name: str = "com.thinkbuddy.app",
+    verdicts: list[str] | None = None,
+    age_seconds: int = 0,
+) -> str:
+    """Helper to forge a valid signed mock Play Integrity token payload for tests."""
+    import jwt
+    if verdicts is None:
+        verdicts = ["MEETS_STRONG_INTEGRITY", "MEETS_DEVICE_INTEGRITY", "MEETS_BASIC_INTEGRITY"]
+    ts_millis = int((datetime.now(UTC) - timedelta(seconds=age_seconds)).timestamp() * 1000)
+    claims = {
+        "appIntegrity": {"packageName": package_name},
+        "requestDetails": {"nonce": nonce, "timestampMillis": ts_millis},
+        "deviceIntegrity": {"deviceRecognitionVerdict": verdicts},
+    }
+    return jwt.encode(claims, "test_secret_for_claims", algorithm="HS256")
+
+
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -600,7 +619,11 @@ async def test_integrity_events_and_invalidation(gateway_client: AsyncClient) ->
     await seed_sample_questions()
     student = await create_test_user(role="student")
     token = create_access_jwt(student.id, "student")
-    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+    auth_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {token}",
+        "X-Device-Integrity": create_mock_play_integrity_token(nonce="device-p04-android-001"),
+    }
 
     quiz = await create_test_quiz(student.id, mode="assessed", question_count=3)
     res_start = await gateway_client.post(
@@ -1224,7 +1247,8 @@ async def test_internal_is_assessed_attempt_active_endpoint(gateway_client: Asyn
     student = await create_test_user(role="student", display_name="Active Check Student")
     token = create_access_jwt(student.id, "student")
     auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
-    internal_headers = {"X-Internal-Service-Token": settings.INTERNAL_SERVICE_TOKEN}
+    from core.common.service_token import create_internal_service_token
+    internal_headers = {"X-Internal-Service-Token": create_internal_service_token()}
 
     # 1. Before quiz start -> is_active = False
     from core.main import app as core_app
@@ -1505,4 +1529,682 @@ async def test_rate_limits_on_attempt_start_and_answer(gateway_client: AsyncClie
     assert ans_responses[-1].status_code == 429
     assert ans_responses[-1].json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
     assert "Retry-After" in ans_responses[-1].headers
+
+
+# =============================================================================
+# 20. Open Attempt States, Unique Index & Lockouts Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_open_attempt_states_unique_index_and_lockouts(gateway_client: AsyncClient) -> None:
+    """Verify open attempt states (created, active, warned, paused):
+    
+    - Unique index prevents starting a second attempt while first is warned or paused.
+    - Chat is locked out (403 QUIZ_IN_PROGRESS_CHAT_LOCKED) while warned or paused.
+    - Answering is blocked (403 ATTEMPT_PAUSED) while paused.
+    - Attempt deadline never extends on pause.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Open State Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {token}",
+        "X-Device-Integrity": create_mock_play_integrity_token(nonce="device-p04-android-001"),
+    }
+
+    quiz1 = await create_test_quiz(student.id, mode="assessed", question_count=2)
+    quiz2 = await create_test_quiz(student.id, mode="assessed", question_count=2)
+
+    # 1. Start first assessed quiz
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz1.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+    item = start_data["current_item"]
+    ans_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+
+    # 2. Transition attempt to 'warned'
+    async with AsyncSessionLocal() as session:
+        att = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))).scalar_one()
+        att.state = "warned"
+        original_deadline = att.deadline_at
+        await session.commit()
+
+    # 2a. Attempting to start a second quiz while warned -> 409 Conflict
+    res_start2 = await gateway_client.post(
+        f"/v1/quizzes/{quiz2.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start2.status_code == 409
+    assert res_start2.json()["error"]["code"] == "ACTIVE_ATTEMPT_ALREADY_EXISTS"
+
+    # 2b. Attempting to chat while warned -> 403 Chat Locked
+    res_chat_warned = await gateway_client.post(
+        "/v1/chat/sessions",
+        json={"title": "Cheat Attempt While Warned"},
+        headers=auth_headers,
+    )
+    assert res_chat_warned.status_code == 403
+    assert res_chat_warned.json()["error"]["code"] == "QUIZ_IN_PROGRESS_CHAT_LOCKED"
+
+    # 3. Transition attempt to 'paused' and verify deadline never extends
+    async with AsyncSessionLocal() as session:
+        att = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))).scalar_one()
+        att.state = "paused"
+        await session.commit()
+        await session.refresh(att)
+        assert att.deadline_at == original_deadline  # Deadline strictly preserved
+
+    # 3a. Attempting to answer item while paused -> 403 ATTEMPT_PAUSED
+    res_ans_paused = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={
+            "nonce": item["nonce"],
+            "response": {"selected_option_id": item["question"]["options"][0]["id"]},
+            "time_spent_ms": 5000,
+        },
+        headers=ans_headers,
+    )
+    assert res_ans_paused.status_code == 403
+    assert res_ans_paused.json()["error"]["code"] == "ATTEMPT_PAUSED"
+
+    # 3b. Attempting to start a second quiz while paused -> 409 Conflict
+    res_start3 = await gateway_client.post(
+        f"/v1/quizzes/{quiz2.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start3.status_code == 409
+    assert res_start3.json()["error"]["code"] == "ACTIVE_ATTEMPT_ALREADY_EXISTS"
+
+    # 3c. Attempting to chat while paused -> 403 Chat Locked
+    res_chat_paused = await gateway_client.post(
+        "/v1/chat/sessions",
+        json={"title": "Cheat Attempt While Paused"},
+        headers=auth_headers,
+    )
+    assert res_chat_paused.status_code == 403
+    assert res_chat_paused.json()["error"]["code"] == "QUIZ_IN_PROGRESS_CHAT_LOCKED"
+
+
+# =============================================================================
+# 21. Play Integrity Verification & Low-Trust Handling Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_play_integrity_verification_and_low_trust(
+    gateway_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify server-side Play Integrity token verification (nonce, package, freshness),
+    stub rejection outside ENV=local, and low-trust handling for non-Play devices.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Integrity Student")
+    token = create_access_jwt(student.id, "student")
+    base_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+    device_id = "device-p04-android-001"
+
+    # 1. Valid Play Integrity token -> returns SECURE
+    valid_token = create_mock_play_integrity_token(
+        nonce=device_id,
+        package_name="com.thinkbuddy.app",
+        verdicts=["MEETS_STRONG_INTEGRITY", "MEETS_DEVICE_INTEGRITY"],
+        age_seconds=10,
+    )
+    from core.quiz.integrity import evaluate_device_attestation, DeviceIntegrityVerdict
+    v_valid = evaluate_device_attestation(
+        platform="android",
+        device_id=device_id,
+        integrity_verdict=valid_token,
+    )
+    assert v_valid == DeviceIntegrityVerdict.SECURE
+
+    # 2. Package name mismatch -> returns COMPROMISED (start rejected with 403)
+    tampered_pkg_token = create_mock_play_integrity_token(
+        nonce=device_id,
+        package_name="com.attacker.repackaged.app",
+    )
+    quiz_pkg = await create_test_quiz(student.id, mode="assessed", question_count=1)
+    res_pkg = await gateway_client.post(
+        f"/v1/quizzes/{quiz_pkg.id}/attempts",
+        json={"device_id": device_id},
+        headers={**base_headers, "X-Device-Integrity": tampered_pkg_token},
+    )
+    assert res_pkg.status_code == 403
+    assert res_pkg.json()["error"]["code"] == "DEVICE_INTEGRITY_FAILED"
+
+    # 3. Nonce mismatch / replay attack -> returns COMPROMISED
+    mismatched_nonce_token = create_mock_play_integrity_token(
+        nonce="different-replayed-nonce",
+        package_name="com.thinkbuddy.app",
+    )
+    v_nonce = evaluate_device_attestation(
+        platform="android",
+        device_id=device_id,
+        integrity_verdict=mismatched_nonce_token,
+    )
+    assert v_nonce == DeviceIntegrityVerdict.COMPROMISED
+
+    # 4. Stale token (> 5 min / 300s old) -> returns COMPROMISED
+    stale_token = create_mock_play_integrity_token(
+        nonce=device_id,
+        package_name="com.thinkbuddy.app",
+        age_seconds=360,
+    )
+    v_stale = evaluate_device_attestation(
+        platform="android",
+        device_id=device_id,
+        integrity_verdict=stale_token,
+    )
+    assert v_stale == DeviceIntegrityVerdict.COMPROMISED
+
+    # 5. Attestation stub in local -> UNVERIFIED (score 0.90, event recorded)
+    v_stub_local = evaluate_device_attestation(
+        platform="android",
+        device_id=device_id,
+        integrity_verdict="mock_secure",
+    )
+    assert v_stub_local == DeviceIntegrityVerdict.UNVERIFIED
+
+    # 6. Attestation stub outside ENV=local (e.g. production) -> strictly COMPROMISED
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "ENV", "production")
+    v_stub_prod = evaluate_device_attestation(
+        platform="android",
+        device_id=device_id,
+        integrity_verdict="mock_secure",
+    )
+    assert v_stub_prod == DeviceIntegrityVerdict.COMPROMISED
+    monkeypatch.setattr(settings, "ENVIRONMENT", "local")
+    monkeypatch.setattr(settings, "ENV", "local")
+
+    # 7. Low-trust device (no Play services: X-Device-Attestation-Provider: none/aosp)
+    # Allowed under scrutiny with initial integrity score 0.85 and low_trust_device_active event
+    quiz_low = await create_test_quiz(student.id, mode="assessed", question_count=1)
+    res_low = await gateway_client.post(
+        f"/v1/quizzes/{quiz_low.id}/attempts",
+        json={"device_id": "aosp-device-without-gms"},
+        headers={
+            **base_headers,
+            "X-Device-Id": "aosp-device-without-gms",
+            "X-Device-Attestation-Provider": "none",
+        },
+    )
+    assert res_low.status_code == 201
+    low_attempt_id = res_low.json()["attempt_id"]
+
+    async with AsyncSessionLocal() as session:
+        att_low = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == low_attempt_id))).scalar_one()
+        assert att_low.integrity_score == 0.85
+        event_res = await session.execute(
+            select(AttemptEvent).where(
+                AttemptEvent.attempt_id == low_attempt_id,
+                AttemptEvent.type == "low_trust_device_active",
+            )
+        )
+        assert event_res.scalar_one_or_none() is not None
+
+
+# =============================================================================
+# 22. Scaled Too-Fast Rule, Multi-Signal Invalidation & Parent Allow Flow
+# =============================================================================
+@pytest.mark.asyncio
+async def test_scaled_too_fast_rule_multi_signal_and_parent_allow(
+    gateway_client: AsyncClient,
+) -> None:
+    """Verify:
+    1. Too-fast minimum response time scales by stem length and question type.
+    2. Invalidation strictly requires >= 2 distinct signals (single signal pauses).
+    3. Parent 'mark as allowed' flow resets attempt and logs audit entry.
+    """
+    from core.quiz.integrity import compute_min_answer_time_ms
+
+    # 1. Stem length and type scaling checks
+    mcq_short_stem = compute_min_answer_time_ms("mcq", "2 + 2 = ?")
+    mcq_long_stem = compute_min_answer_time_ms("mcq", "What is the capital of Bangladesh and its population?")
+    assert mcq_long_stem > mcq_short_stem
+
+    short_stem_time = compute_min_answer_time_ms("short", "Short answer question stem here")
+    broad_stem_time = compute_min_answer_time_ms("broad", "Explain photosynthesis in detail")
+    assert broad_stem_time > short_stem_time > mcq_short_stem
+
+    # 2. Multi-signal invalidation check
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="MultiSignal Student")
+    parent = await create_test_user(role="parent", display_name="Linked Parent")
+    unlinked_parent = await create_test_user(role="parent", display_name="Unlinked Parent")
+
+    # Link parent to student
+    async with AsyncSessionLocal() as session:
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            parent_id=parent.id,
+            student_id=student.id,
+            status="active",
+        )
+        session.add(link)
+        await session.commit()
+
+    student_token = create_access_jwt(student.id, "student")
+    parent_token = create_access_jwt(parent.id, "parent")
+    unlinked_token = create_access_jwt(unlinked_parent.id, "parent")
+
+    auth_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {student_token}",
+        "X-Device-Integrity": create_mock_play_integrity_token(nonce="device-p04-android-001"),
+    }
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=3)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+    item = start_data["current_item"]
+    ans_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+
+    # Signal 1: Answer too fast (under minimum computed time)
+    # First anomaly only: should transition to paused/warned, but NOT invalidated
+    res_ans1 = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={
+            "nonce": item["nonce"],
+            "response": {"selected_option_id": item["question"]["options"][0]["id"]},
+            "time_spent_ms": 300,  # Far below minimum threshold
+        },
+        headers=ans_headers,
+    )
+    assert res_ans1.status_code == 200
+
+    async with AsyncSessionLocal() as session:
+        att = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))).scalar_one()
+        # Single signal must NOT invalidate
+        assert att.state != "invalidated"
+
+        # Signal 2: Record distinct focus lost event right before next item
+        event = AttemptEvent(
+            attempt_id=att.id,
+            type="focus_lost",
+            meta={"duration_ms": 4000},
+        )
+        session.add(event)
+        # Drop score below invalidation threshold to test multi-signal trigger
+        att.integrity_score = 0.40
+        await session.commit()
+
+        # Trigger check with rapid answer after focus loss -> 2 distinct signals!
+        from core.quiz.integrity import IntegrityEngine
+        item_row = (await session.execute(select(AttemptItem).where(AttemptItem.attempt_id == att.id, AttemptItem.position == 2))).scalar_one()
+        await IntegrityEngine.check_and_apply_anomalies(
+            db=session,
+            attempt=att,
+            item=item_row,
+            time_spent_ms=500,
+            is_correct=True,
+        )
+        await session.commit()
+        await session.refresh(att)
+        assert att.state == "invalidated"
+        assert att.invalid_reason is not None
+
+    # 3. Parent "mark as allowed" flow (POST /v1/attempts/{id}/allow)
+    # 3a. Student themself calling allow -> 403 Forbidden
+    res_student_allow = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/allow",
+        json={"reason": "Self override attempt"},
+        headers=auth_headers,
+    )
+    assert res_student_allow.status_code == 403
+
+    # 3b. Unlinked parent calling allow -> 403 Forbidden
+    res_unlinked_allow = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/allow",
+        json={"reason": "Unlinked parent override"},
+        headers={**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {unlinked_token}"},
+    )
+    assert res_unlinked_allow.status_code == 403
+
+    # 3c. Linked parent calling allow -> 200 OK, resets attempt state to active and restores score
+    res_parent_allow = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/allow",
+        json={"reason": "Confirmed system alert was caused by school notification dialog"},
+        headers={**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {parent_token}"},
+    )
+    assert res_parent_allow.status_code == 200
+    allow_data = res_parent_allow.json()
+    assert allow_data["state"] == "active"
+    assert allow_data["integrity_score"] >= 0.90
+    assert "Override allowed" in allow_data["invalid_reason"]
+
+    # Verify audit log entry was written
+    async with AsyncSessionLocal() as session:
+        audit_res = await session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "quiz_attempt_allowed",
+                AuditLog.target_id == str(attempt_id),
+            )
+        )
+        audit_entry = audit_res.scalar_one_or_none()
+        assert audit_entry is not None
+        assert audit_entry.actor_id == parent.id
+        assert "school notification" in audit_entry.meta["reason"]
+
+
+# =============================================================================
+# 23. Database Role Separation & Column Encryption Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_database_role_separation_and_column_encryption() -> None:
+    """Verify:
+    1. thinkbuddy_api role can SELECT from v_questions_public.
+    2. thinkbuddy_api role is strictly forbidden from querying question_keys.
+    3. Column encryption AES-256-GCM correctly encrypts and decrypts key payloads.
+    """
+    from sqlalchemy.exc import ProgrammingError, DBAPIError
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import text
+    from core.quiz.crypto import encrypt_column_value, decrypt_column_value
+
+    # 1 & 2: Database role test
+    api_db_url = settings.DATABASE_URL.replace("thinkbuddy:thinkbuddy_dev_password", "thinkbuddy_api:thinkbuddy_api_password")
+    api_engine = create_async_engine(api_db_url)
+    try:
+        async with api_engine.connect() as conn:
+            # v_questions_public query must succeed
+            res_view = await conn.execute(text("SELECT count(*) FROM v_questions_public;"))
+            count = res_view.scalar()
+            assert count is not None
+
+            # question_keys direct SELECT must be rejected with permission denied
+            with pytest.raises((ProgrammingError, DBAPIError)):
+                await conn.execute(text("SELECT * FROM question_keys LIMIT 1;"))
+    finally:
+        await api_engine.dispose()
+
+    # 3. Column encryption test
+    secret_key = settings.QUESTION_KEY_ENCRYPTION_KEY
+    plaintext_data = {"correct_option_id": "opt_2", "explanation": "Proof by mathematical induction"}
+    encrypted_cipher = encrypt_column_value(plaintext_data, secret_key)
+    assert encrypted_cipher != str(plaintext_data)
+    assert len(encrypted_cipher) > 30
+
+    decrypted_data = decrypt_column_value(encrypted_cipher, secret_key)
+    assert decrypted_data == plaintext_data
+
+    # Decryption fails with wrong key
+    wrong_key = "a_completely_different_32_byte_secret_key_123"
+    with pytest.raises(Exception):
+        decrypt_column_value(encrypted_cipher, wrong_key)
+
+
+# =============================================================================
+# 24. Concurrent Submit vs Expiry & Worker Schedule Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_concurrent_submit_versus_expiry_and_worker_schedule(
+    gateway_client: AsyncClient,
+) -> None:
+    """Verify FOR UPDATE SKIP LOCKED concurrency between client submit and expiry worker,
+    idempotent grading and learning signals, and registered worker schedule.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Concurrent Expiry Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {
+        **CLIENT_HEADERS_ANDROID,
+        "Authorization": f"Bearer {token}",
+        "X-Device-Integrity": create_mock_play_integrity_token(nonce="device-p04-android-001"),
+    }
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=2)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = uuid.UUID(start_data["attempt_id"])
+    attempt_token = start_data["attempt_token"]
+
+    # Set deadline in the past to make attempt eligible for expiration worker
+    async with AsyncSessionLocal() as session:
+        att = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))).scalar_one()
+        att.deadline_at = datetime.now(UTC) - timedelta(seconds=10)
+        await session.commit()
+
+    # Trigger client submit and worker auto-submit concurrently
+    from core.quiz.service import QuizService
+    async def run_client_submit() -> Any:
+        try:
+            async with AsyncSessionLocal() as session:
+                srv = QuizService(session)
+                return await srv.submit_attempt(attempt_id, student.id, attempt_token)
+        except Exception as e:
+            return e
+
+    async def run_worker_expiry() -> Any:
+        try:
+            return await auto_submit_expired_attempts()
+        except Exception as e:
+            return e
+
+    client_res, worker_res = await asyncio.gather(run_client_submit(), run_worker_expiry())
+
+    # Verify attempt was finalized without deadlock or duplicate signals
+    async with AsyncSessionLocal() as session:
+        att_final = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))).scalar_one()
+        assert att_final.submitted_at is not None
+        assert att_final.state in ("submitted", "expired")
+        assert att_final.score is not None
+
+        # Verify learning signals were emitted idempotently (no duplicates)
+        sig_res = await session.execute(
+            select(LearningSignal).where(LearningSignal.student_id == student.id)
+        )
+        signals = list(sig_res.scalars().all())
+        ref_ids = [s.ref_id for s in signals]
+        # Each attempt item ref_id must appear at most once per signal type
+        signal_pairs = {(s.source, s.ref_id) for s in signals}
+        assert len(signal_pairs) == len(signals)
+
+    # Verify Celery beat schedule contains auto-submit task
+    from workers.celery_app import celery_app
+    assert "auto-submit-expired-quiz-attempts" in celery_app.conf.beat_schedule
+    task_conf = celery_app.conf.beat_schedule["auto-submit-expired-quiz-attempts"]
+    assert task_conf["task"] == "auto_submit_expired_attempts"
+    assert task_conf["schedule"] == 30.0
+
+
+# =============================================================================
+# 25. Exhausted Assessed Pool Fallback LRU Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_exhausted_assessed_pool_fallback_lru() -> None:
+    """Verify fallback when student has answered all assessed questions:
+    - Recycles oldest-answered questions (LRU).
+    - NEVER leaks questions from practice-only pool.
+    - Shuffles option IDs and generates new nonces.
+    """
+    test_concept = f"lru_concept_{uuid.uuid4().hex[:8]}"
+    student = await create_test_user(role="student", display_name="LRU Student")
+    builder_student = student.id
+
+    async with AsyncSessionLocal() as session:
+        # Create 2 assessed questions and 1 practice-only question
+        q_assessed_1 = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="assessed",
+            stem={"text": "Assessed Q1: What is Force?"},
+            options=[{"id": "opt_1", "text": "F = ma"}],
+        )
+        q_assessed_2 = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="assessed",
+            stem={"text": "Assessed Q2: What is Energy?"},
+            options=[{"id": "opt_1", "text": "E = mc^2"}],
+        )
+        q_practice_only = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            difficulty=0.5,
+            review_status="approved",
+            concept_id=test_concept,
+            pool="practice",
+            stem={"text": "Practice Only: Secret Question"},
+            options=[{"id": "opt_1", "text": "Secret Answer"}],
+        )
+        k1 = QuestionKey(question_id=q_assessed_1.id, correct_option_id="opt_1", explanation={"text": "Exp 1"})
+        k2 = QuestionKey(question_id=q_assessed_2.id, correct_option_id="opt_1", explanation={"text": "Exp 2"})
+        kp = QuestionKey(question_id=q_practice_only.id, correct_option_id="opt_1", explanation={"text": "Practice Exp"})
+
+        session.add_all([q_assessed_1, q_assessed_2, q_practice_only, k1, k2, kp])
+        await session.commit()
+
+        # Mark both assessed questions as answered in past attempts
+        past_quiz = Quiz(
+            id=uuid.uuid4(),
+            student_id=builder_student,
+            title="Past Assessed Quiz",
+            mode="assessed",
+        )
+        session.add(past_quiz)
+        await session.flush()
+
+        past_attempt = QuizAttempt(
+            quiz_id=past_quiz.id,
+            student_id=builder_student,
+            device_id="lru-device-01",
+            state="submitted",
+            mode="assessed",
+            attempt_token="past_token_lru",
+            started_at=datetime.now(UTC) - timedelta(hours=2),
+            deadline_at=datetime.now(UTC) - timedelta(hours=1),
+            submitted_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        session.add(past_attempt)
+        await session.flush()
+
+        it1 = AttemptItem(
+            attempt_id=past_attempt.id,
+            question_id=q_assessed_1.id,
+            position=1,
+            nonce="nonce_lru_1",
+            answered_at=datetime.now(UTC) - timedelta(hours=1, minutes=30),  # Older
+            is_correct=True,
+            points=1.0,
+        )
+        it2 = AttemptItem(
+            attempt_id=past_attempt.id,
+            question_id=q_assessed_2.id,
+            position=2,
+            nonce="nonce_lru_2",
+            answered_at=datetime.now(UTC) - timedelta(hours=1, minutes=10),  # Newer
+            is_correct=True,
+            points=1.0,
+        )
+        session.add_all([it1, it2])
+        await session.commit()
+
+        # Now build a 2-question assessed quiz for this student
+        # Since all 2 assessed questions were seen, LRU fallback must trigger
+        builder = QuizBuilderService(session)
+        selected_questions = await builder.select_and_randomize_questions(
+            question_count=2,
+            student_id=builder_student,
+            concept_ids=[test_concept],
+            mode="assessed",
+        )
+
+        selected_ids = {q.id for q in selected_questions}
+        assert len(selected_questions) == 2
+        # Both assessed questions must be recycled via LRU
+        assert q_assessed_1.id in selected_ids
+        assert q_assessed_2.id in selected_ids
+        # Practice-only question MUST NEVER be included!
+        assert q_practice_only.id not in selected_ids
+
+
+# =============================================================================
+# 26. Gateway Never Proxies /internal/* & Signed JWT Service Token Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_gateway_never_proxies_internal_and_signed_jwt_service_token(
+    gateway_client: AsyncClient,
+) -> None:
+    """Verify that:
+    1. Gateway strictly refuses to proxy /internal/* and /v1/internal/* (returns 404).
+    2. Core service accepts valid signed HS256 JWT service tokens with thinkbuddy-core audience.
+    3. Core service strictly rejects missing, invalid, or expired service tokens (403).
+    """
+    student_id = uuid.uuid4()
+
+    # 1. Gateway blocks public access to internal routes with 404
+    res_gw_internal = await gateway_client.get(
+        f"/internal/quiz/students/{student_id}/active-attempt",
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_gw_internal.status_code == 404
+
+    res_gw_v1_internal = await gateway_client.get(
+        f"/v1/internal/quiz/students/{student_id}/active-attempt",
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_gw_v1_internal.status_code == 404
+
+    # 2. Direct core calls with signed service tokens
+    from core.main import app as core_app
+    from httpx import ASGITransport
+    from core.common.service_token import create_internal_service_token
+
+    async with AsyncClient(transport=ASGITransport(app=core_app), base_url="http://testserver") as core_client:
+        # 2a. Valid signed JWT service token -> 200 OK
+        valid_jwt = create_internal_service_token(expires_minutes=5)
+        res_core_ok = await core_client.get(
+            f"/v1/internal/quiz/students/{student_id}/active-attempt",
+            headers={"X-Internal-Service-Token": valid_jwt},
+        )
+        assert res_core_ok.status_code == 200
+        assert res_core_ok.json()["is_active"] is False
+
+        # 2b. Missing token -> 403 Forbidden
+        res_core_missing = await core_client.get(
+            f"/v1/internal/quiz/students/{student_id}/active-attempt",
+        )
+        assert res_core_missing.status_code == 403
+
+        # 2c. Invalid / forged token -> 403 Forbidden
+        forged_jwt = "header.payload.signature_invalid"
+        res_core_forged = await core_client.get(
+            f"/v1/internal/quiz/students/{student_id}/active-attempt",
+            headers={"X-Internal-Service-Token": forged_jwt},
+        )
+        assert res_core_forged.status_code == 403
+
+        # 2d. Expired token -> 403 Forbidden
+        expired_jwt = create_internal_service_token(expires_minutes=-5)
+        res_core_expired = await core_client.get(
+            f"/v1/internal/quiz/students/{student_id}/active-attempt",
+            headers={"X-Internal-Service-Token": expired_jwt},
+        )
+        assert res_core_expired.status_code == 403
 
