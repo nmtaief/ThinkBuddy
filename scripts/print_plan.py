@@ -371,6 +371,9 @@ def build_class_10_science_scenarios(
         ),
     ]
 
+    # Synthetic fixture data: Chapters 1, 2, 3, and 7 are synthetic fixture data
+    # for testing non-contiguous custom chapter order. This chapter set is an arbitrary
+    # fixture for test and visualization purposes; no claims are made regarding NCTB term structure.
     higher_math_chapters = [
         ChapterPlanInput(
             id=uuid.uuid4(),
@@ -492,6 +495,101 @@ def build_class_10_science_scenarios(
             end_date=today + timedelta(days=21),
             name="Public Blackout Day",
             holiday_type="national",
+            study_blackout=True,
+            verified=True,
+            status="published",
+        )
+    ]
+
+    return setups, settings, holidays
+
+
+def build_stress_case_scenarios(
+    today: date,
+) -> tuple[list[SubjectSetupInput], ResolvedPlannerSettings, list[Holiday]]:
+    """Build a stress-case scenario (exams in 20 days, large syllabus) triggering coverage shortfalls."""
+    exam_date = today + timedelta(days=20)
+
+    def make_large_subject_chapters(sub_name: str, total_chapters: int = 5, pages_per_ch: int = 50) -> list[ChapterPlanInput]:
+        return [
+            ChapterPlanInput(
+                id=uuid.uuid4(),
+                number=i,
+                title=f"{sub_name} Chapter {i}",
+                printed_page_start=(i - 1) * pages_per_ch + 1,
+                printed_page_end=i * pages_per_ch,
+                custom_order=i,
+                book_title=f"{sub_name} Comprehensive Volume",
+                difficulty_factor=1.2,
+            )
+            for i in range(1, total_chapters + 1)
+        ]
+
+    setups = [
+        SubjectSetupInput(
+            subject="Mathematics",
+            exam_name="Term Final - Math",
+            exam_date=exam_date,
+            chapters=make_large_subject_chapters("Mathematics", total_chapters=6, pages_per_ch=50),  # 300 pages
+        ),
+        SubjectSetupInput(
+            subject="Physics",
+            exam_name="Term Final - Physics",
+            exam_date=exam_date,
+            chapters=make_large_subject_chapters("Physics", total_chapters=5, pages_per_ch=50),  # 250 pages
+        ),
+        SubjectSetupInput(
+            subject="Chemistry",
+            exam_name="Term Final - Chemistry",
+            exam_date=exam_date,
+            chapters=make_large_subject_chapters("Chemistry", total_chapters=5, pages_per_ch=50),  # 250 pages
+        ),
+        SubjectSetupInput(
+            subject="Biology",
+            exam_name="Term Final - Biology",
+            exam_date=exam_date,
+            chapters=make_large_subject_chapters("Biology", total_chapters=5, pages_per_ch=50),  # 250 pages
+        ),
+    ]
+
+    settings = ResolvedPlannerSettings(
+        class_band="9-10",
+        group="science",
+        school_day_minutes=75,
+        holiday_minutes=90,
+        study_window_start="18:00",
+        study_window_end="21:30",
+        weekly_off_days=["fri", "sat"],
+        recurring_unavailable_blocks=[],
+        blocked_observance_keys=[],
+        custom_blackout_dates=[
+            {
+                "start_date": (today + timedelta(days=10)).isoformat(),
+                "end_date": (today + timedelta(days=10)).isoformat(),
+                "reason": "Family event",
+            }
+        ],
+        subject_priorities={
+            "Mathematics": "difficult",
+            "Physics": "main",
+            "Chemistry": "normal",
+            "Biology": "normal",
+        },
+        planner_parameters={
+            "max_consecutive_days_per_subject": 2,
+            "min_subject_daily_share": 0.10,
+            "priority_weight_mapping": {"normal": 1.0, "main": 1.3, "difficult": 1.6},
+            "appearance_frequency_targets": {"difficult": 0.67, "main": 0.50, "normal": 0.38},
+        },
+        settings_version=1,
+    )
+
+    holidays = [
+        Holiday(
+            start_date=today + timedelta(days=10),
+            end_date=today + timedelta(days=10),
+            name="District Observance Day",
+            holiday_type="district",
             study_blackout=True,
             verified=True,
             status="published",
@@ -684,9 +782,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Print complete study plans.")
     parser.add_argument(
         "--target",
-        choices=["7", "10", "all"],
+        choices=["7", "10", "stress", "all"],
         default="all",
-        help="Target student schedule to print (7, 10, or all)",
+        help="Target student schedule to print (7, 10, stress, or all)",
     )
     args = parser.parse_args()
 
@@ -712,6 +810,17 @@ def main() -> None:
             settings=c10_settings,
             holidays=c10_holidays,
             output_path="reports/P03_class_10_science_schedule.txt",
+        )
+
+    if args.target in ("stress", "all"):
+        stress_setups, stress_settings, stress_holidays = build_stress_case_scenarios(today)
+        print_complete_plan(
+            title="STRESS CASE (EXAM IN 20 DAYS, 1050 PAGES, 75M DAILY BUDGET)",
+            today=today,
+            setups=stress_setups,
+            settings=stress_settings,
+            holidays=stress_holidays,
+            output_path="reports/P03_stress_case_schedule.txt",
         )
 
 

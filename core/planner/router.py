@@ -45,6 +45,7 @@ from core.planner.models import (
     Task,
 )
 from core.planner.schemas import (
+    AiSuggestionResponse,
     DailyMinutesResponse,
     PlanDayResponse,
     PlanResponse,
@@ -260,15 +261,30 @@ async def execute_student_plan_regeneration(
             try:
                 ai_shadow_provider = AiPlannerProvider()
                 ai_shadow_res = await ai_shadow_provider.generate_plan(provider_ctx)
-                logger.info(
-                    "AI Planner Shadow Mode evaluated for student %s: valid=%s, provider=%s, reason=%s",
-                    student_id,
-                    ai_shadow_res.plan_out is not None,
-                    ai_shadow_res.provider,
-                    ai_shadow_res.generation_reason,
-                )
+                if ai_shadow_res.plan_out:
+                    from core.planner.shadow_comparator import compare_plans
+                    shadow_report = compare_plans(ai_shadow_res.plan_out, plan_out)
+                    provider_result.shadow_comparison = shadow_report
             except Exception as shadow_exc:
                 logger.warning("AI Planner Shadow Mode execution error: %s", shadow_exc)
+
+        # Record AI priority suggestions in 'suggest' mode for parent review
+        if provider_result.priority_suggestions and resolved_settings.adaptive_mode in ("suggest", "manual"):
+            for ps in provider_result.priority_suggestions:
+                scr = StudentChangeRequest(
+                    setup_id=None,
+                    student_id=student_id,
+                    requested_changes={
+                        "type": "ai_priority_suggestion",
+                        "subject": ps.get("subject"),
+                        "current_level": ps.get("current_level"),
+                        "suggested_level": ps.get("suggested_level"),
+                        "evidence_codes": ps.get("evidence_codes", []),
+                        "rationale": ps.get("rationale", ""),
+                    },
+                    status="pending",
+                )
+                db.add(scr)
 
         all_warnings = (
             list(plan_out.warnings)
@@ -1449,3 +1465,175 @@ async def submit_student_settings_change_request(
         status=req.status,
         created_at=req.created_at,
     )
+
+
+# ============================================================================
+# AI Planner Suggestion & Parent Approval Flow (P06a)
+# ============================================================================
+
+
+@router.get(
+    "/students/{student_id}/ai-suggestions",
+    response_model=list[AiSuggestionResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_ai_suggestions(
+    student_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> list[AiSuggestionResponse]:
+    """List pending AI planner priority suggestions for a student."""
+    if current_user.role == "parent":
+        await verify_parent_access_to_student(current_user, student_id, db)
+    elif current_user.id != student_id and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    stmt = (
+        select(StudentChangeRequest)
+        .where(
+            StudentChangeRequest.student_id == student_id,
+            StudentChangeRequest.status == "pending",
+        )
+        .order_by(StudentChangeRequest.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    records = res.scalars().all()
+
+    output: list[AiSuggestionResponse] = []
+    for r in records:
+        ch = r.requested_changes or {}
+        if ch.get("type") == "ai_priority_suggestion":
+            output.append(
+                AiSuggestionResponse(
+                    id=r.id,
+                    student_id=r.student_id,
+                    subject=ch.get("subject", ""),
+                    current_level=ch.get("current_level", "normal"),
+                    suggested_level=ch.get("suggested_level", "main"),
+                    evidence_codes=ch.get("evidence_codes", []),
+                    rationale=ch.get("rationale", ""),
+                    status=r.status,
+                    created_at=r.created_at,
+                )
+            )
+    return output
+
+
+@router.post(
+    "/students/{student_id}/ai-suggestions/{suggestion_id}/approve",
+    status_code=status.HTTP_200_OK,
+)
+async def approve_ai_suggestion(
+    student_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Parent approves an AI planner priority suggestion, updating settings and regenerating plan."""
+    if current_user.role != "parent" and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required")
+    if current_user.role == "parent":
+        await verify_parent_access_to_student(current_user, student_id, db)
+
+    stmt = select(StudentChangeRequest).where(
+        StudentChangeRequest.id == suggestion_id,
+        StudentChangeRequest.student_id == student_id,
+    )
+    res = await db.execute(stmt)
+    req = res.scalars().first()
+    if not req or req.status != "pending":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found")
+
+    ch = req.requested_changes or {}
+    sub = ch.get("subject")
+    sugg_level = ch.get("suggested_level")
+
+    # Apply to student study settings
+    stmt_settings = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id).with_for_update()
+    res_s = await db.execute(stmt_settings)
+    settings_obj = res_s.scalars().first()
+
+    old_prios = dict(settings_obj.subject_priorities) if settings_obj else {}
+    if settings_obj and sub and sugg_level:
+        settings_obj.subject_priorities[sub] = sugg_level
+        settings_obj.version += 1
+        settings_obj.updated_by_user_id = current_user.id
+
+    req.status = "approved"
+    req.reviewed_at = datetime.now(UTC)
+    req.reviewed_by_id = current_user.id
+
+    # Immutable Audit Log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action="ai_planner.approve_suggestion",
+        target_type="student_study_settings",
+        target_id=student_id,
+        meta={
+            "suggestion_id": str(suggestion_id),
+            "subject": sub,
+            "old_priority": old_prios.get(sub),
+            "new_priority": sugg_level,
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+    db.add(audit)
+    await db.commit()
+
+    # Trigger plan regeneration
+    plan_resp = await _sync_regenerate_plan_for_student(
+        student_id=student_id,
+        db=db,
+        reason="adaptive",
+    )
+
+    return {
+        "status": "approved",
+        "suggestion_id": str(suggestion_id),
+        "subject": sub,
+        "new_priority": sugg_level,
+        "new_plan_version": plan_resp.version,
+    }
+
+
+@router.post(
+    "/students/{student_id}/ai-suggestions/{suggestion_id}/reject",
+    status_code=status.HTTP_200_OK,
+)
+async def reject_ai_suggestion(
+    student_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, str]:
+    """Parent rejects an AI planner suggestion."""
+    if current_user.role != "parent" and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required")
+    if current_user.role == "parent":
+        await verify_parent_access_to_student(current_user, student_id, db)
+
+    stmt = select(StudentChangeRequest).where(
+        StudentChangeRequest.id == suggestion_id,
+        StudentChangeRequest.student_id == student_id,
+    )
+    res = await db.execute(stmt)
+    req = res.scalars().first()
+    if not req or req.status != "pending":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found")
+
+    req.status = "rejected"
+    req.reviewed_at = datetime.now(UTC)
+    req.reviewed_by_id = current_user.id
+
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action="ai_planner.reject_suggestion",
+        target_type="student_study_settings",
+        target_id=student_id,
+        meta={"suggestion_id": str(suggestion_id), "at": datetime.now(UTC).isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"status": "rejected", "suggestion_id": str(suggestion_id)}
+

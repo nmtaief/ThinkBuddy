@@ -612,6 +612,125 @@ async def submit_student_settings_change_request(
 
 
 # -------------------------------------------------------------------------
+# Quiz Engine (docs/04_API_CONTRACT.md §2, docs/05_SECURE_QUIZ.md)
+# -------------------------------------------------------------------------
+from core.quiz.schemas import (
+    AnswerItemRequest,
+    AnswerItemResponse,
+    AttemptEventRequest,
+    AttemptEventResponse,
+    AttemptReviewResponse,
+    StartAttemptRequest,
+    StartAttemptResponse,
+    SubmitAttemptResponse,
+)
+
+
+@router.post(
+    "/students/{student_id}/quizzes",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def create_student_quiz_gateway(student_id: uuid.UUID, request: Request) -> Response:
+    """Create a new quiz session for student."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/quizzes/{quiz_id}/attempts",
+    response_model=StartAttemptResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def start_quiz_attempt_gateway(
+    quiz_id: uuid.UUID,
+    payload: StartAttemptRequest,
+    request: Request,
+) -> Response:
+    """Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/items/{position}/answer",
+    response_model=AnswerItemResponse,
+    tags=["Quiz"],
+)
+async def answer_quiz_item_gateway(
+    attempt_id: uuid.UUID,
+    position: int,
+    payload: AnswerItemRequest,
+    request: Request,
+) -> Response:
+    """Submit answer for sequential quiz item with nonce and deadline verification."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/events",
+    response_model=AttemptEventResponse,
+    tags=["Quiz"],
+)
+async def record_attempt_event_gateway(
+    attempt_id: uuid.UUID,
+    payload: AttemptEventRequest,
+    request: Request,
+) -> Response:
+    """Record anti-cheat event from client."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/submit",
+    response_model=SubmitAttemptResponse,
+    tags=["Quiz"],
+)
+async def submit_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Finalize quiz attempt, calculate score, emit learning signals, and unlock review."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/attempts/{attempt_id}/review",
+    response_model=AttemptReviewResponse,
+    tags=["Quiz"],
+)
+async def review_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Review completed quiz attempt with explanations and answer keys."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2)
+# -------------------------------------------------------------------------
+
+
+@router.post(
+    "/chat/sessions",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Chat"],
+)
+async def create_chat_session_gateway(request: Request) -> Response:
+    """Create chat session (enforces quiz in-progress lockout)."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/chat/sessions/{session_id}/messages",
+    tags=["Chat"],
+)
+async def send_chat_message_gateway(session_id: uuid.UUID, request: Request) -> Response:
+    """Send chat message (enforces quiz in-progress lockout)."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
 # Admin Configuration & Governance
 # -------------------------------------------------------------------------
 @router.get("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_get")

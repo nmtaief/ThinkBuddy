@@ -28,6 +28,7 @@ from core.families.models import StudentProfile
 from core.planner.models import AdminPolicy, Holiday, ObservanceCatalog, Plan, PlanDay
 from core.planner.schemas import (
     AdminPolicyResponse,
+    AiPlannerStatusResponse,
     CreateAdminPolicyRequest,
     HolidayImpactPreviewResponse,
     HolidayImportRequest,
@@ -35,6 +36,7 @@ from core.planner.schemas import (
     ObservanceResponse,
     PolicyImpactPreviewResponse,
     UpdateAdminPolicyRequest,
+    UpdateAiPlannerConfigRequest,
     UpdateHolidayRequest,
 )
 
@@ -766,3 +768,126 @@ async def list_observance_catalog(
         )
         for item in items
     ]
+
+
+# ============================================================================
+# AI Planner Administration (P06a)
+# ============================================================================
+
+
+@router.get(
+    "/ai-planner/status",
+    response_model=AiPlannerStatusResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_ai_planner_status(
+    current_user: Annotated[User, Depends(require_role("admin"))],
+) -> AiPlannerStatusResponse:
+    """Get administrative status, circuit breaker health, and rollout configuration."""
+    from core.common.config import settings as cfg
+    from core.planner.provider import _global_ai_circuit_breaker
+
+    is_open = not _global_ai_circuit_breaker.can_execute_sync()
+    cb_state = "OPEN" if is_open else "CLOSED"
+
+    return AiPlannerStatusResponse(
+        enabled=cfg.AI_PLANNER_ENABLED,
+        shadow_mode=cfg.AI_PLANNER_SHADOW_MODE,
+        service_url=cfg.AI_PLANNER_URL,
+        enabled_class_bands=list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
+        circuit_breaker={
+            "state": cb_state,
+            "failure_threshold": cfg.AI_PLANNER_CIRCUIT_BREAKER_FAILURES,
+            "reset_timeout_seconds": cfg.AI_PLANNER_CIRCUIT_BREAKER_RESET_SECONDS,
+            "consecutive_failures": _global_ai_circuit_breaker._mem_failures,
+        },
+        contract_version="ai-planner/v1.0",
+    )
+
+
+@router.post(
+    "/ai-planner/circuit-breaker/reset",
+    status_code=status.HTTP_200_OK,
+)
+async def reset_ai_circuit_breaker(
+    current_user: Annotated[User, Depends(require_role("admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, str]:
+    """Force reset the AI Planner circuit breaker to CLOSED state."""
+    from core.planner.provider import _global_ai_circuit_breaker
+
+    await _global_ai_circuit_breaker.reset()
+
+    # Immutable Audit Log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action="ai_planner.circuit_breaker_reset",
+        target_type="system_config",
+        target_id=str(current_user.id),
+        meta={"reset_by": str(current_user.id), "at": datetime.now(UTC).isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"status": "success", "message": "Circuit breaker reset to CLOSED"}
+
+
+@router.post(
+    "/ai-planner/config",
+    response_model=AiPlannerStatusResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_ai_planner_config(
+    payload: UpdateAiPlannerConfigRequest,
+    current_user: Annotated[User, Depends(require_role("admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AiPlannerStatusResponse:
+    """Update AI planner global kill switch, shadow mode, and class band rollout."""
+    from core.common.config import settings as cfg
+
+    old_meta = {
+        "enabled": cfg.AI_PLANNER_ENABLED,
+        "shadow_mode": cfg.AI_PLANNER_SHADOW_MODE,
+        "enabled_class_bands": list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
+    }
+
+    if payload.enabled is not None:
+        cfg.AI_PLANNER_ENABLED = payload.enabled
+    if payload.shadow_mode is not None:
+        cfg.AI_PLANNER_SHADOW_MODE = payload.shadow_mode
+    if payload.enabled_class_bands is not None:
+        cfg.AI_PLANNER_ENABLED_CLASS_BANDS = payload.enabled_class_bands
+
+    new_meta = {
+        "enabled": cfg.AI_PLANNER_ENABLED,
+        "shadow_mode": cfg.AI_PLANNER_SHADOW_MODE,
+        "enabled_class_bands": list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
+    }
+
+    # Immutable Audit Log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action="ai_planner.config_update",
+        target_type="system_config",
+        target_id=str(current_user.id),
+        meta={"old": old_meta, "new": new_meta, "at": datetime.now(UTC).isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    from core.planner.provider import _global_ai_circuit_breaker
+
+    return AiPlannerStatusResponse(
+        enabled=cfg.AI_PLANNER_ENABLED,
+        shadow_mode=cfg.AI_PLANNER_SHADOW_MODE,
+        service_url=cfg.AI_PLANNER_URL,
+        enabled_class_bands=list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
+        circuit_breaker={
+            "state": "CLOSED" if _global_ai_circuit_breaker.can_execute_sync() else "OPEN",
+            "failure_threshold": cfg.AI_PLANNER_CIRCUIT_BREAKER_FAILURES,
+            "reset_timeout_seconds": cfg.AI_PLANNER_CIRCUIT_BREAKER_RESET_SECONDS,
+            "consecutive_failures": _global_ai_circuit_breaker._mem_failures,
+        },
+        contract_version="ai-planner/v1.0",
+    )
+

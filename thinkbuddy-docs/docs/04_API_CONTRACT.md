@@ -58,12 +58,22 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /admin/holidays/{id}/publish` – publish holiday calendar change; queues throttled idempotent regeneration.
 - `GET /admin/observances` – list observance catalog entries.
 
-### Quiz
-- `POST /quizzes/{id}/attempts` – start; returns `attempt_id`, `deadline_at`, `attempt_token`, first question.
-- `POST /attempts/{id}/items/{position}/answer` – submit one answer; returns next question (and correctness only if mode allows).
-- `POST /attempts/{id}/events` – integrity events from client.
-- `POST /attempts/{id}/submit` – finalize.
-- `GET /attempts/{id}/review` – only after `submitted`.
+### Quiz & Assessments (P04)
+- `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
+- `POST /quizzes/{id}/attempts` – start attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
+  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit (409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`).
+- `POST /attempts/{id}/items/{position}/answer` – submit one answer sequentially; returns `next_item` and `has_more`.
+  - In assessed mode, correctness feedback is strictly withheld until submit (`is_correct: null`).
+  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
+- `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state`.
+- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`). Idempotent on repeated calls.
+- `GET /attempts/{id}/review` – get attempt review with correct answers and explanations.
+  - Strictly blocked with 403 `ATTEMPT_NOT_SUBMITTED` while attempt is active/unsubmitted!
+
+### Admin Question Bank (`/admin/questions*`, role: admin)
+- `POST /admin/questions` – create question item and isolated question key in `question_keys` table (zero leak to student routes, audit logged).
+- `POST /admin/questions/import` – bulk import questions and isolated question keys from JSONL (audit logged).
+- `GET /admin/questions?chapter_id=&review_status=` – list question bank items.
 
 ### Broad questions
 - `POST /attempt-items/{id}/broad` (text or image upload refs), `GET /submissions/{id}`.

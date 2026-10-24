@@ -35,6 +35,7 @@ from core.planner.settings_resolver import (
 from scripts.print_plan import (
     build_class_7_scenarios,
     build_class_10_science_scenarios,
+    build_stress_case_scenarios,
 )
 
 
@@ -455,3 +456,41 @@ def test_property_at_equal_workload_difficult_ge_main_ge_normal(
         f"Days violation at equal workload: Diff={active_days.get('SubDiff', 0)}, "
         f"Main={active_days.get('SubMain', 0)}, Norm={active_days.get('SubNorm', 0)}"
     )
+
+
+def test_golden_stress_case_plan() -> None:
+    """Verify stress case (exam in 20 days, large syllabus) triggers coverage shortfall warnings."""
+    today = date(2026, 10, 23)
+    setups, settings, holidays = build_stress_case_scenarios(today)
+    max_exam = max(s.exam_date for s in setups)
+
+    now_dt = datetime(today.year, today.month, today.day, 16, 0)
+    calendar_days = resolve_calendar_days(
+        start_date=today,
+        end_date=max_exam,
+        now=now_dt,
+        resolved_settings=settings,
+        published_holidays=holidays,
+        exam_dates={s.exam_date: [s.subject] for s in setups},
+        completed_minutes_today=0,
+    )
+
+    plan = generate_student_plan(
+        student_id=uuid.uuid4(),
+        today=today,
+        daily_study_minutes=settings.school_day_minutes,
+        setups=setups,
+        available_days=settings.weekly_off_days,
+        resolved_settings=settings,
+        day_calendar=calendar_days,
+    )
+
+    # All subjects must have coverage shortfall in this stress case
+    assert len(plan.coverage_reports) == 4
+    for sub_name, rep in plan.coverage_reports.items():
+        assert rep.shortfall_pages > 0, f"Expected shortfall for {sub_name}, got 0"
+        assert rep.coverage_pct < 100.0, f"Expected < 100% for {sub_name}, got {rep.coverage_pct}%"
+        assert any(f"COVERAGE_SHORTFALL_{sub_name.upper()}" in w for w in plan.warnings), (
+            f"Missing COVERAGE_SHORTFALL warning for {sub_name}"
+        )
+

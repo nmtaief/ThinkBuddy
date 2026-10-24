@@ -619,6 +619,7 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
             "0006_p03_planner_v2_config",
             "0007_p03_v2_adaptive_blackout",
             "0008_p03_rest_and_p06a_prov",
+            "0009_p04_secure_quiz_tables",
         )
 
         # 3. Test policy directly against live Postgres DB rows

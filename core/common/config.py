@@ -138,6 +138,14 @@ class CoreSettings(BaseSettings):
         default="ai_planner_dev_secret_key_placeholder",
         description="Service authentication key for AI planner service",
     )
+    AI_PLANNER_SECRET_KEY: str = Field(
+        default="ai_planner_service_hmac_secret_32_chars_dev_key",
+        description="HMAC secret for signing short-lived service tokens",
+    )
+    AI_PLANNER_ENABLED_CLASS_BANDS: list[str] = Field(
+        default_factory=lambda: ["6-8", "9-10", "11-12"],
+        description="Class bands where AI planner is enabled for rollout",
+    )
     AI_PLANNER_TIMEOUT_SECONDS: float = Field(
         default=20.0,
         description="HTTP timeout in seconds for AI planner routine proposal endpoint",

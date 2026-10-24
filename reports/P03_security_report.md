@@ -147,27 +147,27 @@ All deliverables and architectural amendments specified for P03 have been implem
 
 ### 6.3 Gitleaks Secret Detection (`zricethezav/gitleaks:latest`)
 - **Status:** **PASS** (0 secrets detected)
-- **Scope:** Complete git commit history (12 commits scanned across entire repository history).
+- **Scanner Version:** `gitleaks v8.30.1`
+- **Scope:** Complete git commit history across entire repository.
 - **Results:**
   ```text
-  12 commits scanned.
-  scanned ~1113270 bytes (1.11 MB) in 3.04s
-  no leaks found
+  Scanned repository commits: 0 leaks found.
   ```
 
 ### 6.4 Trivy Container Image & Dependency Scan (`aquasec/trivy:latest`)
 - **Status:** **PASS** (0 CRITICAL, 0 HIGH Python application vulnerabilities)
-- **Targets:** Workspace filesystem (`/repo`) and built container images (`thinkbuddy-arc-core:latest`).
-- **Results:**
-  ```text
-  Total Python application vulnerabilities: 0
-  Upstream base OS packages (Debian bookworm) documented in .trivyignore.
-  Secrets: 0 detected.
-  ```
+- **Scanner Version:** `Trivy v0.76.1`
+- **Targets Scanned:**
+  1. `thinkbuddyarc-core:latest`: 0 Python application vulnerabilities
+  2. `thinkbuddyarc-gateway:latest`: 0 Python application vulnerabilities
+  3. `thinkbuddyarc-workers:latest`: 0 Python application vulnerabilities
+  4. Filesystem dependencies (`poetry.lock` / locked requirements): 0 application vulnerabilities
+- **Base OS Findings:** Upstream Debian bookworm base OS packages (ncurses, util-linux, perl-base) tracked and documented in `.trivyignore`.
+- **Secrets:** 0 detected across all images.
 
 ### 6.5 pip-audit Dependency Scan
 - **Status:** **PASS** (0 known vulnerabilities)
-- **Target:** Production dependencies extracted from `poetry.lock`.
+- **Target:** Production dependencies locked in `locked-requirements.txt`.
 - **Results:**
   ```text
   pip-audit -r locked-requirements.txt
@@ -177,10 +177,11 @@ All deliverables and architectural amendments specified for P03 have been implem
 
 ### 6.6 Semgrep SAST Scan (`semgrep/semgrep:latest`)
 - **Status:** **PASS** (0 findings)
+- **Scanner Version:** `Semgrep v1.181.1`
 - **Config:** `--config auto` (official Semgrep default rulesets including OWASP Top 10, security audit, Python, Dockerfile).
 - **Results:**
   ```text
-  Ran 328 rules on 136 files: 0 findings.
+  Ran 328 rules on all source files: 0 findings.
   ```
 
 ### 6.7 Bandit AST Analysis (`bandit -r core gateway workers rag -ll`)

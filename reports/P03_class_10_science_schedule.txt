@@ -183,8 +183,8 @@ D29   | 2026-11-20 | Study       | Chemistry          | Revision   | Ch 4 (pp. 6
       |            |             | Higher Mathematics | Study      | Ch 3 (printed pp. 78-85)               |   72m |          
       |            |             | Higher Mathematics | Homework   | Ch 3 (printed pp. 78-85)               |   20m |          
 -----------------------------------------------------------------------------------------------------------------------------
-D30   | 2026-11-21 | Buffer      | Physics            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      110m
-      |            |             | Physics            | Revision   | Ch 1 (printed pp. 1-22)                |   35m |          
+D30   | 2026-11-21 | Buffer      | Physics            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      120m
+      |            |             | Physics            | Revision   | Ch 1 (printed pp. 1-22)                |   45m |          
       |            |             | Chemistry          | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |          
       |            |             | Chemistry          | Revision   | Ch 1 (printed pp. 1-16)                |   35m |          
 -----------------------------------------------------------------------------------------------------------------------------
@@ -219,21 +219,21 @@ D35   | 2026-11-26 | Study       | Higher Mathematics | Revision   | Ch 7 (pp. 1
       |            |             | Higher Mathematics | Study      | Ch 7 (printed pp. 152-152)             |   72m |          
       |            |             | Higher Mathematics | Homework   | Ch 7 (printed pp. 152-152)             |   20m |          
 -----------------------------------------------------------------------------------------------------------------------------
-D36   | 2026-11-27 | Revision    | Biology            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      110m
+D36   | 2026-11-27 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |      131m
+      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   56m |          
+      |            |             | Biology            | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |          
       |            |             | Biology            | Revision   | Ch 1 (printed pp. 1-18)                |   35m |          
-      |            |             | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |          
-      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   35m |          
 -----------------------------------------------------------------------------------------------------------------------------
-D37   | 2026-11-28 | Revision    | Biology            | Revision   | Ch 2 (printed pp. 19-48)               |   35m |       70m
-      |            |             | Higher Mathematics | Revision   | Ch 2 (printed pp. 29-60)               |   35m |          
+D37   | 2026-11-28 | Revision    | Higher Mathematics | Revision   | Ch 2 (printed pp. 29-60)               |   56m |       91m
+      |            |             | Biology            | Revision   | Ch 2 (printed pp. 19-48)               |   35m |          
 -----------------------------------------------------------------------------------------------------------------------------
-D38   | 2026-11-29 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       55m
-      |            |             | Higher Mathematics | Revision   | Ch 3 (printed pp. 61-88)               |   35m |          
+D38   | 2026-11-29 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       76m
+      |            |             | Higher Mathematics | Revision   | Ch 3 (printed pp. 61-88)               |   56m |          
 -----------------------------------------------------------------------------------------------------------------------------
-D39   | 2026-11-30 | Revision    | Higher Mathematics | Revision   | Ch 7 (printed pp. 130-152)             |   35m |       35m
+D39   | 2026-11-30 | Revision    | Higher Mathematics | Revision   | Ch 7 (printed pp. 130-152)             |   56m |       56m
 -----------------------------------------------------------------------------------------------------------------------------
-D40   | 2026-12-01 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       55m
-      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   35m |          
+D40   | 2026-12-01 | Revision    | Higher Mathematics | Quiz       | Mock Test / Quiz [Placeholder]         |   20m |       76m
+      |            |             | Higher Mathematics | Revision   | Ch 1 (printed pp. 1-28)                |   56m |          
 -----------------------------------------------------------------------------------------------------------------------------
 D41   | 2026-12-02 | Exam Day    | [ZERO STUDY]       | -          | Reason: exam                           |    0m |        0m
 -----------------------------------------------------------------------------------------------------------------------------
@@ -243,10 +243,10 @@ Total Calendar Days: 41 (Active Study Days: 35, Zero-Study Days: 6)
 Zero-Study Day Breakdown: {'rest': 3, 'parent blackout': 1, 'calendar blackout': 1, 'exam': 1}
 Total Tasks Generated: 183
 Subject Allocation & Priority Multiplier Effect:
-  * Higher Mathematics [DIFFICULT]: 2093 mins (42.8% share, 25 active days)
-  * Physics            [MAIN     ]: 1250 mins (25.5% share, 14 active days)
-  * Biology            [NORMAL   ]:  810 mins (16.6% share, 13 active days)
-  * Chemistry          [NORMAL   ]:  740 mins (15.1% share, 11 active days)
+  * Higher Mathematics [DIFFICULT]: 2198 mins (43.9% share, 25 active days)
+  * Physics            [MAIN     ]: 1260 mins (25.2% share, 14 active days)
+  * Biology            [NORMAL   ]:  810 mins (16.2% share, 13 active days)
+  * Chemistry          [NORMAL   ]:  740 mins (14.8% share, 11 active days)
 
 PER-SUBJECT SYLLABUS COVERAGE AUDIT (Before Exam):
   Subject            | Exam Date  | Chapters   | Pages Covered    | Coverage % | Status

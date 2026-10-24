@@ -1346,6 +1346,369 @@
         }
       }
     },
+    "/v1/students/{student_id}/quizzes": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Create Student Quiz Gateway",
+        "description": "Create a new quiz session for student.",
+        "operationId": "create_student_quiz_gateway_v1_students__student_id__quizzes_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/quizzes/{quiz_id}/attempts": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Start Quiz Attempt Gateway",
+        "description": "Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving.",
+        "operationId": "start_quiz_attempt_gateway_v1_quizzes__quiz_id__attempts_post",
+        "parameters": [
+          {
+            "name": "quiz_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Quiz Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartAttemptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/items/{position}/answer": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Answer Quiz Item Gateway",
+        "description": "Submit answer for sequential quiz item with nonce and deadline verification.",
+        "operationId": "answer_quiz_item_gateway_v1_attempts__attempt_id__items__position__answer_post",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Position"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerItemResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/events": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Record Attempt Event Gateway",
+        "description": "Record anti-cheat event from client.",
+        "operationId": "record_attempt_event_gateway_v1_attempts__attempt_id__events_post",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttemptEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptEventResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/submit": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Submit Quiz Attempt Gateway",
+        "description": "Finalize quiz attempt, calculate score, emit learning signals, and unlock review.",
+        "operationId": "submit_quiz_attempt_gateway_v1_attempts__attempt_id__submit_post",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitAttemptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/review": {
+      "get": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Review Quiz Attempt Gateway",
+        "description": "Review completed quiz attempt with explanations and answer keys.",
+        "operationId": "review_quiz_attempt_gateway_v1_attempts__attempt_id__review_get",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptReviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Create Chat Session Gateway",
+        "description": "Create chat session (enforces quiz in-progress lockout).",
+        "operationId": "create_chat_session_gateway_v1_chat_sessions_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}/messages": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Send Chat Message Gateway",
+        "description": "Send chat message (enforces quiz in-progress lockout).",
+        "operationId": "send_chat_message_gateway_v1_chat_sessions__session_id__messages_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/{path}": {
       "get": {
         "tags": [
@@ -1644,6 +2007,293 @@
           "expires_at"
         ],
         "title": "AddChildResponse"
+      },
+      "AnswerItemRequest": {
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "title": "Nonce"
+          },
+          "response": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Response"
+          },
+          "time_spent_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Time Spent Ms",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "nonce",
+          "response"
+        ],
+        "title": "AnswerItemRequest"
+      },
+      "AnswerItemResponse": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "answered": {
+            "type": "boolean",
+            "title": "Answered"
+          },
+          "is_correct": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Correct"
+          },
+          "next_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptItemPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "answered"
+        ],
+        "title": "AnswerItemResponse"
+      },
+      "AttemptEventRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "AttemptEventRequest"
+      },
+      "AttemptEventResponse": {
+        "properties": {
+          "recorded": {
+            "type": "boolean",
+            "title": "Recorded",
+            "default": true
+          },
+          "integrity_score": {
+            "type": "number",
+            "title": "Integrity Score"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "integrity_score",
+          "state"
+        ],
+        "title": "AttemptEventResponse"
+      },
+      "AttemptItemPublic": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "nonce": {
+            "type": "string",
+            "title": "Nonce"
+          },
+          "time_limit_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Limit S"
+          },
+          "question": {
+            "$ref": "#/components/schemas/QuestionPublic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "nonce",
+          "question"
+        ],
+        "title": "AttemptItemPublic",
+        "description": "Sequential quiz item served to the student."
+      },
+      "AttemptItemReview": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "question": {
+            "$ref": "#/components/schemas/QuestionPublic"
+          },
+          "student_response": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Student Response"
+          },
+          "is_correct": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Correct"
+          },
+          "points": {
+            "type": "number",
+            "title": "Points"
+          },
+          "correct_answer": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Correct Answer"
+          },
+          "explanation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Explanation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "question",
+          "student_response",
+          "is_correct",
+          "points",
+          "correct_answer",
+          "explanation"
+        ],
+        "title": "AttemptItemReview"
+      },
+      "AttemptReviewResponse": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Attempt Id"
+          },
+          "quiz_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Quiz Id"
+          },
+          "quiz_title": {
+            "type": "string",
+            "title": "Quiz Title"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "total_possible_score": {
+            "type": "number",
+            "title": "Total Possible Score"
+          },
+          "integrity_score": {
+            "type": "number",
+            "title": "Integrity Score"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptItemReview"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "quiz_id",
+          "quiz_title",
+          "mode",
+          "state",
+          "score",
+          "total_possible_score",
+          "integrity_score",
+          "started_at",
+          "submitted_at",
+          "items"
+        ],
+        "title": "AttemptReviewResponse"
       },
       "AuthExchangeRequest": {
         "properties": {
@@ -2333,6 +2983,98 @@
         "title": "PlanResponse",
         "description": "Full versioned study plan."
       },
+      "QuestionOptionPublic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Opaque option identifier"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "Localized option text (Bangla/English)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "QuestionOptionPublic",
+        "description": "Option with opaque ID and localized text/blocks."
+      },
+      "QuestionPublic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcq",
+              "short",
+              "broad"
+            ],
+            "title": "Type"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id"
+          },
+          "concept_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept Id"
+          },
+          "difficulty": {
+            "type": "number",
+            "title": "Difficulty"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "stem": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stem"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionOptionPublic"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "difficulty",
+          "language",
+          "stem"
+        ],
+        "title": "QuestionPublic",
+        "description": "Question representation served to students during active quizzes.\n\nZero answer keys, rubrics, or explanations are present."
+      },
       "RecurringUnavailableBlock": {
         "properties": {
           "day_of_week": {
@@ -2505,6 +3247,85 @@
           "comment"
         ],
         "title": "ReviewSubmissionRequest"
+      },
+      "StartAttemptRequest": {
+        "properties": {
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          }
+        },
+        "type": "object",
+        "title": "StartAttemptRequest"
+      },
+      "StartAttemptResponse": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Attempt Id"
+          },
+          "quiz_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Quiz Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Deadline At"
+          },
+          "attempt_token": {
+            "type": "string",
+            "title": "Attempt Token"
+          },
+          "total_items": {
+            "type": "integer",
+            "title": "Total Items"
+          },
+          "current_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttemptItemPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "quiz_id",
+          "state",
+          "mode",
+          "started_at",
+          "deadline_at",
+          "attempt_token",
+          "total_items"
+        ],
+        "title": "StartAttemptResponse"
       },
       "StudentChangeRequestInput": {
         "properties": {
@@ -2790,6 +3611,62 @@
         ],
         "title": "StudySetupResponse",
         "description": "Study setup details for a subject."
+      },
+      "SubmitAttemptResponse": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Attempt Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "total_possible_score": {
+            "type": "number",
+            "title": "Total Possible Score"
+          },
+          "integrity_score": {
+            "type": "number",
+            "title": "Integrity Score"
+          },
+          "is_flagged": {
+            "type": "boolean",
+            "title": "Is Flagged",
+            "default": false
+          },
+          "invalid_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Reason"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "state",
+          "score",
+          "total_possible_score",
+          "integrity_score",
+          "submitted_at"
+        ],
+        "title": "SubmitAttemptResponse"
       },
       "SyllabusItemInput": {
         "properties": {

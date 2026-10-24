@@ -31,7 +31,11 @@ from core.planner.engine import (
     SubjectSetupInput,
     generate_student_plan,
 )
-from core.planner.mock_ai_service import app as mock_ai_app, set_test_mode
+from tests.mock_services.ai_planner import (
+    mock_ai_app,
+    set_simulation_mode as set_test_mode,
+    SimulationMode,
+)
 from core.planner.provider import (
     AiPlannerProvider,
     CircuitBreaker,
@@ -721,3 +725,533 @@ async def test_live_db_provenance_and_api_responses(
     assert today_data["generation_reason"] == plan_row.generation_reason
     assert today_data["reason_for_parents"] is not None
     assert len(today_data["reason_for_parents"]) > 0
+
+
+# ============================================================================
+# 8. Missing Validator Rules Tests (V03, V08, V09, V10, V11, V14)
+# ============================================================================
+
+
+def test_validator_rule_v03_study_window_violation() -> None:
+    """V03: Reject proposal if scheduled tasks exceed study window capacity considering unavailable blocks."""
+    ctx, setups, settings = build_test_context()
+    validator = AiProposalValidator(
+        setups=setups,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=150,
+        student_id=ctx.student_id,
+    )
+
+    # Force a day with 400 minutes scheduled when capacity is 180m
+    d_str = ctx.day_calendar[0].date.isoformat()
+    raw_payload = {
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": [
+            {
+                "date": d_str,
+                "tasks": [
+                    {
+                        "type": "study",
+                        "subject": "Mathematics",
+                        "chapter_id": str(setups[0].chapters[0].id),
+                        "page_start": 1,
+                        "page_end": 10,
+                        "minutes": 350,  # Exceeds 180m window capacity
+                    }
+                ],
+            }
+        ],
+    }
+
+    res = validator.validate(raw_payload)
+    assert not res.is_valid
+    assert res.error_code == "V03_STUDY_WINDOW_VIOLATION"
+
+
+def test_validator_rule_v08_pinned_tasks_enforcement() -> None:
+    """V08: Reject proposal if pinned tasks are omitted or their duration is altered."""
+    ctx, setups, settings = build_test_context()
+    pinned_id = str(uuid.uuid4())
+    pinned_tasks = [
+        {
+            "task_id": pinned_id,
+            "date": ctx.day_calendar[0].date,
+            "subject": "Mathematics",
+            "type": "study",
+            "minutes": 45,
+            "chapter_id": str(setups[0].chapters[0].id),
+            "page_start": 1,
+            "page_end": 5,
+        }
+    ]
+
+    validator = AiProposalValidator(
+        setups=setups,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=150,
+        student_id=ctx.student_id,
+        pinned_tasks=pinned_tasks,
+    )
+
+    # Proposal with pinned task duration altered from 45m to 20m
+    d_str = ctx.day_calendar[0].date.isoformat()
+    payload_altered = {
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": [
+            {
+                "date": d_str,
+                "tasks": [
+                    {
+                        "task_id": pinned_id,
+                        "type": "study",
+                        "subject": "Mathematics",
+                        "chapter_id": str(setups[0].chapters[0].id),
+                        "page_start": 1,
+                        "page_end": 5,
+                        "minutes": 20,  # Altered!
+                    }
+                ],
+            }
+        ],
+    }
+
+    res_altered = validator.validate(payload_altered)
+    assert not res_altered.is_valid
+    assert res_altered.error_code == "V08_PINNED_TASK_ALTERED"
+
+    # Proposal where pinned task is omitted entirely
+    payload_omitted = {
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": [
+            {
+                "date": d_str,
+                "tasks": [
+                    {
+                        "type": "study",
+                        "subject": "Mathematics",
+                        "chapter_id": str(setups[0].chapters[0].id),
+                        "page_start": 6,
+                        "page_end": 10,
+                        "minutes": 45,
+                    }
+                ],
+            }
+        ],
+    }
+
+    res_omitted = validator.validate(payload_omitted)
+    assert not res_omitted.is_valid
+    assert res_omitted.error_code == "V08_PINNED_TASK_OMITTED"
+
+
+def test_validator_rule_v09_locked_fields_and_priority_jump() -> None:
+    """V09: Parent-locked fields cannot be modified; priority level jumps > 1 are dropped with warnings."""
+    import dataclasses
+    ctx, setups, settings = build_test_context()
+    # Lock Mathematics priority using dataclasses.replace since ResolvedPlannerSettings is frozen
+    settings = dataclasses.replace(settings, parent_locked_fields=["Mathematics", "priority_Mathematics"])
+
+    validator = AiProposalValidator(
+        setups=setups,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=150,
+        student_id=ctx.student_id,
+    )
+
+    d_str = ctx.day_calendar[0].date.isoformat()
+    raw_payload = {
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "priority_suggestions": [
+            {
+                "subject": "Mathematics",  # Locked!
+                "current_level": "normal",
+                "suggested_level": "main",
+                "evidence_codes": ["ACCURACY_LOW"],
+                "rationale": "Needs more time",
+            },
+            {
+                "subject": "General Science",
+                "current_level": "normal",
+                "suggested_level": "difficult",  # 2-level jump!
+                "evidence_codes": ["ACCURACY_LOW"],
+                "rationale": "Jump 2 levels",
+            },
+        ],
+        "days": [
+            {
+                "date": d_str,
+                "tasks": [
+                    {
+                        "type": "study",
+                        "subject": "Mathematics",
+                        "chapter_id": str(setups[0].chapters[0].id),
+                        "page_start": 1,
+                        "page_end": 10,
+                        "minutes": 45,
+                    }
+                ],
+            }
+        ],
+    }
+
+    res = validator.validate(raw_payload)
+    assert res.is_valid
+    assert res.repaired
+    # Locked field suggestion dropped
+    assert any("V09_LOCKED_FIELD_IGNORED_Mathematics" in w for w in res.warnings)
+    # Excessive 2-level jump dropped
+    assert any("V09_EXCESSIVE_PRIORITY_JUMP_DROPPED_General Science" in w for w in res.warnings)
+    assert len(res.sanitized_priority_suggestions) == 0
+
+
+def test_validator_rule_v10_max_tasks_and_mock_quiz_cap() -> None:
+    """V10: Reject if day exceeds 8 tasks, and trivially repair mock quiz cap."""
+    ctx, setups, settings = build_test_context()
+    validator = AiProposalValidator(
+        setups=setups,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=300,
+        student_id=ctx.student_id,
+    )
+
+    d_str = ctx.day_calendar[0].date.isoformat()
+    # 1. 10 tasks on a single day (exceeds limit 6 with excess 4 > 2 -> hard reject)
+    tasks_10 = [
+        {
+            "type": "study",
+            "subject": "Mathematics",
+            "chapter_id": str(setups[0].chapters[0].id),
+            "page_start": 1,
+            "page_end": 2,
+            "minutes": 20,
+        }
+        for _ in range(10)
+    ]
+    res_10 = validator.validate({
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": [{"date": d_str, "tasks": tasks_10}],
+    })
+    assert not res_10.is_valid
+    assert res_10.error_code == "V10_EXCEEDED_MAX_TASKS_PER_DAY"
+
+    # 2. Mock quiz on consecutive days -> repaired by dropping the second quiz
+    d1_str = ctx.day_calendar[0].date.isoformat()
+    d2_str = ctx.day_calendar[1].date.isoformat()
+    res_quiz = validator.validate({
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": [
+            {
+                "date": d1_str,
+                "tasks": [{
+                    "type": "quiz",
+                    "subject": "Mathematics",
+                    "chapter_id": None,
+                    "minutes": 20,
+                    "reason_code": "MOCK_QUIZ",
+                }],
+            },
+            {
+                "date": d2_str,
+                "tasks": [{
+                    "type": "quiz",
+                    "subject": "Mathematics",
+                    "chapter_id": None,
+                    "minutes": 20,
+                    "reason_code": "MOCK_QUIZ",
+                }],
+            },
+        ],
+    })
+    assert res_quiz.is_valid
+    assert res_quiz.repaired
+    assert any("V10_MOCK_QUIZ_CAP_DROPPED_Mathematics" in w for w in res_quiz.warnings)
+
+
+def test_validator_rule_v11_rotation_as_soft_rule() -> None:
+    """V11: Rotation is a soft rule per docs/07_AI_PLANNER_API.md §8: warns only, never rejects."""
+    ctx, setups, settings = build_test_context()
+
+    # Add 2 more subjects so total subjects >= 3 to trigger rotation checks
+    setups_3 = list(setups) + [
+        SubjectSetupInput(
+            subject="Physics",
+            exam_name="Term Final Exam",
+            exam_date=ctx.today + timedelta(days=25),
+            chapters=[
+                ChapterPlanInput(
+                    id=uuid.uuid4(),
+                    number=1,
+                    title="Motion",
+                    book_title="Physics",
+                    printed_page_start=1,
+                    printed_page_end=40,
+                    difficulty_factor=1.0,
+                    custom_order=1,
+                )
+            ],
+        ),
+        SubjectSetupInput(
+            subject="Chemistry",
+            exam_name="Term Final Exam",
+            exam_date=ctx.today + timedelta(days=25),
+            chapters=[
+                ChapterPlanInput(
+                    id=uuid.uuid4(),
+                    number=1,
+                    title="Structure of Matter",
+                    book_title="Chemistry",
+                    printed_page_start=1,
+                    printed_page_end=40,
+                    difficulty_factor=1.0,
+                    custom_order=1,
+                )
+            ],
+        ),
+    ]
+
+    validator = AiProposalValidator(
+        setups=setups_3,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=150,
+        student_id=ctx.student_id,
+    )
+
+    # 3 consecutive days of Mathematics
+    days_payload = []
+    for i in range(3):
+        days_payload.append({
+            "date": ctx.day_calendar[i].date.isoformat(),
+            "tasks": [{
+                "type": "study",
+                "subject": "Mathematics",
+                "chapter_id": str(setups[0].chapters[0].id),
+                "page_start": 1 + i * 5,
+                "page_end": 5 + i * 5,
+                "minutes": 45,
+            }],
+        })
+
+    res = validator.validate({
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "days": days_payload,
+    })
+
+    # MUST be valid because V11 is a soft rule!
+    assert res.is_valid
+    assert any("V11_ROTATION_EXCEEDED_Mathematics" in w for w in res.warnings)
+
+
+def test_validator_rule_v14_rationale_sanitization_and_pii() -> None:
+    """V14: Detect and redact PII (phone, email) and escape HTML in rationale text."""
+    ctx, setups, settings = build_test_context()
+    validator = AiProposalValidator(
+        setups=setups,
+        day_calendar=ctx.day_calendar,
+        resolved_settings=settings,
+        today=ctx.today,
+        daily_study_minutes=150,
+        student_id=ctx.student_id,
+    )
+
+    d_str = ctx.day_calendar[0].date.isoformat()
+    raw_payload = {
+        "contract_version": "ai-planner/v1.0",
+        "model_info": {"model_id": "mock-model", "version": "1.0"},
+        "rationale": {
+            "Mathematics": "Contact 01711223344 or test@gmail.com for help.",
+            "Physics": "Review motion equations <script>alert(1)</script>.",
+        },
+        "days": [
+            {
+                "date": d_str,
+                "tasks": [
+                    {
+                        "type": "study",
+                        "subject": "Mathematics",
+                        "chapter_id": str(setups[0].chapters[0].id),
+                        "page_start": 1,
+                        "page_end": 10,
+                        "minutes": 45,
+                    }
+                ],
+            }
+        ],
+    }
+
+    res = validator.validate(raw_payload)
+    assert res.is_valid
+    sanitized_math = res.rationale["Mathematics"]
+    # PII redacted with safe template
+    assert "01711223344" not in sanitized_math
+    assert "test@gmail.com" not in sanitized_math
+    assert "Study routine prioritized for balanced syllabus coverage" in sanitized_math
+
+    # HTML escaped in Physics rationale
+    sanitized_phys = res.rationale.get("Physics", "")
+    assert "<script>" not in sanitized_phys
+    assert "&lt;script&gt;" in sanitized_phys
+
+
+# ============================================================================
+# 9. Shadow Mode Comparator Tests
+# ============================================================================
+
+
+def test_shadow_mode_comparator_metrics() -> None:
+    """Verify that compare_plans computes agreement metrics between AI and baseline plans."""
+    from core.planner.shadow_comparator import compare_plans
+    ctx, setups, settings = build_test_context()
+
+    deterministic_plan = generate_student_plan(
+        student_id=ctx.student_id,
+        today=ctx.today,
+        daily_study_minutes=ctx.daily_study_minutes,
+        setups=ctx.setups,
+        available_days=ctx.available_days,
+        completed_tasks=None,
+        resolved_settings=ctx.resolved_settings,
+        day_calendar=ctx.day_calendar,
+    )
+
+    # Compare deterministic with itself: parity should be met, recommendation PASS
+    comparison = compare_plans(deterministic_plan, deterministic_plan)
+    assert comparison["metrics"]["coverage_parity_met"] is True
+    assert comparison["metrics"]["churn_rate_pct"] == 0.0
+    assert comparison["recommendation"] == "PASS"
+
+
+# ============================================================================
+# 10. AI Planner Stubs & Mock Endpoints Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_ai_planner_stubs_quizzes_revision_drafts_explain() -> None:
+    """Verify that stub methods successfully communicate with mock service endpoints."""
+    from datetime import UTC, datetime
+    from core.contracts.ai_planner import (
+        InsightExplainRequest,
+        QuestionChunkRef,
+        QuestionDraftRequest,
+        QuizProposeRequest,
+        RevisionProposeRequest,
+    )
+
+    transport = ASGITransport(app=mock_ai_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://mock-ai") as client:
+        provider = AiPlannerProvider(
+            client=client,
+            service_url="http://mock-ai",
+            api_key="valid-key",
+        )
+
+        # 1. Propose Quizzes
+        quiz_req = QuizProposeRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            target_date=date.today(),
+            kind="daily",
+            subject="Mathematics",
+            concept_pool=["linear-equations"],
+        )
+        quiz_resp = await provider.propose_quizzes(quiz_req)
+        assert len(quiz_resp.quiz_specs) > 0
+
+        # 2. Propose Revision
+        rev_req = RevisionProposeRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            revision_state={"boxes": {}},
+            mastery={"Mathematics": 0.8},
+            window_days=7,
+        )
+        rev_resp = await provider.propose_revision(rev_req)
+        assert len(rev_resp.revision_items) > 0
+
+        # 3. Draft Questions
+        draft_req = QuestionDraftRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            source_chunks=[
+                QuestionChunkRef(
+                    chunk_id=str(uuid.uuid4()),
+                    book_title="General Mathematics",
+                    chapter_title="Algebra",
+                    printed_page=12,
+                    text_snippet="Sample textbook snippet",
+                )
+            ],
+            count=1,
+        )
+        draft_resp = await provider.draft_questions(draft_req)
+        assert len(draft_resp.questions) > 0
+
+        # 4. Explain Insights
+        explain_req = InsightExplainRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            mastery_trends={"Mathematics": "up"},
+            plan_diff_summary={"added_days": 2},
+        )
+        explain_resp = await provider.explain_insights(explain_req)
+        assert "Mathematics" in explain_resp.explanations
+
+
+# ============================================================================
+# 11. AI Planner Admin CLI & Audit Log Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_ai_planner_admin_cli_and_audit() -> None:
+    """Verify that admin CLI functions execute successfully and write structured audit records."""
+    from scripts.ai_planner_admin import reset_breaker, set_rollout, show_status, toggle_kill_switch
+    from core.common.database import AsyncSessionLocal
+    from core.audit.models import AuditLog
+    from sqlalchemy import select
+
+    admin_id = uuid.uuid4()
+
+    # 1. Show Status (CLI stdout check)
+    await show_status()
+
+    # 2. Reset Breaker
+    await reset_breaker(admin_id=admin_id)
+
+    # 3. Toggle Kill Switch
+    await toggle_kill_switch(admin_id=admin_id, enabled=True)
+
+    # 4. Set Rollout
+    await set_rollout(admin_id=admin_id, class_bands=["6-8", "9-10"])
+
+    # Verify audit logs created
+    async with AsyncSessionLocal() as session:
+        stmt = select(AuditLog).where(AuditLog.actor_id == admin_id)
+        res = await session.execute(stmt)
+        audits = res.scalars().all()
+        actions = [a.action for a in audits]
+        assert "ai_planner.cli_circuit_breaker_reset" in actions
+        assert "ai_planner.cli_toggle_kill_switch" in actions
+        assert "ai_planner.cli_set_rollout_bands" in actions
+

@@ -379,3 +379,37 @@ class StudentStudySettingsResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     recommended_daily_minutes: int | None = None
     admin_hard_limits: dict[str, Any] | None = None
+
+
+class AiPlannerStatusResponse(BaseModel):
+    """Administrative status of AI planner integration."""
+
+    enabled: bool
+    shadow_mode: bool
+    service_url: str
+    enabled_class_bands: list[str]
+    circuit_breaker: dict[str, Any]
+    contract_version: str = "ai-planner/v1.0"
+
+
+class UpdateAiPlannerConfigRequest(BaseModel):
+    """Payload to update AI planner rollout and kill switches."""
+
+    enabled: bool | None = None
+    shadow_mode: bool | None = None
+    enabled_class_bands: list[str] | None = None
+
+
+class AiSuggestionResponse(BaseModel):
+    """AI planner priority or pacing suggestion pending parent review."""
+
+    id: uuid.UUID
+    student_id: uuid.UUID
+    subject: str
+    current_level: str
+    suggested_level: str
+    evidence_codes: list[str] = Field(default_factory=list)
+    rationale: str
+    status: str
+    created_at: datetime
+
