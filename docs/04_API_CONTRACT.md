@@ -43,6 +43,9 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /students/{id}/plan?from=&to=` – days + tasks with day types (`school_day`, `holiday`, `blackout`, `exam_day`), coverage reports, and plan provenance (`provider`, `model_version`, `contract_version`, `settings_version`, `generation_reason`; see `docs/07_AI_PLANNER_API.md`).
 - `GET /students/{id}/today` – home screen payload (tasks, revision, streak, exam countdown, remaining budget, student timezone, and `plan_provenance` with parent-facing rationale).
 - `PATCH /tasks/{id}` – status update (student only; parents read-only; ownership verified).
+- `GET /students/{id}/ai-suggestions` – list pending AI planner priority suggestions for student.
+- `POST /students/{id}/ai-suggestions/{suggestion_id}/approve` – parent approves AI suggestion, updating settings and regenerating plan (enforces Rule V09 locked fields).
+- `POST /students/{id}/ai-suggestions/{suggestion_id}/reject` – parent rejects AI suggestion.
 
 ### Admin Governance & Configuration (`/admin/*`, role: admin)
 - `GET /admin/policies` – list admin policies across class bands and groups.
@@ -57,6 +60,10 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /admin/holidays/{id}/preview` – preview affected plans and students for holiday date range.
 - `POST /admin/holidays/{id}/publish` – publish holiday calendar change; queues throttled idempotent regeneration.
 - `GET /admin/observances` – list observance catalog entries.
+- `GET /admin/ai-planner/status` – operational status of AI Planner (kill switch, circuit breaker state, rollout class bands).
+- `POST /admin/ai-planner/circuit-breaker/reset` – force reset AI Planner circuit breaker to CLOSED.
+- `PUT /admin/ai-planner/config` – update AI Planner kill switch and rollout class bands.
+- `GET /admin/ai-planner/shadow-metrics` – get aggregate shadow-mode comparison metrics and latest run logs.
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).

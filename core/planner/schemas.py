@@ -413,3 +413,16 @@ class AiSuggestionResponse(BaseModel):
     status: str
     created_at: datetime
 
+
+class ShadowMetricsResponse(BaseModel):
+    """Aggregated metrics and reports for AI planner shadow-mode evaluations."""
+
+    total_runs: int
+    coverage_parity_pass_count: int
+    coverage_parity_pass_rate_pct: float
+    avg_churn_rate_pct: float
+    avg_minute_delta: float
+    total_warnings: int
+    recent_runs: list[dict[str, Any]] = Field(default_factory=list)
+
+

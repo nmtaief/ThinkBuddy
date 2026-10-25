@@ -53,118 +53,10 @@
       }
     },
     "/internal/{path}": {
-      "patch": {
-        "summary": "Block Gateway Internal Direct",
-        "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Block Gateway Internal Direct",
-        "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Block Gateway Internal Direct",
-        "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "operationId": "block_gateway_internal_direct_internal__path__post",
         "parameters": [
           {
             "name": "path",
@@ -200,7 +92,115 @@
       "delete": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__post",
         "parameters": [
           {
             "name": "path",
@@ -1266,6 +1266,158 @@
         }
       }
     },
+    "/v1/students/{student_id}/ai-suggestions": {
+      "get": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "List Ai Suggestions",
+        "description": "List pending AI planner priority suggestions for a student.",
+        "operationId": "list_ai_suggestions_v1_students__student_id__ai_suggestions_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AiSuggestionResponse"
+                  },
+                  "title": "Response List Ai Suggestions V1 Students  Student Id  Ai Suggestions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/ai-suggestions/{suggestion_id}/approve": {
+      "post": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Approve Ai Suggestion",
+        "description": "Parent approves an AI planner priority suggestion, updating settings and regenerating plan.",
+        "operationId": "approve_ai_suggestion_v1_students__student_id__ai_suggestions__suggestion_id__approve_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "suggestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Suggestion Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/ai-suggestions/{suggestion_id}/reject": {
+      "post": {
+        "tags": [
+          "Planning"
+        ],
+        "summary": "Reject Ai Suggestion",
+        "description": "Parent rejects an AI planner suggestion.",
+        "operationId": "reject_ai_suggestion_v1_students__student_id__ai_suggestions__suggestion_id__reject_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "suggestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Suggestion Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/teacher/queue": {
       "get": {
         "tags": [
@@ -1529,82 +1681,10 @@
       }
     },
     "/v1/v1/internal/{path}": {
-      "patch": {
+      "delete": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -1640,7 +1720,7 @@
       "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -1673,10 +1753,82 @@
           }
         }
       },
-      "delete": {
+      "patch": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -1711,82 +1863,10 @@
       }
     },
     "/v1/internal/{path}": {
-      "patch": {
+      "delete": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -1822,7 +1902,7 @@
       "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -1855,10 +1935,82 @@
           }
         }
       },
-      "delete": {
+      "patch": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
         "parameters": [
           {
             "name": "path",
@@ -2887,6 +3039,65 @@
           "expires_at"
         ],
         "title": "AddChildResponse"
+      },
+      "AiSuggestionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "current_level": {
+            "type": "string",
+            "title": "Current Level"
+          },
+          "suggested_level": {
+            "type": "string",
+            "title": "Suggested Level"
+          },
+          "evidence_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Codes"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "student_id",
+          "subject",
+          "current_level",
+          "suggested_level",
+          "rationale",
+          "status",
+          "created_at"
+        ],
+        "title": "AiSuggestionResponse",
+        "description": "AI planner priority or pacing suggestion pending parent review."
       },
       "AllowAttemptRequest": {
         "properties": {

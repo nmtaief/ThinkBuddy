@@ -246,6 +246,9 @@ class PlanProviderContext:
     idempotency_key: uuid.UUID | str = field(default_factory=uuid.uuid4)
     request_id: uuid.UUID | str = field(default_factory=uuid.uuid4)
     pinned_tasks: list[dict[str, Any]] | None = None
+    mastery_records: list[dict[str, Any]] | None = None
+    learning_signals: dict[str, Any] | None = None
+    revision_items: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -361,6 +364,9 @@ class AiPlannerProvider(PlanProvider):
             idempotency_key=ctx.idempotency_key,
             request_id=ctx.request_id,
             mode=ctx.resolved_settings.adaptive_mode,
+            mastery_records=ctx.mastery_records,
+            learning_signals=ctx.learning_signals,
+            revision_items=ctx.revision_items,
         )
 
         headers = self._get_service_headers(str(ctx.idempotency_key), str(ctx.request_id))
@@ -470,56 +476,135 @@ class AiPlannerProvider(PlanProvider):
         )
 
     # -----------------------------------------------------------------------
-    # Stub Methods for Additional AI Planner Endpoints (P06a)
+    # Helper & Stub Methods for Additional AI Planner Endpoints (P06a)
     # -----------------------------------------------------------------------
 
+    async def _post_with_retries(
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Execute POST call with circuit breaker checks, timeouts, and retries."""
+        can_run = await self.circuit_breaker.can_execute()
+        if not can_run:
+            raise RuntimeError("CIRCUIT_BREAKER_OPEN: Cannot execute request while circuit breaker is OPEN")
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                if self._external_client:
+                    resp = await self._external_client.post(
+                        endpoint,
+                        json=payload,
+                        headers=headers,
+                        timeout=timeout_seconds,
+                    )
+                else:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(
+                            endpoint,
+                            json=payload,
+                            headers=headers,
+                            timeout=timeout_seconds,
+                        )
+
+                if resp.status_code == 200:
+                    await self.circuit_breaker.record_success()
+                    return resp.json()
+
+                if resp.status_code >= 500:
+                    last_exc = httpx.HTTPStatusError(
+                        f"Server error {resp.status_code}",
+                        request=resp.request,
+                        response=resp,
+                    )
+                else:
+                    # Client errors (4xx) are fatal and should not be retried
+                    await self.circuit_breaker.record_failure()
+                    resp.raise_for_status()
+
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                last_exc = exc
+
+            if attempt < self.max_retries:
+                await asyncio.sleep(0.05 * (2**attempt))
+
+        await self.circuit_breaker.record_failure()
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Request failed after retries")
+
+    async def check_health(self, timeout_seconds: float = 2.0) -> dict[str, Any]:
+        """Call GET /healthz (docs/07_AI_PLANNER_API.md §3)."""
+        endpoint = f"{self.service_url.rstrip('/')}/healthz"
+        if self._external_client:
+            resp = await self._external_client.get(endpoint, timeout=timeout_seconds)
+        else:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(endpoint, timeout=timeout_seconds)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_contract(self, timeout_seconds: float = 2.0) -> dict[str, Any]:
+        """Call GET /v1/contract (docs/07_AI_PLANNER_API.md §3)."""
+        endpoint = f"{self.service_url.rstrip('/')}/v1/contract"
+        if self._external_client:
+            resp = await self._external_client.get(endpoint, timeout=timeout_seconds)
+        else:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(endpoint, timeout=timeout_seconds)
+        resp.raise_for_status()
+        return resp.json()
+
     async def propose_quizzes(self, req: QuizProposeRequest) -> QuizProposeResponse:
-        """Call POST /v1/quizzes/propose to get quiz composition specs."""
+        """Call POST /v1/quizzes/propose (docs/07_AI_PLANNER_API.md §3 - 15s timeout)."""
         headers = self._get_service_headers(req.idempotency_key, req.request_id)
         endpoint = f"{self.service_url.rstrip('/')}/v1/quizzes/propose"
-        if self._external_client:
-            resp = await self._external_client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        else:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        resp.raise_for_status()
-        return QuizProposeResponse.model_validate(resp.json())
+        data = await self._post_with_retries(
+            endpoint=endpoint,
+            payload=req.model_dump(mode="json"),
+            headers=headers,
+            timeout_seconds=15.0,
+        )
+        return QuizProposeResponse.model_validate(data)
 
     async def propose_revision(self, req: RevisionProposeRequest) -> RevisionProposeResponse:
-        """Call POST /v1/revision/propose to get revision queue specs."""
+        """Call POST /v1/revision/propose (docs/07_AI_PLANNER_API.md §3 - 15s timeout)."""
         headers = self._get_service_headers(req.idempotency_key, req.request_id)
         endpoint = f"{self.service_url.rstrip('/')}/v1/revision/propose"
-        if self._external_client:
-            resp = await self._external_client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        else:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        resp.raise_for_status()
-        return RevisionProposeResponse.model_validate(resp.json())
+        data = await self._post_with_retries(
+            endpoint=endpoint,
+            payload=req.model_dump(mode="json"),
+            headers=headers,
+            timeout_seconds=15.0,
+        )
+        return RevisionProposeResponse.model_validate(data)
 
     async def draft_questions(self, req: QuestionDraftRequest) -> QuestionDraftResponse:
-        """Call POST /v1/questions/draft to get grounded question drafts."""
+        """Call POST /v1/questions/draft (docs/07_AI_PLANNER_API.md §3 - 30s timeout)."""
         headers = self._get_service_headers(req.idempotency_key, req.request_id)
         endpoint = f"{self.service_url.rstrip('/')}/v1/questions/draft"
-        if self._external_client:
-            resp = await self._external_client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        else:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        resp.raise_for_status()
-        return QuestionDraftResponse.model_validate(resp.json())
+        data = await self._post_with_retries(
+            endpoint=endpoint,
+            payload=req.model_dump(mode="json"),
+            headers=headers,
+            timeout_seconds=30.0,
+        )
+        return QuestionDraftResponse.model_validate(data)
 
     async def explain_insights(self, req: InsightExplainRequest) -> InsightExplainResponse:
-        """Call POST /v1/insights/explain to get parent explanations."""
+        """Call POST /v1/insights/explain (docs/07_AI_PLANNER_API.md §3 - 15s timeout)."""
         headers = self._get_service_headers(req.idempotency_key, req.request_id)
         endpoint = f"{self.service_url.rstrip('/')}/v1/insights/explain"
-        if self._external_client:
-            resp = await self._external_client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        else:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(endpoint, json=req.model_dump(mode="json"), headers=headers)
-        resp.raise_for_status()
-        return InsightExplainResponse.model_validate(resp.json())
+        data = await self._post_with_retries(
+            endpoint=endpoint,
+            payload=req.model_dump(mode="json"),
+            headers=headers,
+            timeout_seconds=15.0,
+        )
+        return InsightExplainResponse.model_validate(data)
 
 
 def get_plan_provider(

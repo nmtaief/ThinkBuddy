@@ -43,6 +43,9 @@ def build_pseudonymous_snapshot(
     request_id: uuid.UUID | str | None = None,
     mode: str | None = None,
     locale: str = "bn",
+    mastery_records: list[dict[str, Any]] | None = None,
+    learning_signals: dict[str, Any] | None = None,
+    revision_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Construct a minimal, pseudonymous request payload conforming to docs/07_AI_PLANNER_API.md §4 & §5."""
     student_ref = generate_student_ref(student_id)
@@ -148,6 +151,42 @@ def build_pseudonymous_snapshot(
                     }
                 )
 
+    # Real Mastery & Learning Signals (docs/07_AI_PLANNER_API.md §5)
+    mastery_block: list[dict[str, Any]] = []
+    if mastery_records:
+        for m in mastery_records:
+            mastery_block.append(
+                {
+                    "chapter_id": str(m.get("chapter_id", "")),
+                    "concept_id": str(m.get("concept_id", "")) if m.get("concept_id") else None,
+                    "score": float(m.get("score", 0.0)),
+                    "confidence": float(m.get("confidence", 0.0)),
+                    "last_seen": m.get("last_seen"),
+                }
+            )
+
+    signals_block: dict[str, Any] = {}
+    if learning_signals:
+        signals_block = {
+            "quiz_accuracy": float(learning_signals.get("quiz_accuracy", 0.0)),
+            "speed_vs_expected": float(learning_signals.get("speed_vs_expected", 1.0)),
+            "repeated_chat_topics": list(learning_signals.get("repeated_chat_topics", [])),
+            "skipped_tasks_count": int(learning_signals.get("skipped_tasks_count", 0)),
+            "self_rated_difficulty": learning_signals.get("self_rated_difficulty"),
+        }
+
+    revision_block: list[dict[str, Any]] = []
+    if revision_items:
+        for r in revision_items:
+            revision_block.append(
+                {
+                    "chapter_id": str(r.get("chapter_id", "")),
+                    "concept_id": str(r.get("concept_id", "")) if r.get("concept_id") else None,
+                    "box": int(r.get("box", 1)),
+                    "due_at": r.get("due_at"),
+                }
+            )
+
     return {
         "contract_version": "ai-planner/v1.0",
         "request_id": req_id,
@@ -163,6 +202,9 @@ def build_pseudonymous_snapshot(
         "exams": exams_block,
         "syllabus": syllabus_block,
         "progress": progress_block,
+        "mastery": mastery_block,
+        "signals": signals_block,
+        "revision": revision_block,
         "pinned": pinned_block,
         "options": {
             "planning_goal": "balanced",

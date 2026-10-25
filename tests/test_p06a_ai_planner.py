@@ -57,6 +57,12 @@ from core.planner.validator import AiProposalValidator
 
 
 # Helper to build a standard test context
+@pytest.fixture(autouse=True)
+async def reset_circuit_breaker():
+    from core.planner.provider import _global_ai_circuit_breaker
+    await _global_ai_circuit_breaker.reset()
+
+
 def build_test_context(
     student_id: uuid.UUID | None = None,
     adaptive_mode: str = "suggest",
@@ -516,7 +522,7 @@ async def test_ai_planner_provider_fallback_on_untrusted_hard_violation() -> Non
 
 def test_circuit_breaker_transitions() -> None:
     """Circuit breaker trips to OPEN after threshold and enters HALF_OPEN after timeout."""
-    cb = CircuitBreaker(failure_threshold=3, reset_timeout_seconds=0.1)
+    cb = CircuitBreaker(failure_threshold=3, reset_timeout_seconds=0.1, key_prefix=f"test:cb:{uuid.uuid4()}")
     assert cb.state == CircuitBreakerState.CLOSED
     assert cb.can_execute()
 
@@ -553,7 +559,7 @@ def test_circuit_breaker_transitions() -> None:
 @pytest.mark.asyncio
 async def test_circuit_breaker_fast_fails_when_open() -> None:
     """When circuit breaker is OPEN, provider immediately falls back without HTTP calls."""
-    cb = CircuitBreaker(failure_threshold=1, reset_timeout_seconds=60.0)
+    cb = CircuitBreaker(failure_threshold=1, reset_timeout_seconds=60.0, key_prefix=f"test:cb:{uuid.uuid4()}")
     cb.record_failure()  # Trips breaker to OPEN
     assert cb.state == CircuitBreakerState.OPEN
 
@@ -1254,4 +1260,452 @@ async def test_ai_planner_admin_cli_and_audit() -> None:
         assert "ai_planner.cli_circuit_breaker_reset" in actions
         assert "ai_planner.cli_toggle_kill_switch" in actions
         assert "ai_planner.cli_set_rollout_bands" in actions
+
+
+# ============================================================================
+# 12. Real Signals, Healthz/Contract, Stubs Fault Modes, and Approval Tests
+# ============================================================================
+
+
+def test_real_signals_and_mastery_in_snapshot() -> None:
+    """Verify that mastery, signals, and revision are cleanly serialized into snapshot without PII."""
+    student_id = uuid.uuid4()
+    ctx, setups, settings = build_test_context(student_id=student_id)
+    ctx.mastery_records = [
+        {
+            "concept_id": "concept-geom-01",
+            "mastery_score": 0.85,
+            "accuracy": 0.9,
+            "attempts": 10,
+            "last_practiced_at": "2026-10-24T10:00:00Z",
+        }
+    ]
+    ctx.learning_signals = {
+        "focus_topics": ["algebra", "trigonometry"],
+        "struggling_concepts": ["concept-geom-02"],
+        "study_velocity": 1.15,
+    }
+    ctx.revision_items = [
+        {
+            "chapter_id": str(setups[0].chapters[0].id),
+            "box": 2,
+            "due_date": "2026-10-25",
+            "reason_code": "SPACED_REVIEW_DUE",
+        }
+    ]
+
+    snapshot = build_pseudonymous_snapshot(
+        student_id=ctx.student_id,
+        today=ctx.today,
+        now_dhaka=ctx.now_dhaka,
+        resolved_settings=ctx.resolved_settings,
+        day_calendar=ctx.day_calendar,
+        setups=ctx.setups,
+        completed_tasks=ctx.completed_tasks,
+        idempotency_key=ctx.idempotency_key,
+        request_id=ctx.request_id,
+        mode=ctx.resolved_settings.adaptive_mode,
+        mastery_records=ctx.mastery_records,
+        learning_signals=ctx.learning_signals,
+        revision_items=ctx.revision_items,
+    )
+
+    # Verify structured sections
+    assert "mastery" in snapshot
+    assert "signals" in snapshot
+    assert "revision" in snapshot
+    assert len(snapshot["mastery"]) == 1
+    assert snapshot["mastery"][0]["concept_id"] == "concept-geom-01"
+    assert snapshot["signals"]["speed_vs_expected"] == 1.0
+    assert len(snapshot["revision"]) == 1
+
+    # Verify zero PII
+    snapshot_str = str(snapshot)
+    assert str(student_id) not in snapshot_str
+    assert "student_ref" in snapshot
+    assert snapshot["student_ref"].startswith("anon-")
+
+
+@pytest.mark.asyncio
+async def test_healthz_and_contract_endpoints() -> None:
+    """Verify check_health and get_contract on AiPlannerProvider."""
+    transport = ASGITransport(app=mock_ai_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://mock-ai") as client:
+        provider = AiPlannerProvider(
+            client=client,
+            service_url="http://mock-ai",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
+            circuit_breaker=CircuitBreaker(key_prefix=f"test:cb:{uuid.uuid4()}"),
+        )
+        health = await provider.check_health()
+        assert health["status"] == "ok"
+        assert health["service"] == "mock-ai-planner"
+
+        contract = await provider.get_contract()
+        assert contract["active_version"] == "ai-planner/v1.0"
+        assert "ai-planner/v1.0" in contract["supported_versions"]
+
+
+@pytest.mark.asyncio
+async def test_ai_planner_stubs_fault_modes_and_retries() -> None:
+    """Verify that stubs retry and trip circuit breaker on repeated 500 errors."""
+    from datetime import UTC, datetime
+    from core.contracts.ai_planner import QuizProposeRequest
+
+    set_test_mode("ERROR_500")
+    cb = CircuitBreaker(failure_threshold=2, reset_timeout_seconds=60.0, key_prefix=f"test:cb:{uuid.uuid4()}")
+    transport = ASGITransport(app=mock_ai_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://mock-ai") as client:
+        provider = AiPlannerProvider(
+            client=client,
+            service_url="http://mock-ai",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
+            circuit_breaker=cb,
+            max_retries=1,
+        )
+
+        quiz_req = QuizProposeRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            target_date=date.today(),
+            kind="daily",
+            subject="Mathematics",
+            concept_pool=["linear-equations"],
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await provider.propose_quizzes(quiz_req)
+
+        assert cb.consecutive_failures == 1
+    set_test_mode("NORMAL")
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_fast_fail_on_stubs() -> None:
+    """Verify that stub calls immediately fast-fail with RuntimeError when circuit breaker is OPEN."""
+    from datetime import UTC, datetime
+    from core.contracts.ai_planner import QuizProposeRequest
+
+    cb = CircuitBreaker(failure_threshold=1, reset_timeout_seconds=60.0, key_prefix=f"test:cb:{uuid.uuid4()}")
+    cb.record_failure()
+    assert cb.state == CircuitBreakerState.OPEN
+
+    transport = ASGITransport(app=mock_ai_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://mock-ai") as client:
+        provider = AiPlannerProvider(
+            client=client,
+            service_url="http://mock-ai",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
+            circuit_breaker=cb,
+        )
+
+        quiz_req = QuizProposeRequest(
+            idempotency_key=str(uuid.uuid4()),
+            student_ref="anon-12345",
+            as_of=datetime.now(UTC),
+            target_date=date.today(),
+            kind="daily",
+            subject="Mathematics",
+            concept_pool=["linear-equations"],
+        )
+
+        with pytest.raises(RuntimeError, match="CIRCUIT_BREAKER_OPEN"):
+            await provider.propose_quizzes(quiz_req)
+
+
+@pytest.mark.asyncio
+async def test_admin_shadow_metrics_api_and_cli(
+    gateway_client: httpx.AsyncClient,
+) -> None:
+    """Verify GET /v1/admin/ai-planner/shadow-metrics API and show_shadow_metrics CLI."""
+    from datetime import UTC, datetime
+    from core.audit.models import AuditLog
+    from core.auth.models import User
+    from core.auth.tokens import create_access_jwt
+    from core.common.database import AsyncSessionLocal
+    from scripts.ai_planner_admin import show_shadow_metrics
+
+    admin_id = uuid.uuid4()
+    student_id = uuid.uuid4()
+    now_iso = datetime.now(UTC).isoformat()
+
+    runs = [
+        {"metrics": {"coverage_parity_met": True, "churn_rate_pct": 10.0, "minutes_delta": 15.0, "ai_warnings_count": 1}, "recommendation": "PASS"},
+        {"metrics": {"coverage_parity_met": True, "churn_rate_pct": 5.0, "minutes_delta": -10.0, "ai_warnings_count": 0}, "recommendation": "PASS"},
+        {"metrics": {"coverage_parity_met": False, "churn_rate_pct": 45.0, "minutes_delta": 55.0, "ai_warnings_count": 2}, "recommendation": "FLAG"},
+    ]
+
+    async with AsyncSessionLocal() as session:
+        admin_user = User(
+            id=admin_id,
+            auth_provider="phone",
+            auth_uid=f"phone:{uuid.uuid4().hex[:12]}",
+            display_name="অ্যাডমিন ইউজার",
+            phone=f"+88017{uuid.uuid4().hex[:8]}",
+            role="admin",
+            status="active",
+        )
+        session.add(admin_user)
+        for r in runs:
+            audit = AuditLog(
+                actor_id=admin_id,
+                action="ai_planner.shadow_comparison",
+                target_type="plan",
+                target_id=str(student_id),
+                meta={
+                    "student_id": str(student_id),
+                    "at": now_iso,
+                    "metrics": r["metrics"],
+                    "recommendation": r["recommendation"],
+                },
+            )
+            session.add(audit)
+        await session.commit()
+
+    token = create_access_jwt(user_id=admin_id, role="admin")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Client-Platform": "android",
+        "X-Client-Form-Factor": "phone",
+        "X-App-Version": "1.0.0",
+        "X-Device-Id": "device-test-p06a-adm",
+        "Accept-Language": "bn",
+    }
+
+    resp = await gateway_client.get("/v1/admin/ai-planner/shadow-metrics", headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total_runs"] >= 3
+    assert data["coverage_parity_pass_count"] >= 2
+    assert "coverage_parity_pass_rate_pct" in data
+    assert "avg_churn_rate_pct" in data
+    assert "avg_minute_delta" in data
+    assert len(data["recent_runs"]) > 0
+
+    await show_shadow_metrics()
+
+
+@pytest.mark.asyncio
+async def test_suggest_and_approval_flow_with_parent_auth_and_locked_fields(
+    gateway_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify suggestion listing, parent approval/rejection, Rule V09 locked fields, and authorization."""
+    monkeypatch.setattr(app_settings, "AI_PLANNER_ENABLED", False)
+    from datetime import UTC, datetime
+    from core.audit.models import AuditLog
+    from core.auth.models import User
+    from core.auth.tokens import create_access_jwt
+    from core.common.database import AsyncSessionLocal
+    from core.families.models import ParentStudentLink, StudentProfile
+    from core.planner.models import StudentChangeRequest, StudentStudySettings
+    from sqlalchemy import select
+
+    student_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    unlinked_parent_id = uuid.uuid4()
+
+    sugg_unlocked_id = uuid.uuid4()
+    sugg_reject_id = uuid.uuid4()
+    sugg_locked_id = uuid.uuid4()
+
+    async with AsyncSessionLocal() as session:
+        # Users
+        stud = User(
+            id=student_id,
+            auth_provider="phone",
+            auth_uid=f"phone:{uuid.uuid4().hex[:12]}",
+            display_name="স্টুডেন্ট ইউজার",
+            phone=f"+88017{uuid.uuid4().hex[:8]}",
+            role="student",
+            status="active",
+        )
+        par = User(
+            id=parent_id,
+            auth_provider="phone",
+            auth_uid=f"phone:{uuid.uuid4().hex[:12]}",
+            display_name="প্যারেন্ট ইউজার",
+            phone=f"+88018{uuid.uuid4().hex[:8]}",
+            role="parent",
+            status="active",
+        )
+        unlinked_par = User(
+            id=unlinked_parent_id,
+            auth_provider="phone",
+            auth_uid=f"phone:{uuid.uuid4().hex[:12]}",
+            display_name="আনলিঙ্কড প্যারেন্ট",
+            phone=f"+88019{uuid.uuid4().hex[:8]}",
+            role="parent",
+            status="active",
+        )
+        session.add_all([stud, par, unlinked_par])
+
+        # Active Parent Link
+        link = ParentStudentLink(
+            parent_id=parent_id,
+            student_id=student_id,
+            status="active",
+            consent_at=datetime.now(UTC),
+        )
+        session.add(link)
+
+        # Student Profile
+        prof = StudentProfile(
+            user_id=student_id,
+            class_level=9,
+            group="science",
+            medium="bn",
+            daily_minutes=120,
+            available_days=["sat", "sun", "mon", "tue", "wed", "thu"],
+            time_zone="Asia/Dhaka",
+        )
+        session.add(prof)
+
+        # Study Settings (English locked by parent)
+        settings = StudentStudySettings(
+            student_id=student_id,
+            school_day_minutes=120,
+            holiday_minutes=180,
+            subject_priorities={"General Science": "normal", "Mathematics": "normal", "English": "normal"},
+            parent_locked_fields=["English"],
+            version=1,
+        )
+        session.add(settings)
+
+        # 3 Change Requests
+        req_unlocked = StudentChangeRequest(
+            id=sugg_unlocked_id,
+            student_id=student_id,
+            requested_changes={
+                "type": "ai_priority_suggestion",
+                "subject": "General Science",
+                "current_level": "normal",
+                "suggested_level": "difficult",
+                "evidence_codes": ["LOW_ACCURACY"],
+                "rationale": "Needs more focus based on recent quizzes",
+            },
+            status="pending",
+        )
+        req_reject = StudentChangeRequest(
+            id=sugg_reject_id,
+            student_id=student_id,
+            requested_changes={
+                "type": "ai_priority_suggestion",
+                "subject": "Mathematics",
+                "current_level": "normal",
+                "suggested_level": "easy",
+                "evidence_codes": ["HIGH_MASTERY"],
+                "rationale": "Consistent high scores",
+            },
+            status="pending",
+        )
+        req_locked = StudentChangeRequest(
+            id=sugg_locked_id,
+            student_id=student_id,
+            requested_changes={
+                "type": "ai_priority_suggestion",
+                "subject": "English",
+                "current_level": "normal",
+                "suggested_level": "difficult",
+                "evidence_codes": ["TIME_LAG"],
+                "rationale": "Syllabus delay",
+            },
+            status="pending",
+        )
+        session.add_all([req_unlocked, req_reject, req_locked])
+        await session.commit()
+
+    par_token = create_access_jwt(user_id=parent_id, role="parent")
+    unlinked_token = create_access_jwt(user_id=unlinked_parent_id, role="parent")
+
+    headers_par = {
+        "Authorization": f"Bearer {par_token}",
+        "X-Client-Platform": "android",
+        "X-Client-Form-Factor": "phone",
+        "X-App-Version": "1.0.0",
+        "X-Device-Id": "device-par-01",
+        "Accept-Language": "bn",
+    }
+    headers_unlinked = {
+        "Authorization": f"Bearer {unlinked_token}",
+        "X-Client-Platform": "android",
+        "X-Client-Form-Factor": "phone",
+        "X-App-Version": "1.0.0",
+        "X-Device-Id": "device-unlinked-01",
+        "Accept-Language": "bn",
+    }
+
+    # 1. Unlinked parent cannot access student suggestions
+    unlinked_res = await gateway_client.get(f"/v1/students/{student_id}/ai-suggestions", headers=headers_unlinked)
+    assert unlinked_res.status_code == 403
+
+    # 2. Linked parent can list suggestions
+    list_res = await gateway_client.get(f"/v1/students/{student_id}/ai-suggestions", headers=headers_par)
+    assert list_res.status_code == 200, list_res.text
+    suggestions = list_res.json()
+    assert len(suggestions) >= 3
+
+    # 3. Reject a suggestion
+    rej_res = await gateway_client.post(
+        f"/v1/students/{student_id}/ai-suggestions/{sugg_reject_id}/reject",
+        headers=headers_par,
+    )
+    assert rej_res.status_code == 200
+    assert rej_res.json()["status"] == "rejected"
+
+    # 4. Attempt to approve locked field suggestion (Rule V09 -> 400 Bad Request)
+    locked_res = await gateway_client.post(
+        f"/v1/students/{student_id}/ai-suggestions/{sugg_locked_id}/approve",
+        headers=headers_par,
+    )
+    assert locked_res.status_code == 400
+    assert "Rule V09" in locked_res.text or "locked" in locked_res.text
+
+    # 5. Approve unlocked suggestion (General Science -> difficult)
+    appr_res = await gateway_client.post(
+        f"/v1/students/{student_id}/ai-suggestions/{sugg_unlocked_id}/approve",
+        headers=headers_par,
+    )
+    assert appr_res.status_code == 200
+    assert appr_res.json()["status"] == "approved"
+    assert appr_res.json()["new_priority"] == "difficult"
+
+    # Verify DB state
+    async with AsyncSessionLocal() as session:
+        stmt_s = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+        s_obj = (await session.execute(stmt_s)).scalar_one()
+        assert s_obj.subject_priorities["General Science"] == "difficult"
+
+        # Verify audit records written
+        stmt_a = select(AuditLog).where(AuditLog.target_id == str(student_id))
+        audits = (await session.execute(stmt_a)).scalars().all()
+        actions = [a.action for a in audits]
+        assert "ai_planner.approve_suggestion" in actions
+        assert "ai_planner.reject_suggestion" in actions
+
+
+def test_per_class_band_rollout_switching(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that provider factory dynamically switches between deterministic and AI based on class band."""
+    from dataclasses import replace
+
+    monkeypatch.setattr(app_settings, "AI_PLANNER_ENABLED", True)
+    monkeypatch.setattr(app_settings, "AI_PLANNER_ENABLED_CLASS_BANDS", ["9-10"])
+
+    # 1. 9-10 is enabled -> AiPlannerProvider
+    _, _, settings_base = build_test_context(adaptive_mode="suggest")
+    settings_9_10 = replace(settings_base, class_band="9-10")
+    p1 = get_plan_provider(settings_9_10)
+    assert isinstance(p1, AiPlannerProvider)
+
+    # 2. 6-8 is NOT enabled -> DeterministicProvider
+    settings_6_8 = replace(settings_base, class_band="6-8")
+    p2 = get_plan_provider(settings_6_8)
+    assert isinstance(p2, DeterministicProvider)
+
+    # 3. Add 6-8 to rollout -> AiPlannerProvider
+    monkeypatch.setattr(app_settings, "AI_PLANNER_ENABLED_CLASS_BANDS", ["6-8", "9-10"])
+    p3 = get_plan_provider(settings_6_8)
+    assert isinstance(p3, AiPlannerProvider)
+
 

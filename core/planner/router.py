@@ -44,6 +44,7 @@ from core.planner.models import (
     SyllabusItem,
     Task,
 )
+from core.progress.models import Mastery, ProgressDaily, RevisionItem
 from core.planner.schemas import (
     AiSuggestionResponse,
     DailyMinutesResponse,
@@ -246,6 +247,52 @@ async def execute_student_plan_regeneration(
             completed_minutes_today=completed_minutes_today,
         )
 
+        # Load real learning signals, mastery, and spaced revision (docs/07_AI_PLANNER_API.md §5)
+        stmt_m = select(Mastery).where(Mastery.student_id == student_id)
+        res_m = await db.execute(stmt_m)
+        mastery_records = [
+            {
+                "chapter_id": str(m.chapter_id),
+                "concept_id": str(m.concept_id) if m.concept_id else None,
+                "score": m.score,
+                "confidence": m.confidence,
+                "last_seen": m.last_signal_at.isoformat() if m.last_signal_at else None,
+            }
+            for m in res_m.scalars().all()
+        ]
+
+        stmt_r = select(RevisionItem).where(RevisionItem.student_id == student_id)
+        res_r = await db.execute(stmt_r)
+        revision_records = [
+            {
+                "chapter_id": str(r.chapter_id),
+                "concept_id": str(r.concept_id) if r.concept_id else None,
+                "box": r.box,
+                "due_at": r.due_at.isoformat() if r.due_at else None,
+            }
+            for r in res_r.scalars().all()
+        ]
+
+        stmt_p = (
+            select(ProgressDaily)
+            .where(ProgressDaily.student_id == student_id)
+            .order_by(ProgressDaily.date.desc())
+            .limit(14)
+        )
+        res_p = await db.execute(stmt_p)
+        progress_days = res_p.scalars().all()
+        quiz_accs = [p.quiz_avg for p in progress_days if p.quiz_avg is not None]
+        avg_quiz_acc = (sum(quiz_accs) / len(quiz_accs)) if quiz_accs else 0.8
+        skipped_count = sum(p.tasks_total - p.tasks_done for p in progress_days if p.tasks_total > p.tasks_done)
+
+        learning_signals = {
+            "quiz_accuracy": round(avg_quiz_acc, 2),
+            "speed_vs_expected": 1.0,
+            "repeated_chat_topics": [],
+            "skipped_tasks_count": skipped_count,
+            "self_rated_difficulty": None,
+        }
+
         # Run Planner via PlanProvider Abstraction (P06a)
         provider_ctx = PlanProviderContext(
             student_id=student_id,
@@ -257,6 +304,9 @@ async def execute_student_plan_regeneration(
             completed_tasks=historical_records,
             resolved_settings=resolved_settings,
             day_calendar=day_calendar,
+            mastery_records=mastery_records,
+            learning_signals=learning_signals,
+            revision_items=revision_records,
         )
 
         plan_provider = get_plan_provider(resolved_settings)
@@ -272,6 +322,19 @@ async def execute_student_plan_regeneration(
                     from core.planner.shadow_comparator import compare_plans
                     shadow_report = compare_plans(ai_shadow_res.plan_out, plan_out)
                     provider_result.shadow_comparison = shadow_report
+                    # Persist shadow evaluation to audit_log
+                    audit_shadow = AuditLog(
+                        actor_id=student_id,
+                        action="ai_planner.shadow_comparison",
+                        target_type="plan",
+                        target_id=student_id,
+                        meta={
+                            **shadow_report,
+                            "student_id": str(student_id),
+                            "at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+                    db.add(audit_shadow)
             except Exception as shadow_exc:
                 logger.warning("AI Planner Shadow Mode execution error: %s", shadow_exc)
 
@@ -1479,6 +1542,16 @@ async def submit_student_settings_change_request(
 # ============================================================================
 
 
+async def verify_parent_access_to_student(user: User, student_id: uuid.UUID, session: AsyncSession) -> None:
+    """Verify that a parent user has an active linked relationship to the student."""
+    has_access = await can_access_student(user, student_id, session)
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Parent not authorized for this student",
+        )
+
+
 @router.get(
     "/students/{student_id}/ai-suggestions",
     response_model=list[AiSuggestionResponse],
@@ -1560,11 +1633,22 @@ async def approve_ai_suggestion(
     res_s = await db.execute(stmt_settings)
     settings_obj = res_s.scalars().first()
 
+    # Rule V09: Locked fields check
+    if settings_obj and sub:
+        locked_fields = set(settings_obj.parent_locked_fields or [])
+        if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Subject priority for '{sub}' is locked by parent against AI suggestions (Rule V09)",
+            )
+
     old_prios = dict(settings_obj.subject_priorities) if settings_obj else {}
     if settings_obj and sub and sugg_level:
-        settings_obj.subject_priorities[sub] = sugg_level
+        new_prios = dict(settings_obj.subject_priorities or {})
+        new_prios[sub] = sugg_level
+        settings_obj.subject_priorities = new_prios
         settings_obj.version += 1
-        settings_obj.updated_by_user_id = current_user.id
+        settings_obj.updated_at = datetime.now(UTC)
 
     req.status = "approved"
     req.reviewed_at = datetime.now(UTC)
@@ -1575,7 +1659,7 @@ async def approve_ai_suggestion(
         actor_id=current_user.id,
         action="ai_planner.approve_suggestion",
         target_type="student_study_settings",
-        target_id=student_id,
+        target_id=str(student_id),
         meta={
             "suggestion_id": str(suggestion_id),
             "subject": sub,
@@ -1588,9 +1672,9 @@ async def approve_ai_suggestion(
     await db.commit()
 
     # Trigger plan regeneration
-    plan_resp = await _sync_regenerate_plan_for_student(
-        student_id=student_id,
+    _, new_plan_version = await execute_student_plan_regeneration(
         db=db,
+        student_id=student_id,
         reason="adaptive",
     )
 
@@ -1599,7 +1683,7 @@ async def approve_ai_suggestion(
         "suggestion_id": str(suggestion_id),
         "subject": sub,
         "new_priority": sugg_level,
-        "new_plan_version": plan_resp.version,
+        "new_plan_version": new_plan_version,
     }
 
 
@@ -1636,7 +1720,7 @@ async def reject_ai_suggestion(
         actor_id=current_user.id,
         action="ai_planner.reject_suggestion",
         target_type="student_study_settings",
-        target_id=student_id,
+        target_id=str(student_id),
         meta={"suggestion_id": str(suggestion_id), "at": datetime.now(UTC).isoformat()},
     )
     db.add(audit)
