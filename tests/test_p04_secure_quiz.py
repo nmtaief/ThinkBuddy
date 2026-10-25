@@ -1816,11 +1816,13 @@ async def test_scaled_too_fast_rule_multi_signal_and_parent_allow(
 
     # Signal 1: Answer too fast (under minimum computed time)
     # First anomaly only: should transition to paused/warned, but NOT invalidated
+    opts = item["question"].get("options") or []
+    opt_id = opts[0]["id"] if opts else "opt_0"
     res_ans1 = await gateway_client.post(
         f"/v1/attempts/{attempt_id}/items/1/answer",
         json={
             "nonce": item["nonce"],
-            "response": {"selected_option_id": item["question"]["options"][0]["id"]},
+            "response": {"selected_option_id": opt_id},
             "time_spent_ms": 300,  # Far below minimum threshold
         },
         headers=ans_headers,

@@ -1,6 +1,9 @@
 """Internal HTTP client for Gateway-to-Core communication."""
 
+from __future__ import annotations
+
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -64,6 +67,37 @@ class CoreServiceClient:
                 json=json_data,
                 headers=merged_headers,
             )
+
+    async def stream_request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json_data: Any | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], AsyncIterator[bytes]]:
+        """Stream an internal request from Core without buffering tokens."""
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        merged_headers = self._get_headers(headers)
+        client = httpx.AsyncClient(transport=self.transport, timeout=60.0)
+        req = client.build_request(
+            method=method,
+            url=url,
+            params=params,
+            json=json_data,
+            headers=merged_headers,
+        )
+        resp = await client.send(req, stream=True)
+
+        async def body_stream() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+            finally:
+                await resp.aclose()
+                await client.aclose()
+
+        return resp.status_code, dict(resp.headers), body_stream()
 
 
 core_client = CoreServiceClient()

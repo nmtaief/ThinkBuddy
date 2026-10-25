@@ -86,8 +86,17 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /attempt-items/{id}/broad` (text or image upload refs), `GET /submissions/{id}`.
 
 ### Chat (RAG)
-- `POST /chat/sessions`, `GET /chat/sessions`, `GET /chat/sessions/{id}`.
-- `POST /chat/sessions/{id}/messages` – SSE if `Accept: text/event-stream`, else JSON.
+- `POST /chat/sessions` – create chat session (student only; locked during active assessed quiz with 403 `QUIZ_IN_PROGRESS_CHAT_LOCKED`).
+- `GET /chat/sessions` – list active chat sessions for the authenticated student.
+- `GET /chat/sessions/{id}` – get chat session details and message history with authoritative citations (ownership verified; 404 if not owned).
+- `POST /chat/sessions/{id}/messages` – send prompt to AI tutor.
+  - Response Mode: SSE stream if `Accept: text/event-stream` or `stream: true`; full JSON fallback (`ChatMessageResponse`) if `stream: false`.
+  - Safeguards & Integrity:
+    - Active Assessed Quiz Lockout: Refused with 403 `QUIZ_IN_PROGRESS_CHAT_LOCKED` across all open attempt states (`created`, `active`, `warned`, `paused`); logs `chat_attempt` telemetry infraction.
+    - Daily Quota: Enforced against family entitlement (free plan: 20 messages/day, premium: 100 messages/day). Returns 429 `DAILY_CHAT_QUOTA_EXCEEDED` when reached.
+    - Rate Limits: 20 requests / min per authenticated student plus 60 requests / min per-IP ceiling.
+  - Grounded Citations (Rule 7 & 8): Every assistant answer carrying facts terminates with citations (`book_title`, `chapter_title`, `chapter_number`, `printed_page`, `chunk_id`). Authoritative printed page number is strictly rendered to users; internal PDF page index is kept separate.
+  - Low Confidence Fallback: If retrieval confidence is below threshold (< 0.45), returns explicit "not found in your textbook" message without guessing or hallucinating citations.
 
 ### Progress & parent
 - `GET /students/{id}/progress/summary`, `/progress/mastery`, `/progress/weak-points`, `/progress/history`.
@@ -101,8 +110,12 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /uploads/sign` – signed URL for answer photos; type/size limits enforced.
 
 ## 3. SSE event types (chat)
-`event: meta` (message id, retrieval confidence) → `event: token` (text delta) → `event: citation` (book, chapter, printed page, chunk id) → `event: done` (usage) | `event: error`.
-Clients must tolerate unknown events. Heartbeat comment every 15 s.
+1. `event: meta` – JSON payload with `message_id` and `retrieval_confidence` (0.0 to 1.0).
+2. `event: token` – incremental text chunk delta (`{"delta": "..."}`).
+3. `event: citation` – authoritative curriculum citation for each used chunk (`{"chunk_id": "...", "book_title": "...", "chapter_title": "...", "chapter_number": ..., "printed_page": ...}`).
+4. `event: done` – completion metrics (`{"tokens_in": ..., "tokens_out": ..., "latency_ms": ...}`).
+5. Heartbeat comment `: ping\n\n` emitted periodically (every 15s) on long pauses.
+Clients must tolerate unknown events. Disconnecting the client terminates token generation immediately.
 
 ## 4. Authorization rules
 Every route declares: allowed roles, ownership rule (self / linked parent / assigned teacher), and entitlement requirement. Missing declaration fails CI.

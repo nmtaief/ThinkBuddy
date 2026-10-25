@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.auth.router import (
     AuthExchangeRequest,
@@ -19,6 +19,12 @@ from core.auth.router import (
     UserResponse,
 )
 from core.auth.tokens import decode_access_jwt, hash_link_code
+from core.chat.schemas import (
+    ChatMessageCreateRequest,
+    ChatSessionCreateRequest,
+    ChatSessionDetailResponse,
+    ChatSessionResponse,
+)
 from core.common.logging import request_id_ctx
 from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.curriculum.schemas import (
@@ -91,6 +97,39 @@ async def forward_to_core(request: Request, json_body: Any = None) -> Response:
         status_code=core_res.status_code,
         headers=response_headers,
         media_type=core_res.headers.get("content-type", "application/json"),
+    )
+
+
+async def forward_stream_to_core(request: Request, json_body: Any = None) -> Response:
+    """Forward incoming streaming Gateway request to Core and stream chunks in real-time."""
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    headers.pop("content-length", None)
+
+    if json_body is None and request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            json_body = await request.json()
+        except Exception:
+            json_body = None
+
+    status_code, resp_headers, stream_gen = await core_client.stream_request(
+        method=request.method,
+        path=request.url.path,
+        params=dict(request.query_params),
+        json_data=json_body,
+        headers=headers,
+    )
+
+    clean_headers: dict[str, str] = {}
+    for k, v in resp_headers.items():
+        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}:
+            clean_headers[k] = v
+
+    return StreamingResponse(
+        stream_gen,
+        status_code=status_code,
+        headers=clean_headers,
+        media_type=resp_headers.get("content-type", "text/event-stream"),
     )
 
 
@@ -853,17 +892,42 @@ async def review_quiz_attempt_gateway(
 
 
 # -------------------------------------------------------------------------
-# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2)
+# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2, §3)
 # -------------------------------------------------------------------------
 
 
 @router.post(
     "/chat/sessions",
+    response_model=ChatSessionResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["Chat"],
 )
-async def create_chat_session_gateway(request: Request) -> Response:
-    """Create chat session (enforces quiz in-progress lockout)."""
+async def create_chat_session_gateway(
+    request: Request,
+    payload: ChatSessionCreateRequest | None = None,
+) -> Response:
+    """Create a new chat session (enforces quiz in-progress lockout)."""
+    body = payload.model_dump(mode="json") if payload else {}
+    return await forward_to_core(request, json_body=body)
+
+
+@router.get(
+    "/chat/sessions",
+    response_model=list[ChatSessionResponse],
+    tags=["Chat"],
+)
+async def list_chat_sessions_gateway(request: Request) -> Response:
+    """List active chat sessions for the authenticated student."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/chat/sessions/{session_id}",
+    response_model=ChatSessionDetailResponse,
+    tags=["Chat"],
+)
+async def get_chat_session_gateway(session_id: uuid.UUID, request: Request) -> Response:
+    """Get chat session details and message history with citations."""
     return await forward_to_core(request)
 
 
@@ -871,9 +935,65 @@ async def create_chat_session_gateway(request: Request) -> Response:
     "/chat/sessions/{session_id}/messages",
     tags=["Chat"],
 )
-async def send_chat_message_gateway(session_id: uuid.UUID, request: Request) -> Response:
-    """Send chat message (enforces quiz in-progress lockout)."""
-    return await forward_to_core(request)
+async def send_chat_message_gateway(
+    session_id: uuid.UUID,
+    payload: ChatMessageCreateRequest,
+    request: Request,
+) -> Response:
+    """Send message to AI tutor with dual user/IP rate limiting and SSE streaming support."""
+    client_ip = get_trusted_client_ip(request)
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (20 chat requests / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("chat_message_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=20,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many chat messages. Please wait a moment.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (60 chat requests / min per IP)
+    ip_rate_key = build_rate_limit_key("chat_message_ip", client_ip)
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=60,
+        window_seconds=60,
+    )
+    if not ip_ok:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(ip_retry)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests from this network. Please wait.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
+    accept = request.headers.get("accept", "")
+    wants_sse = ("text/event-stream" in accept) or payload.stream
+
+    if wants_sse:
+        return await forward_stream_to_core(request, json_body=payload.model_dump(mode="json"))
+
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
 # -------------------------------------------------------------------------
