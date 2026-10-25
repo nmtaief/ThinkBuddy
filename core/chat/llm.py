@@ -70,12 +70,13 @@ class MockLLMGateway(LLMGateway):
     ) -> None:
         from core.common.config import settings as app_settings
 
-        env_val = getattr(app_settings, "ENV", None) or getattr(
-            app_settings, "ENVIRONMENT", "local"
-        )
-        if env_val.lower() in ("production", "staging"):
+        env_val = (
+            getattr(app_settings, "ENV", None)
+            or getattr(app_settings, "ENVIRONMENT", "")
+        ).strip().lower()
+        if env_val != "local":
             raise RuntimeError(
-                f"MockLLMGateway is strictly forbidden in {env_val} environment"
+                f"MockLLMGateway is strictly forbidden unless ENV=local (current ENV='{env_val}')"
             )
 
         self.default_stream_tokens = default_stream_tokens or [

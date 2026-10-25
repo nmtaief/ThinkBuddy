@@ -32,7 +32,7 @@ from core.auth.tokens import create_access_jwt
 from core.common.database import AsyncSessionLocal
 from core.curriculum.models import Book, Chapter, Chunk
 from core.families.models import ParentStudentLink, StudentProfile
-from core.planner.models import Plan, PlanDay, StudySetup, SyllabusItem
+from core.planner.models import Plan, PlanDay, StudySetup, SyllabusItem, Task
 from core.planner.settings_resolver import ResolvedPlannerSettings
 from core.progress.jobs import (
     run_batched_daily_jobs,
@@ -45,6 +45,7 @@ from core.progress.question_worker import QuestionGenerationWorker
 from core.progress.revision import (
     LEITNER_INTERVALS,
     RevisionScheduler,
+    calculate_due_date,
     calculate_next_box,
 )
 from core.progress.streak import calculate_streak
@@ -270,6 +271,30 @@ def test_hypothesis_leitner_box_progression(box: int, is_correct: bool) -> None:
         assert interval == LEITNER_INTERVALS[1]
 
 
+@given(
+    box=st.integers(min_value=1, max_value=5),
+    is_correct=st.booleans(),
+    hour_offset=st.integers(min_value=0, max_value=23),
+)
+@hyp_settings(max_examples=25, deadline=None)
+def test_hypothesis_leitner_box_and_due_date_properties(
+    box: int, is_correct: bool, hour_offset: int
+) -> None:
+    """Property: Due-date strictly advances into future matching box intervals, with monotonic progression."""
+    now_dt = datetime(2026, 10, 25, hour_offset, 0, tzinfo=UTC)
+    next_box, interval = calculate_next_box(current_box=box, is_correct=is_correct)
+    due_dt = calculate_due_date(from_dt=now_dt, interval=interval)
+
+    assert due_dt > now_dt
+    assert due_dt == now_dt + interval
+    if is_correct:
+        assert next_box >= box or box == 5
+        assert interval >= LEITNER_INTERVALS[box]
+    else:
+        assert next_box == 1
+        assert interval == LEITNER_INTERVALS[1]
+
+
 # =============================================================================
 # 2. Streak Continuity with Exempt Days (Requirement 2)
 # =============================================================================
@@ -357,10 +382,25 @@ async def test_streak_continuity_with_exempt_days() -> None:
         # Streak should be 3!
         assert streak == 3, f"Expected streak 3 across exempt days, got {streak}"
 
-        # Now test breaking: if 2026-10-18 was a school day with 0 study, streak broke before 18
-        # But if 2026-10-21 had NOT been studied (unexcused school day):
-        # We delete p2 and recompute:
+        # Test weekly grace day (Requirement 5):
+        # 2026-10-21 was a school day with unexcused 0 study.
+        # But 1 weekly grace day excuses the first missed day in week 43!
         await session.delete(p2)
+        await session.commit()
+
+        streak_with_grace = await calculate_streak(
+            db=session,
+            student_id=student.id,
+            as_of_date=date(2026, 10, 25),
+            resolved_settings=settings,
+            exam_dates=exam_dates,
+        )
+        # 2026-10-21 is excused by weekly grace day! Streak counts 2026-10-25 and 2026-10-19 -> streak = 2!
+        assert streak_with_grace == 2, f"Expected streak 2 with 1 weekly grace day, got {streak_with_grace}"
+
+        # Now test breaking: a SECOND unexcused miss in the same week exhausts the grace day
+        # We delete p1 (2026-10-19) as well:
+        await session.delete(p1)
         await session.commit()
 
         broken_streak = await calculate_streak(
@@ -370,9 +410,129 @@ async def test_streak_continuity_with_exempt_days() -> None:
             resolved_settings=settings,
             exam_dates=exam_dates,
         )
-        # 2026-10-21 was an unstudied school day, terminating the streak before it reached 10-19.
-        # Only 2026-10-25 counts now.
+        # Both 10-21 and 10-19 missed in same week: grace day covered 10-21, 10-19 broke streak. Only 10-25 counts!
         assert broken_streak == 1, f"Expected broken streak to be 1, got {broken_streak}"
+
+
+@pytest.mark.asyncio
+async def test_streak_continuity_with_zero_planned_tasks() -> None:
+    """Requirement 5: Days with no planned tasks must not break a streak."""
+    student, book, chapter, chunk = await setup_student_with_curriculum()
+
+    settings = ResolvedPlannerSettings(
+        class_band="9-10",
+        group="science",
+        school_day_minutes=120,
+        holiday_minutes=180,
+        study_window_start="17:00",
+        study_window_end="21:30",
+        weekly_off_days=[],
+        recurring_unavailable_blocks=[],
+        blocked_observance_keys=[],
+        custom_blackout_dates=[],
+        subject_priorities={"Science": "normal"},
+    )
+
+    async with AsyncSessionLocal() as session:
+        setup = (
+            await session.execute(select(StudySetup).where(StudySetup.student_id == student.id))
+        ).scalars().first()
+        assert setup is not None
+
+        # Create a Plan where 10-22 and 10-24 have tasks, but 10-23 has 0 planned tasks (empty PlanDay)
+        plan = Plan(
+            id=uuid.uuid4(),
+            setup_id=setup.id,
+            student_id=student.id,
+            version=1,
+            reason="initial",
+            status="active",
+            params={},
+        )
+        session.add(plan)
+        await session.flush()
+
+        day_with_task = PlanDay(
+            id=uuid.uuid4(),
+            plan_id=plan.id,
+            date=date(2026, 10, 22),
+            day_type="study",
+            planned_minutes=60,
+        )
+        # Empty plan day (0 planned tasks)
+        day_empty = PlanDay(
+            id=uuid.uuid4(),
+            plan_id=plan.id,
+            date=date(2026, 10, 23),
+            day_type="study",
+            planned_minutes=0,
+        )
+        day_today = PlanDay(
+            id=uuid.uuid4(),
+            plan_id=plan.id,
+            date=date(2026, 10, 24),
+            day_type="study",
+            planned_minutes=60,
+        )
+        session.add_all([day_with_task, day_empty, day_today])
+        await session.flush()
+
+        task1 = Task(
+            id=uuid.uuid4(),
+            plan_day_id=day_with_task.id,
+            student_id=student.id,
+            chapter_id=chapter.id,
+            type="study",
+            est_minutes=30,
+            status="done",
+            refs={},
+            source="planner",
+        )
+        task2 = Task(
+            id=uuid.uuid4(),
+            plan_day_id=day_today.id,
+            student_id=student.id,
+            chapter_id=chapter.id,
+            type="study",
+            est_minutes=30,
+            status="done",
+            refs={},
+            source="planner",
+        )
+        session.add_all([task1, task2])
+
+        # Progress: 10-22 studied, 10-23 zero study (0 planned tasks), 10-24 studied
+        p_22 = ProgressDaily(
+            id=uuid.uuid4(),
+            student_id=student.id,
+            date=date(2026, 10, 22),
+            minutes=30,
+            tasks_done=1,
+            tasks_total=1,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        p_24 = ProgressDaily(
+            id=uuid.uuid4(),
+            student_id=student.id,
+            date=date(2026, 10, 24),
+            minutes=30,
+            tasks_done=1,
+            tasks_total=1,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        session.add_all([p_22, p_24])
+        await session.commit()
+
+        streak = await calculate_streak(
+            db=session,
+            student_id=student.id,
+            as_of_date=date(2026, 10, 24),
+            resolved_settings=settings,
+        )
+        # Day 10-23 had 0 planned tasks, so zero study does NOT break the streak!
+        assert streak == 2, f"Expected streak 2 across 0-planned-task day, got {streak}"
 
 
 # =============================================================================
@@ -667,6 +827,33 @@ async def test_concurrent_double_run_idempotency() -> None:
         dates = [d.date for d in days]
         assert len(dates) == len(set(dates)), "Duplicate plan days created by concurrent runs"
         assert len(dates) > 0, "Active plan must contain days"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_both_daily_and_three_day_jobs() -> None:
+    """Requirement 8: Concurrent run of daily composition AND 3-day review jobs simultaneously."""
+    student, book, chapter, chunk = await setup_student_with_curriculum()
+
+    async with AsyncSessionLocal() as session1, AsyncSessionLocal() as session2:
+        task_daily = run_daily_composition_job(session1, student.id)
+        task_review = run_three_day_review_cycle(session2, student.id)
+        v_daily, (v_review, quiz_id) = await asyncio.gather(task_daily, task_review)
+
+        assert v_daily >= 1
+        assert v_review >= 1
+
+    async with AsyncSessionLocal() as check_session:
+        active_version = max(v_daily, v_review)
+        stmt_days = (
+            select(PlanDay)
+            .join(Plan, PlanDay.plan_id == Plan.id)
+            .where(Plan.student_id == student.id, Plan.version == active_version)
+        )
+        res_days = await check_session.execute(stmt_days)
+        days = res_days.scalars().all()
+        dates = [d.date for d in days]
+        assert len(dates) == len(set(dates)), "Duplicate plan days created by concurrent runs"
+        assert len(dates) > 0
 
 
 # =============================================================================

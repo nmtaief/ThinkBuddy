@@ -10,9 +10,10 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.planner.models import Plan, PlanDay, Task
 from core.planner.settings_resolver import (
     ResolvedPlannerSettings,
     get_published_holidays,
@@ -64,8 +65,34 @@ async def calculate_streak(
     )
     cal_map = {d.date: d.day_type for d in cal_days}
 
+    # 3. Load active plan and planned task counts per day (Requirement 5)
+    active_plan_stmt = (
+        select(Plan.id)
+        .where(Plan.student_id == student_id)
+        .order_by(Plan.version.desc())
+        .limit(1)
+    )
+    active_plan_id = (await db.execute(active_plan_stmt)).scalar_one_or_none()
+
+    has_plan = active_plan_id is not None
+    planned_task_counts: dict[date, int] = {}
+    if has_plan:
+        stmt_tasks = (
+            select(PlanDay.date, func.count(Task.id))
+            .join(PlanDay, Task.plan_day_id == PlanDay.id)
+            .where(
+                PlanDay.plan_id == active_plan_id,
+                PlanDay.date >= start_lookback,
+                PlanDay.date <= as_of_date,
+            )
+            .group_by(PlanDay.date)
+        )
+        res_tasks = await db.execute(stmt_tasks)
+        planned_task_counts = dict(res_tasks.all())
+
     streak = 0
     current_check_date = as_of_date
+    grace_days_used: set[tuple[int, int]] = set()
 
     while current_check_date >= start_lookback:
         day_type = cal_map.get(current_check_date, "school_day")
@@ -76,10 +103,17 @@ async def calculate_streak(
         if has_studied:
             streak += 1
         else:
-            # Check if this day is exempt (Requirement 2)
+            # Check if this day is exempt (Requirement 2 & Requirement 5)
             is_exempt = day_type in ("blackout", "holiday", "exam_day")
-            if is_exempt:
-                # Streak is preserved across exempt days without breaking
+
+            # Days with no planned tasks must not break a streak (Requirement 5)
+            if has_plan:
+                has_no_planned_tasks = planned_task_counts.get(current_check_date, 0) == 0
+            else:
+                has_no_planned_tasks = prog is not None and prog.tasks_total == 0
+
+            if is_exempt or has_no_planned_tasks:
+                # Streak is preserved across exempt and 0-task days without breaking
                 pass
             else:
                 # Non-exempt school day:
@@ -87,8 +121,15 @@ async def calculate_streak(
                 if current_check_date == as_of_date:
                     pass
                 else:
-                    # Completed school day with zero study -> streak breaks
-                    break
+                    # Check weekly grace day (Requirement 5: 1 grace day per weekly calendar window)
+                    week_key = current_check_date.isocalendar()[:2]
+                    if week_key not in grace_days_used:
+                        grace_days_used.add(week_key)
+                        # Grace day consumed for this week; streak is preserved
+                        pass
+                    else:
+                        # Grace day already used in this week; streak terminates
+                        break
 
         current_check_date -= timedelta(days=1)
 

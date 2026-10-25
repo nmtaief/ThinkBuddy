@@ -49,6 +49,11 @@ def calculate_next_box(current_box: int, is_correct: bool) -> tuple[int, timedel
     return next_box, interval
 
 
+def calculate_due_date(from_dt: datetime, interval: timedelta) -> datetime:
+    """Calculate the next due date by adding interval to the given datetime."""
+    return from_dt + interval
+
+
 class RevisionScheduler:
     """Service to schedule, query, and promote/demote Leitner revision items."""
 

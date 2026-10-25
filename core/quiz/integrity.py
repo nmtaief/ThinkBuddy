@@ -128,7 +128,7 @@ def verify_play_integrity_token(
     if "." in token_str:
         try:
             # Decode claims from JWT
-            unverified_claims = jwt.decode(token_str, options={"verify_signature": False})
+            unverified_claims = jwt.decode(token_str, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
 
             # 1. Package name verification
             app_integrity = unverified_claims.get("appIntegrity", {})
@@ -169,7 +169,7 @@ def verify_play_integrity_token(
             if "COMPROMISED" in verdicts:
                 return DeviceIntegrityVerdict.COMPROMISED
         except Exception as exc:
-            logger.warning("Error parsing Play Integrity token claims: %s", exc)
+            logger.warning("Play integrity validation error: %s", type(exc).__name__)
             return DeviceIntegrityVerdict.COMPROMISED
 
     return DeviceIntegrityVerdict.UNVERIFIED

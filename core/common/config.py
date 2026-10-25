@@ -126,6 +126,18 @@ class CoreSettings(BaseSettings):
     TEACHER_REVIEW_ENABLED: bool = Field(
         default=False, description="Teacher review feature flag (off in beta)"
     )
+    FEATURE_RAG_CHAT_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for RAG AI Tutor Chat (P05). Disabled by default.",
+    )
+    FEATURE_PROGRESS_MASTERY_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for Progress & Mastery tracking (P06). Disabled by default.",
+    )
+    FEATURE_SPACED_REVISION_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for Spaced Revision Scheduler (P06). Disabled by default.",
+    )
 
     # AI Planner Integration (P06a)
     AI_PLANNER_ENABLED: bool = Field(
@@ -194,7 +206,7 @@ class CoreSettings(BaseSettings):
     @property
     def is_local(self) -> bool:
         """Return True only if running in local environment (ENV=local)."""
-        return self.ENV.lower() == "local"
+        return (self.ENV or "").strip().lower() == "local"
 
     @model_validator(mode="after")
     def validate_non_local_secrets(self) -> "CoreSettings":

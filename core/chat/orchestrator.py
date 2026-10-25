@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -39,6 +40,27 @@ from core.quiz.models import OPEN_ATTEMPT_STATES, AttemptEvent, Quiz, QuizAttemp
 from core.quiz.service import QuizService
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_chunk_text(text: str) -> str:
+    """Escape or strip delimiter strings (including </context>, <context>) before prompt assembly."""
+    if not text:
+        return ""
+    # Neutralize closing and opening context tags to prevent prompt injection breakouts
+    sanitized = re.sub(
+        r"<\s*/?\s*context\s*>",
+        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Neutralize system tag variations
+    sanitized = re.sub(
+        r"<\s*/?\s*system\s*>",
+        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    return sanitized
 
 
 class ChatOrchestrator:
@@ -285,7 +307,7 @@ class ChatOrchestrator:
                 "role": "user",
                 "content": (
                     "Context (Textbook Data - Reference Only):\n<context>\n"
-                    + "\n---\n".join(c.text for c in chunks)
+                    + "\n---\n".join(sanitize_chunk_text(c.text) for c in chunks)
                     + f"\n</context>\n\nQuestion: {payload.content}"
                 ),
             },
@@ -475,7 +497,7 @@ class ChatOrchestrator:
                 "role": "user",
                 "content": (
                     "Context (Textbook Data - Reference Only):\n<context>\n"
-                    + "\n---\n".join(c.text for c in chunks)
+                    + "\n---\n".join(sanitize_chunk_text(c.text) for c in chunks)
                     + f"\n</context>\n\nQuestion: {payload.content}"
                 ),
             },

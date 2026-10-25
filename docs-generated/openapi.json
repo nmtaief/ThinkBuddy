@@ -89,7 +89,7 @@
           }
         }
       },
-      "post": {
+      "put": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
         "operationId": "block_gateway_internal_direct_internal__path__patch",
@@ -161,7 +161,7 @@
           }
         }
       },
-      "put": {
+      "post": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
         "operationId": "block_gateway_internal_direct_internal__path__patch",
@@ -1565,7 +1565,7 @@
           }
         }
       },
-      "post": {
+      "put": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
         "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
@@ -1637,7 +1637,7 @@
           }
         }
       },
-      "put": {
+      "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
         "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
@@ -1747,7 +1747,7 @@
           }
         }
       },
-      "post": {
+      "put": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
         "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
@@ -1819,7 +1819,7 @@
           }
         }
       },
-      "put": {
+      "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
         "operationId": "block_gateway_internal_routes_v1_internal__path__patch",

@@ -25,6 +25,7 @@ from core.chat.schemas import (
     ChatSessionDetailResponse,
     ChatSessionResponse,
 )
+from core.common.config import settings
 from core.common.logging import request_id_ctx
 from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.curriculum.schemas import (
@@ -168,6 +169,9 @@ async def get_client_config(
             "teacher_reviews": False,  # Beta flag: teacher features flagged off per architecture
             "broad_questions_ai_assist": True,
             "bangla_voice_input": False,
+            "rag_chat": settings.FEATURE_RAG_CHAT_ENABLED,
+            "progress_mastery": settings.FEATURE_PROGRESS_MASTERY_ENABLED,
+            "spaced_revision": settings.FEATURE_SPACED_REVISION_ENABLED,
         },
         "entitlements": {
             "daily_chat_quota": 50,
