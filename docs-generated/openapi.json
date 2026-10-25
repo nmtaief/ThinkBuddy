@@ -53,10 +53,10 @@
       }
     },
     "/internal/{path}": {
-      "post": {
+      "get": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "operationId": "block_gateway_internal_direct_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -92,7 +92,7 @@
       "delete": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "operationId": "block_gateway_internal_direct_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -125,10 +125,10 @@
           }
         }
       },
-      "patch": {
+      "post": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "operationId": "block_gateway_internal_direct_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -164,7 +164,7 @@
       "put": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "operationId": "block_gateway_internal_direct_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -197,10 +197,10 @@
           }
         }
       },
-      "get": {
+      "patch": {
         "summary": "Block Gateway Internal Direct",
         "description": "Public gateway strictly refuses to expose internal routes.",
-        "operationId": "block_gateway_internal_direct_internal__path__post",
+        "operationId": "block_gateway_internal_direct_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1681,10 +1681,46 @@
       }
     },
     "/v1/v1/internal/{path}": {
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1720,43 +1756,7 @@
       "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1792,7 +1792,7 @@
       "put": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1825,10 +1825,10 @@
           }
         }
       },
-      "get": {
+      "patch": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1863,10 +1863,46 @@
       }
     },
     "/v1/internal/{path}": {
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1902,43 +1938,7 @@
       "post": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "summary": "Block Gateway Internal Routes",
-        "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -1974,7 +1974,7 @@
       "put": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
@@ -2007,10 +2007,10 @@
           }
         }
       },
-      "get": {
+      "patch": {
         "summary": "Block Gateway Internal Routes",
         "description": "Public gateway strictly refuses to proxy internal routes.",
-        "operationId": "block_gateway_internal_routes_v1_internal__path__delete",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__get",
         "parameters": [
           {
             "name": "path",
