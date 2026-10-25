@@ -1,0 +1,141 @@
+@import "katex/dist/katex.min.css";
+@import url("https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap");
+
+:root {
+  /* Breakpoint tokens */
+  --bp-compact-max: 599px;
+  --bp-medium-min: 600px;
+  --bp-medium-max: 839px;
+  --bp-expanded-min: 840px;
+
+  /* Typography */
+  --font-bangla: "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif;
+  --font-english: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-math: "KaTeX_Main", "KaTeX_Math", "Times New Roman", serif;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+  --text-4xl: 36px;
+
+  --leading-normal: 1.5;
+  --leading-snug: 1.375;
+  --leading-relaxed: 1.625;
+  --leading-loose: 2;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Touch Targets */
+  --touch-target-min: 48px;
+
+  /* Light Theme Colors (Default) */
+  --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
+  --color-primary-surface: #EFF6FF;
+  --color-secondary: #0D9488;
+  --color-secondary-hover: #0F766E;
+  --color-secondary-surface: #F0FDFA;
+  --color-bg: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #F1F5F9;
+  --color-surface-elevated: #FFFFFF;
+  --color-border: #E2E8F0;
+  --color-border-focused: #3B82F6;
+
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748B;
+  --color-text-inverse: #FFFFFF;
+
+  --color-success: #16A34A;
+  --color-success-surface: #DCFCE7;
+  --color-needs-practice: #D97706;
+  --color-needs-practice-surface: #FEF3C7;
+  --color-not-enough-data: #64748B;
+  --color-not-enough-data-surface: #F1F5F9;
+  --color-warning: #EA580C;
+  --color-warning-surface: #FFEDD5;
+  --color-danger: #DC2626;
+  --color-danger-surface: #FEE2E2;
+  --color-info: #0284C7;
+  --color-info-surface: #E0F2FE;
+
+  --color-day-school: #3B82F6;
+  --color-day-holiday: #10B981;
+  --color-day-blackout: #94A3B8;
+  --color-day-exam: #8B5CF6;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+[data-theme="dark"] {
+  --color-primary: #3B82F6;
+  --color-primary-hover: #60A5FA;
+  --color-primary-surface: #1E293B;
+  --color-secondary: #14B8A6;
+  --color-secondary-hover: #2DD4BF;
+  --color-secondary-surface: #132A27;
+  --color-bg: #0B0F19;
+  --color-surface: #111827;
+  --color-surface-hover: #1F2937;
+  --color-surface-elevated: #1E293B;
+  --color-border: #1F2937;
+  --color-border-focused: #60A5FA;
+
+  --color-text-primary: #F9FAFB;
+  --color-text-secondary: #CBD5E1;
+  --color-text-muted: #94A3B8;
+  --color-text-inverse: #0F172A;
+
+  --color-success: #22C55E;
+  --color-success-surface: #143823;
+  --color-needs-practice: #F59E0B;
+  --color-needs-practice-surface: #3D2B05;
+  --color-not-enough-data: #94A3B8;
+  --color-not-enough-data-surface: #1E293B;
+  --color-warning: #F97316;
+  --color-warning-surface: #3E1E09;
+  --color-danger: #EF4444;
+  --color-danger-surface: #3F1515;
+  --color-info: #38BDF8;
+  --color-info-surface: #0C2E42;
+
+  --color-day-school: #60A5FA;
+  --color-day-holiday: #34D399;
+  --color-day-blackout: #64748B;
+  --color-day-exam: #A78BFA;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.6), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+}
