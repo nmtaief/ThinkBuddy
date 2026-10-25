@@ -114,12 +114,49 @@ async def set_rollout(admin_id: uuid.UUID, class_bands: list[str]) -> None:
     print(f"[SUCCESS] AI Planner rollout updated to: {class_bands}. Audit record written.")
 
 
+async def show_shadow_metrics() -> None:
+    """Print aggregate metrics from AI Planner shadow-mode runs."""
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(AuditLog)
+            .where(AuditLog.action == "ai_planner.shadow_comparison")
+            .order_by(AuditLog.at.desc())
+            .limit(100)
+        )
+        res = await session.execute(stmt)
+        logs = res.scalars().all()
+
+    total_runs = len(logs)
+    print("=" * 70)
+    print("THINKBUDDY AI PLANNER SHADOW-MODE METRICS (P06a)")
+    print("=" * 70)
+    print(f"Total Shadow Runs:            {total_runs}")
+    if total_runs == 0:
+        print("No shadow-mode comparison runs recorded yet.")
+        print("=" * 70)
+        return
+
+    pass_count = sum(1 for l in logs if (l.meta or {}).get("metrics", {}).get("coverage_parity_met", True))
+    total_churn = sum((l.meta or {}).get("metrics", {}).get("churn_rate_pct", 0.0) for l in logs)
+    total_delta = sum((l.meta or {}).get("metrics", {}).get("minutes_delta", 0.0) for l in logs)
+    total_warns = sum((l.meta or {}).get("metrics", {}).get("ai_warnings_count", 0) for l in logs)
+
+    print(f"Coverage Parity Pass Rate:    {round(pass_count / total_runs * 100.0, 1)}% ({pass_count}/{total_runs})")
+    print(f"Average Churn Rate:           {round(total_churn / total_runs, 1)}%")
+    print(f"Average Minute Delta:         {round(total_delta / total_runs, 1)}m")
+    print(f"Total AI Warnings:            {total_warns}")
+    print("=" * 70)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AI Planner Administrative CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # status command
     subparsers.add_parser("status", help="Show operational status of AI Planner")
+
+    # shadow-metrics command
+    subparsers.add_parser("shadow-metrics", help="Show shadow-mode metrics and comparison runs")
 
     # reset-breaker command
     reset_parser = subparsers.add_parser("reset-breaker", help="Reset circuit breaker to CLOSED")
@@ -139,6 +176,8 @@ def main() -> None:
 
     if args.command == "status":
         asyncio.run(show_status())
+    elif args.command == "shadow-metrics":
+        asyncio.run(show_shadow_metrics())
     elif args.command == "reset-breaker":
         asyncio.run(reset_breaker(args.admin_id))
     elif args.command == "toggle-kill-switch":

@@ -35,6 +35,7 @@ from core.planner.schemas import (
     HolidayResponse,
     ObservanceResponse,
     PolicyImpactPreviewResponse,
+    ShadowMetricsResponse,
     UpdateAdminPolicyRequest,
     UpdateAiPlannerConfigRequest,
     UpdateHolidayRequest,
@@ -890,4 +891,83 @@ async def update_ai_planner_config(
         },
         contract_version="ai-planner/v1.0",
     )
+
+
+@router.get(
+    "/ai-planner/shadow-metrics",
+    response_model=ShadowMetricsResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_ai_planner_shadow_metrics(
+    current_user: Annotated[User, Depends(require_role("admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ShadowMetricsResponse:
+    """Get aggregated metrics and latest reports from AI planner shadow-mode runs."""
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.action == "ai_planner.shadow_comparison")
+        .order_by(AuditLog.at.desc())
+        .limit(100)
+    )
+    res = await db.execute(stmt)
+    logs = res.scalars().all()
+
+    total_runs = len(logs)
+    if total_runs == 0:
+        return ShadowMetricsResponse(
+            total_runs=0,
+            coverage_parity_pass_count=0,
+            coverage_parity_pass_rate_pct=100.0,
+            avg_churn_rate_pct=0.0,
+            avg_minute_delta=0.0,
+            total_warnings=0,
+            recent_runs=[],
+        )
+
+    pass_count = 0
+    total_churn = 0.0
+    total_delta = 0.0
+    total_warns = 0
+    recent_runs: list[dict[str, Any]] = []
+
+    for l in logs:
+        meta = l.meta or {}
+        metrics = meta.get("metrics", {})
+        parity = metrics.get("coverage_parity_met", True)
+        if parity:
+            pass_count += 1
+        churn = metrics.get("churn_rate_pct", 0.0)
+        total_churn += churn
+        delta = metrics.get("minutes_delta", 0.0)
+        total_delta += delta
+        warns = metrics.get("ai_warnings_count", 0)
+        total_warns += warns
+
+        if len(recent_runs) < 10:
+            recent_runs.append(
+                {
+                    "student_id": meta.get("student_id"),
+                    "at": meta.get("at") or l.at.isoformat(),
+                    "recommendation": meta.get("recommendation", "PASS"),
+                    "parity_met": parity,
+                    "churn_rate_pct": churn,
+                    "minutes_delta": delta,
+                    "ai_warnings_count": warns,
+                }
+            )
+
+    pass_rate = round((pass_count / total_runs) * 100.0, 1)
+    avg_churn = round(total_churn / total_runs, 1)
+    avg_delta = round(total_delta / total_runs, 1)
+
+    return ShadowMetricsResponse(
+        total_runs=total_runs,
+        coverage_parity_pass_count=pass_count,
+        coverage_parity_pass_rate_pct=pass_rate,
+        avg_churn_rate_pct=avg_churn,
+        avg_minute_delta=avg_delta,
+        total_warnings=total_warns,
+        recent_runs=recent_runs,
+    )
+
 

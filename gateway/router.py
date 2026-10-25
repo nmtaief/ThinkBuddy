@@ -49,6 +49,7 @@ from core.families.router import (
     RedeemLinkResponse,
 )
 from core.planner.schemas import (
+    AiSuggestionResponse,
     DailyMinutesResponse,
     PlanResponse,
     StudentChangeRequestInput,
@@ -585,6 +586,42 @@ async def update_task_status(
 ) -> Response:
     """Update task completion status (student only)."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.get(
+    "/students/{student_id}/ai-suggestions",
+    response_model=list[AiSuggestionResponse],
+    tags=["Planning"],
+)
+async def list_ai_suggestions(student_id: uuid.UUID, request: Request) -> Response:
+    """List pending AI planner priority suggestions for a student."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/students/{student_id}/ai-suggestions/{suggestion_id}/approve",
+    tags=["Planning"],
+)
+async def approve_ai_suggestion(
+    student_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Parent approves an AI planner priority suggestion, updating settings and regenerating plan."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/students/{student_id}/ai-suggestions/{suggestion_id}/reject",
+    tags=["Planning"],
+)
+async def reject_ai_suggestion(
+    student_id: uuid.UUID,
+    suggestion_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Parent rejects an AI planner suggestion."""
+    return await forward_to_core(request)
 
 
 # -------------------------------------------------------------------------

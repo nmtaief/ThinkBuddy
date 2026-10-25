@@ -279,6 +279,15 @@ async def propose_plan(
 
 @mock_ai_app.post("/v1/quizzes/propose")
 async def propose_quizzes(payload: dict[str, Any]) -> dict[str, Any]:
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    if CURRENT_MODE == SimulationMode.ERROR_500:
+        raise HTTPException(status_code=500, detail="Internal AI Model Engine Failure")
+    if CURRENT_MODE == SimulationMode.TIMEOUT:
+        import asyncio
+        await asyncio.sleep(25.0)
+        return {}
+
     return {
         "proposal_id": str(uuid.uuid4()),
         "contract_version": CONTRACT_VERSION_V1_0,
@@ -299,6 +308,15 @@ async def propose_quizzes(payload: dict[str, Any]) -> dict[str, Any]:
 
 @mock_ai_app.post("/v1/revision/propose")
 async def propose_revision(payload: dict[str, Any]) -> dict[str, Any]:
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    if CURRENT_MODE == SimulationMode.ERROR_500:
+        raise HTTPException(status_code=500, detail="Internal AI Model Engine Failure")
+    if CURRENT_MODE == SimulationMode.TIMEOUT:
+        import asyncio
+        await asyncio.sleep(25.0)
+        return {}
+
     today = date.today()
     return {
         "proposal_id": str(uuid.uuid4()),
@@ -317,6 +335,15 @@ async def propose_revision(payload: dict[str, Any]) -> dict[str, Any]:
 
 @mock_ai_app.post("/v1/questions/draft")
 async def draft_questions(payload: dict[str, Any]) -> dict[str, Any]:
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    if CURRENT_MODE == SimulationMode.ERROR_500:
+        raise HTTPException(status_code=500, detail="Internal AI Model Engine Failure")
+    if CURRENT_MODE == SimulationMode.TIMEOUT:
+        import asyncio
+        await asyncio.sleep(35.0)
+        return {}
+
     chunks = payload.get("source_chunks", [])
     source_ids = [c["chunk_id"] for c in chunks] if chunks else [str(uuid.uuid4())]
     return {
@@ -345,6 +372,15 @@ async def draft_questions(payload: dict[str, Any]) -> dict[str, Any]:
 
 @mock_ai_app.post("/v1/insights/explain")
 async def explain_insights(payload: dict[str, Any]) -> dict[str, Any]:
+    global REQUEST_COUNT
+    REQUEST_COUNT += 1
+    if CURRENT_MODE == SimulationMode.ERROR_500:
+        raise HTTPException(status_code=500, detail="Internal AI Model Engine Failure")
+    if CURRENT_MODE == SimulationMode.TIMEOUT:
+        import asyncio
+        await asyncio.sleep(25.0)
+        return {}
+
     return {
         "proposal_id": str(uuid.uuid4()),
         "contract_version": CONTRACT_VERSION_V1_0,
