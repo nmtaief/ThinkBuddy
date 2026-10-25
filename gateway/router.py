@@ -997,6 +997,30 @@ async def send_chat_message_gateway(
 
 
 # -------------------------------------------------------------------------
+# Progress & Mastery (docs/04_API_CONTRACT.md §7)
+# -------------------------------------------------------------------------
+@router.get("/progress/{path:path}", tags=["Progress"], operation_id="gateway_progress_get")
+async def forward_progress_get(path: str, request: Request) -> Response:
+    """Forward progress and mastery GET requests to Core Service."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Spaced Revision (docs/04_API_CONTRACT.md §7)
+# -------------------------------------------------------------------------
+@router.get("/revision/{path:path}", tags=["Revision"], operation_id="gateway_revision_get")
+async def forward_revision_get(path: str, request: Request) -> Response:
+    """Forward spaced revision GET requests to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post("/revision/{path:path}", tags=["Revision"], operation_id="gateway_revision_post")
+async def forward_revision_post(path: str, request: Request) -> Response:
+    """Forward spaced revision POST requests to Core Service."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
 # Admin Configuration & Governance
 # -------------------------------------------------------------------------
 @router.get("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_get")

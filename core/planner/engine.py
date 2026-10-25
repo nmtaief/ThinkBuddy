@@ -54,9 +54,9 @@ DAY_NAMES_TO_WEEKDAY = {
 class TimeShareConfig:
     """Configurable time shares for daily task composition per docs/06_ADAPTIVE_ENGINE.md §4."""
 
-    study_share: float = 0.65
-    revision_share: float = 0.25
-    weak_point_share: float = 0.0
+    study_share: float = 0.55
+    revision_share: float = 0.20
+    weak_point_share: float = 0.15
     homework_quiz_share: float = 0.10
 
     def __post_init__(self) -> None:
@@ -631,7 +631,7 @@ def generate_student_plan(
         prio_mult = prio_mapping.get(prio, 1.0)
         est_study_minutes_needed = sum(ch.effort for ch in sorted_chapters) * 2.5 * prio_mult
         total_available_study_minutes = len(study_candidate_dates) * math.floor(
-            sub_daily_b * time_shares.study_share
+            sub_daily_b * (time_shares.study_share + math.ceil(time_shares.weak_point_share * 0.67 * 100) / 100)
         )
 
         compression_ratio = 1.0
@@ -822,7 +822,12 @@ def generate_student_plan(
                 tracker.setup.subject, min_study_block_minutes
             )
             base_slice = math.floor(
-                sub_budget * (time_shares.study_share + time_shares.revision_share)
+                sub_budget
+                * (
+                    time_shares.study_share
+                    + time_shares.revision_share
+                    + time_shares.weak_point_share
+                )
             )
             sub_prio = sub_priorities.get(tracker.setup.subject, "normal")
             ch_prio_mult = prio_mapping.get(sub_prio, 1.0)

@@ -68,6 +68,16 @@ class MockLLMGateway(LLMGateway):
         fail_primary: bool = False,
         fallback_stream_tokens: list[str] | None = None,
     ) -> None:
+        from core.common.config import settings as app_settings
+
+        env_val = getattr(app_settings, "ENV", None) or getattr(
+            app_settings, "ENVIRONMENT", "local"
+        )
+        if env_val.lower() in ("production", "staging"):
+            raise RuntimeError(
+                f"MockLLMGateway is strictly forbidden in {env_val} environment"
+            )
+
         self.default_stream_tokens = default_stream_tokens or [
             "সালোকসংশ্লেষণ ",
             "হলো এমন একটি ",

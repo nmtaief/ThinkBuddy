@@ -93,8 +93,8 @@ class QuizBuilderService:
         res = await self.db.execute(stmt)
         candidates = list(res.scalars().all())
 
-        if not candidates:
-            # Fallback to any approved questions in allowed pool
+        if not candidates and not chapter_ids:
+            # Fallback to any approved questions in allowed pool only if no specific chapters requested
             fallback_res = await self.db.execute(
                 select(Question)
                 .where(

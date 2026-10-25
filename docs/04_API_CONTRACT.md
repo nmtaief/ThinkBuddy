@@ -98,8 +98,17 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
   - Grounded Citations (Rule 7 & 8): Every assistant answer carrying facts terminates with citations (`book_title`, `chapter_title`, `chapter_number`, `printed_page`, `chunk_id`). Authoritative printed page number is strictly rendered to users; internal PDF page index is kept separate.
   - Low Confidence Fallback: If retrieval confidence is below threshold (< 0.45), returns explicit "not found in your textbook" message without guessing or hallucinating citations.
 
-### Progress & parent
-- `GET /students/{id}/progress/summary`, `/progress/mastery`, `/progress/weak-points`, `/progress/history`.
+### Progress, Mastery & Spaced Revision (P06)
+- `GET /progress/summary?student_id=` – overall mastery score, confidence, and active streak for student or linked parent dashboard.
+- `GET /progress/mastery?student_id=` – chapter-by-chapter mastery scores with confidence and parent-safe statuses (`mastered`, `needs_practice`, `not_enough_data`).
+- `GET /progress/weak-points?student_id=` – topics needing practice and suggested intervention review types (Requirement 7: strictly parent-safe wording; never labeled "weak").
+- `GET /progress/history?student_id=&days=30` – historical study progress, minutes studied, tasks completed, and quiz averages over lookback period.
+- `GET /revision/daily?student_id=` – 5-box Leitner spaced repetition items due today, ordered by box priority and capped by available daily revision minutes. Excludes subjects in blackout or past exam dates.
+- `POST /revision/{id}/review` – submit revision review result (`result="correct"` promotes to `box + 1`, `result="incorrect"` demotes to `box = 1`).
+- `POST /internal/jobs/daily-composition?student_id=` – internal worker endpoint triggering daily adaptive composition and planner regeneration under student advisory lock.
+- `POST /internal/jobs/three-day-review?student_id=` – internal worker endpoint triggering 3-day review cycle, assembling P04 review quiz, and regenerating planner.
+
+### Parent & Family
 - `GET /parents/me/students` – list of linked children.
 - `GET/PATCH /notifications/settings`.
 

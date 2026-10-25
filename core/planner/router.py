@@ -152,6 +152,13 @@ async def execute_student_plan_regeneration(
         # 4. Resolve 3-tier settings
         resolved_settings = await resolve_student_settings(db, student_id)
 
+        # 4b. Load student chapter mastery for adaptive input (P06)
+        from core.progress.models import Mastery
+
+        stmt_m = select(Mastery.chapter_id, Mastery.score).where(Mastery.student_id == student_id)
+        res_m = await db.execute(stmt_m)
+        student_mastery_map = dict(res_m.all())
+
         # 5. Prepare engine inputs
         engine_setups: list[SubjectSetupInput] = []
         exam_dates: set[date] = set()
@@ -176,7 +183,7 @@ async def execute_student_plan_regeneration(
                         book_title=ch.book.title if ch.book else "",
                         weight=s_item.weight,
                         difficulty_factor=s_item.custom_difficulty or ch.difficulty_factor or 1.0,
-                        mastery=0.5,
+                        mastery=student_mastery_map.get(ch.id, 0.5),
                     )
                 )
             engine_setups.append(
