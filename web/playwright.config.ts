@@ -13,21 +13,21 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "phone-compact",
+      name: "chromium-compact",
       use: {
         ...devices["Pixel 5"],
         viewport: { width: 375, height: 667 },
       },
     },
     {
-      name: "tablet-medium",
+      name: "webkit-medium",
       use: {
-        ...devices["Desktop Chrome"],
+        ...devices["iPad (gen 7)"],
         viewport: { width: 768, height: 1024 },
       },
     },
     {
-      name: "desktop-expanded",
+      name: "chromium-expanded",
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 800 },
@@ -37,7 +37,7 @@ export default defineConfig({
   webServer: {
     command: "npm start",
     url: "http://127.0.0.1:3000",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 60000,
   },
 });

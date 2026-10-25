@@ -16,6 +16,8 @@ import {
   Sparkles,
   GitPullRequest,
   CheckCircle,
+  FileText,
+  Bell,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -33,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, currentTab, onSelectTab,
     { id: "plan", label: t.nav.plan, icon: Clock },
     { id: "revision", label: t.nav.revision, icon: RotateCcw },
     { id: "quiz", label: t.nav.quiz, icon: HelpCircle },
+    { id: "broad-answer", label: t.student.broadAnswerTitle || "রচনামূলক", icon: FileText },
     { id: "chat", label: t.nav.chat, icon: MessageSquare },
     { id: "progress", label: t.nav.progress, icon: BarChart2 },
     { id: "change-request", label: t.nav.changeRequest, icon: GitPullRequest },
@@ -45,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, currentTab, onSelectTab,
     { id: "suggestions", label: t.nav.suggestions, icon: Sparkles },
     { id: "auto-adjustments", label: t.nav.autoAdjustments, icon: CheckCircle },
     { id: "change-requests", label: t.nav.changeRequest, icon: GitPullRequest },
+    { id: "notifications", label: t.nav.notifications || "নোটিফিকেশন", icon: Bell },
   ];
 
   const links = role === "parent" ? parentLinks : studentLinks;

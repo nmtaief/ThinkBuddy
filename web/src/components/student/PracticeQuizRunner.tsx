@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { QuizAttempt, QuizReviewItem } from "@/lib/types";
+import { QuizAttempt, QuizReviewItem, ClientConfig } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { MathRenderer } from "@/components/MathRenderer";
@@ -9,9 +9,10 @@ import { AlertCircle, CheckCircle, XCircle, ArrowRight, Smartphone, BookOpen } f
 
 interface PracticeQuizRunnerProps {
   lang: Language;
+  config?: ClientConfig;
 }
 
-export const PracticeQuizRunner: React.FC<PracticeQuizRunnerProps> = ({ lang }) => {
+export const PracticeQuizRunner: React.FC<PracticeQuizRunnerProps> = ({ lang, config }) => {
   const t = translations[lang];
 
   const [activeTab, setActiveTab] = useState<"practice" | "assessed_notice">("practice");
@@ -106,10 +107,12 @@ export const PracticeQuizRunner: React.FC<PracticeQuizRunnerProps> = ({ lang }) 
             </div>
             <div>
               <h3 style={{ fontSize: "var(--text-lg)", fontWeight: 700 }}>
-                {t.student.assessedQuizBlockedTitle}
+                {(lang === "bn" ? config?.assessed_quiz_banner?.title_bn : config?.assessed_quiz_banner?.title_en) ||
+                  t.student.assessedQuizBlockedTitle}
               </h3>
               <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-                {t.student.assessedQuizBlockedBody}
+                {(lang === "bn" ? config?.assessed_quiz_banner?.body_bn : config?.assessed_quiz_banner?.body_en) ||
+                  "ThinkBuddy অ্যান্ড্রয়েড অ্যাপ শীঘ্রই আসছে। অ্যাপ প্রকাশ না হওয়া পর্যন্ত মূল্যায়ন কুইজ সাময়িকভাবে স্থগিত।"}
               </p>
             </div>
           </div>

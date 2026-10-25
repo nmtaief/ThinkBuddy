@@ -29,7 +29,7 @@ test.describe("Security: Assessed Quiz Guard on Web", () => {
     await assessedTab.click();
 
     // Verify blocking banner
-    await expect(page.getByText(/ন্যায্যতা ও নিরাপত্তার স্বার্থে মূল্যায়ন কুইজ শুধুমাত্র অ্যান্ড্রয়েড ThinkBuddy অ্যাপে/i)).toBeVisible();
+    await expect(page.getByText(/ThinkBuddy অ্যান্ড্রয়েড অ্যাপ শীঘ্রই আসছে|ন্যায্যতা ও নিরাপত্তার স্বার্থে মূল্যায়ন কুইজ/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /অ্যান্ড্রয়েড অ্যাপ ডাউনলোড করুন/i })).toBeVisible();
   });
 });

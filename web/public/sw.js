@@ -26,6 +26,22 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// Logout purge message listener (P08 deliverable: no authenticated data left in SW caches)
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "LOGOUT_PURGE") {
+    event.waitUntil(
+      caches.keys().then((keys) => {
+        return Promise.all(
+          keys.map((key) => caches.delete(key))
+        );
+      }).then(() => {
+        // Re-cache only anonymous static assets shell
+        return caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS));
+      })
+    );
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   // Offline caching strategy for Today's plan
   if (event.request.url.includes("/api/proxy/students/") && event.request.url.includes("/today")) {

@@ -1,12 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, BACKEND_GATEWAY_URL, CSRF_HEADER_NAME } from "@/lib/session";
 
+// Permitted upstream endpoint patterns
+const ALLOWED_ENDPOINT_PATTERNS = [
+  /^client\/config$/,
+  /^quizzes\/[^/]+\/attempts$/,
+  /^attempts\/[^/]+\/items\/[^/]+\/answer$/,
+  /^attempts\/[^/]+\/submit$/,
+  /^attempts\/[^/]+\/review$/,
+  /^students\/[^/]+\/plan$/,
+  /^students\/[^/]+\/study-settings$/,
+  /^students\/[^/]+\/suggestions$/,
+  /^suggestions\/[^/]+\/approve$/,
+  /^suggestions\/[^/]+\/decline$/,
+  /^students\/[^/]+\/auto-adjustments$/,
+  /^auto-adjustments\/[^/]+\/undo$/,
+  /^students\/[^/]+\/change-requests$/,
+  /^parents\/me\/students$/,
+  /^parents\/me\/notifications\/preferences$/,
+  /^uploads\/sign$/,
+  /^tasks\/[^/]+$/,
+];
+
+function isPathAllowed(endpoint: string): boolean {
+  return ALLOWED_ENDPOINT_PATTERNS.some((pattern) => pattern.test(endpoint));
+}
+
+function hasPathTraversal(pathSegments: string[]): boolean {
+  for (const seg of pathSegments) {
+    const decoded = decodeURIComponent(seg);
+    if (
+      decoded.includes("..") ||
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      decoded.includes("\0")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validateOrigin(req: NextRequest): boolean {
+  const origin = req.headers.get("origin");
+  const host = req.headers.get("host");
+  if (!origin || !host) return true;
+  try {
+    const originHost = new URL(origin).host;
+    return originHost === host;
+  } catch {
+    return false;
+  }
+}
+
 async function handleProxy(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
+
+  // 1. Path traversal rejection
+  if (hasPathTraversal(path)) {
+    return NextResponse.json(
+      { error: { code: "PATH_TRAVERSAL_DETECTED", message: "Invalid path sequence" } },
+      { status: 400 }
+    );
+  }
+
   const endpoint = path.join("/");
+
+  // 2. Explicitly block internal and admin paths
+  const lowerEndpoint = endpoint.toLowerCase();
+  if (
+    lowerEndpoint.startsWith("internal") ||
+    lowerEndpoint.includes("/internal") ||
+    lowerEndpoint.startsWith("admin") ||
+    lowerEndpoint.includes("/admin") ||
+    lowerEndpoint.startsWith("v1/admin")
+  ) {
+    return NextResponse.json(
+      { error: { code: "FORBIDDEN_PATH", message: "Access to internal/admin routes is forbidden" } },
+      { status: 403 }
+    );
+  }
+
+  // 3. Allow-list check
+  if (!isPathAllowed(endpoint)) {
+    return NextResponse.json(
+      { error: { code: "ENDPOINT_NOT_ALLOWED", message: `Endpoint '${endpoint}' is not permitted` } },
+      { status: 403 }
+    );
+  }
+
   const session = await getSession();
 
-  // Block assessed quizzes at BFF layer per Rule 4, 05_SECURE_QUIZ.md, and P08 requirements
+  // 4. Block assessed quizzes at BFF layer per Rule 4, 05_SECURE_QUIZ.md, and P08 requirements
   if (endpoint.includes("attempts") && req.method === "POST") {
     try {
       const cloned = req.clone();
@@ -27,19 +112,35 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     }
   }
 
-  // CSRF validation for mutating methods if session exists
-  if (session && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-    const csrfHeader = req.headers.get(CSRF_HEADER_NAME);
-    if (!csrfHeader || csrfHeader !== session.csrfToken) {
+  // 5. Origin check and CSRF validation for mutating methods
+  // CSRF delivery pattern: Ephemeral csrfToken delivered in auth response body,
+  // bound to server session in Redis, validated on every mutating request via x-csrf-token header.
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    if (!validateOrigin(req)) {
       return NextResponse.json(
-        { error: { code: "CSRF_ERROR", message: "Invalid or missing CSRF token" } },
+        { error: { code: "ORIGIN_MISMATCH", message: "Cross-origin request rejected" } },
         { status: 403 }
       );
     }
+
+    if (session) {
+      const csrfHeader = req.headers.get(CSRF_HEADER_NAME);
+      if (!csrfHeader || csrfHeader !== session.csrfToken) {
+        return NextResponse.json(
+          { error: { code: "CSRF_ERROR", message: "Invalid or missing CSRF token" } },
+          { status: 403 }
+        );
+      }
+    }
   }
 
-  const formFactor = req.headers.get("x-client-form-factor") || "expanded";
-  const acceptLang = req.headers.get("accept-language") || "bn";
+  // 6. Overwrite client platform headers strictly from server
+  const clientFormFactorHeader = req.headers.get("x-client-form-factor");
+  const formFactor = ["compact", "medium", "expanded"].includes(clientFormFactorHeader || "")
+    ? (clientFormFactorHeader as string)
+    : "expanded";
+
+  const acceptLang = req.headers.get("accept-language")?.includes("en") ? "en" : "bn";
 
   const headers: Record<string, string> = {
     "X-Client-Platform": "web",
@@ -58,6 +159,7 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     headers["Content-Type"] = contentType;
   }
 
+  // 7. Fixed upstream
   const targetUrl = new URL(`${BACKEND_GATEWAY_URL}/v1/${endpoint}`);
   req.nextUrl.searchParams.forEach((val, key) => {
     targetUrl.searchParams.append(key, val);
@@ -83,7 +185,6 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
       },
     });
   } catch (err: unknown) {
-    // If backend is not reached during mock/test, provide deterministic client fallback
     const message = err instanceof Error ? err.message : "Gateway connection error";
     return NextResponse.json(
       { error: { code: "GATEWAY_UNAVAILABLE", message } },

@@ -13,6 +13,8 @@ import { ParentDashboardView } from "@/components/parent/ParentDashboardView";
 import { StudySetupEditorView } from "@/components/parent/StudySetupEditorView";
 import { ParentSuggestionsView } from "@/components/parent/ParentSuggestionsView";
 import { ParentOnboardingView } from "@/components/parent/ParentOnboardingView";
+import { NotificationPreferencesView } from "@/components/parent/NotificationPreferencesView";
+import { BroadAnswerView } from "@/components/student/BroadAnswerView";
 import { Language, translations } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { SessionUser, ClientConfig, TodayPayload, ChildSummary } from "@/lib/types";
@@ -206,7 +208,8 @@ export default function Home() {
                   onToggleTask={handleToggleTask}
                 />
               )}
-              {currentTab === "quiz" && <PracticeQuizRunner lang={lang} />}
+              {currentTab === "quiz" && <PracticeQuizRunner lang={lang} config={config} />}
+              {currentTab === "broad-answer" && <BroadAnswerView lang={lang} />}
               {currentTab === "chat" && <AIChatView lang={lang} />}
               {currentTab === "progress" && <ProgressView lang={lang} />}
               {currentTab === "revision" && <ProgressView lang={lang} />}
@@ -245,6 +248,9 @@ export default function Home() {
                   studentId={activeChildId}
                   lang={lang}
                 />
+              )}
+              {currentTab === "notifications" && (
+                <NotificationPreferencesView lang={lang} />
               )}
             </>
           )}

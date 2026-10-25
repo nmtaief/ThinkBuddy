@@ -16,3 +16,6 @@
 14. **Small, reviewable changes.** One prompt = one branch/PR. Do not refactor unrelated code.
 15. **Log, don't leak.** Structured logs with request IDs. Never log tokens, OTPs, answer keys, or full student chat content.
 16. **Ask by writing a `QUESTIONS.md` entry** when a requirement is ambiguous, then proceed with the documented default.
+17. **Client token isolation.** Never store auth tokens (access, refresh, or session) in browser-accessible client storage (localStorage, sessionStorage, IndexedDB). Web clients must store sessions in HttpOnly, SameSite, Secure cookies managed via a server BFF layer. Mobile clients must use hardware-backed secure storage (Android Keystore, iOS Keychain).
+18. **Platform isolation for assessments.** Assessed quizzes require native platform enforcement (`FLAG_SECURE`, Play Integrity, app attestation) and must never be permitted on web clients. The backend and BFF must restrict web clients to practice quizzes only (`WEB_PLATFORM_PRACTICE_ONLY`).
+
