@@ -2,9 +2,10 @@
 
 **Date:** 2026-10-25  
 **Milestone:** P07 (Parent Dashboard APIs & Push Notifications)  
+**Tail Commit:** `346a3da`  
 **Status:** Completed & Verified; all P07 tail requirements satisfied; ready for P08 Web App  
 **Standing Rules:** Strictly enforced (Rules 1–16)  
-**Total Commits (`git rev-list --count --all`):** 30  
+**Total Commits (`git rev-list --count --all`):** 31  
 
 ---
 
