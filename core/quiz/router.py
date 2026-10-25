@@ -10,14 +10,17 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.dependencies import get_current_user, require_role
 from core.auth.models import User
 from core.common.database import get_db_session
-from core.quiz.models import Quiz
+from core.common.service_token import require_internal_service_token
+from core.quiz.models import OPEN_ATTEMPT_STATES, QuizAttempt
 from core.quiz.schemas import (
+    AllowAttemptRequest,
     AnswerItemRequest,
     AnswerItemResponse,
     AttemptEventRequest,
@@ -68,7 +71,11 @@ async def create_student_quiz(
         )
 
     service = QuizService(db)
-    chapter_ids = [uuid.UUID(c) for c in payload.get("chapter_ids", [])] if payload.get("chapter_ids") else None
+    chapter_ids = (
+        [uuid.UUID(c) for c in payload.get("chapter_ids", [])]
+        if payload.get("chapter_ids")
+        else None
+    )
     quiz = await service.builder.build_quiz(
         student_id=student_id,
         chapter_ids=chapter_ids,
@@ -98,6 +105,39 @@ async def create_student_quiz(
 
 
 @router.post(
+    "/quizzes/{quiz_id}/attempts/create",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_quiz_attempt_endpoint(
+    quiz_id: uuid.UUID,
+    payload: StartAttemptRequest,
+    current_user: Annotated[User, Depends(require_role("student"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_client_platform: str = Header("android", alias="X-Client-Platform"),
+    x_device_id: str | None = Header(None, alias="X-Device-Id"),
+) -> dict[str, Any]:
+    """Create a quiz attempt in state 'created' with a short 5-minute expiry.
+
+    Returns attempt_id and integrity_nonce (bound to attempt_id) for Play Integrity.
+    """
+    service = QuizService(db)
+    attempt = await service.create_attempt(
+        quiz_id=quiz_id,
+        student_id=current_user.id,
+        client_platform=x_client_platform,
+        device_id=payload.device_id or x_device_id,
+    )
+    return {
+        "attempt_id": str(attempt.id),
+        "state": attempt.state,
+        "nonce": str(attempt.id),
+        "deadline_at": attempt.deadline_at.isoformat() if attempt.deadline_at else None,
+        "attempt_token": attempt.attempt_token,
+    }
+
+
+@router.post(
     "/quizzes/{quiz_id}/attempts",
     response_model=StartAttemptResponse,
     status_code=status.HTTP_201_CREATED,
@@ -107,13 +147,16 @@ async def start_quiz_attempt(
     payload: StartAttemptRequest,
     current_user: Annotated[User, Depends(require_role("student"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    request: Request,
     x_client_platform: str = Header("android", alias="X-Client-Platform"),
     x_device_id: str | None = Header(None, alias="X-Device-Id"),
+    x_device_integrity: str | None = Header(None, alias="X-Device-Integrity"),
 ) -> StartAttemptResponse:
     """Start a quiz attempt.
-    
+
     Enforces:
     - Web platform practice-only restriction
+    - Device integrity verdict (Play Integrity / App Attest)
     - One-active-assessed-attempt limit per student
     - Sequential question serving (Rule 6: answer keys withheld)
     """
@@ -123,6 +166,9 @@ async def start_quiz_attempt(
         student_id=current_user.id,
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
+        integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
+        headers=dict(request.headers),
+        attempt_id=payload.attempt_id,
     )
 
 
@@ -141,7 +187,7 @@ async def answer_quiz_item(
     x_attempt_token: str | None = Header(None, alias="X-Attempt-Token"),
 ) -> AnswerItemResponse:
     """Submit one item answer in sequence.
-    
+
     Enforces:
     - Server deadline authority (expired attempts rejected and auto-submitted)
     - Per-item server nonce verification preventing replay
@@ -223,11 +269,86 @@ async def review_quiz_attempt(
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AttemptReviewResponse:
     """Get full quiz review with correct answers and explanations.
-    
+
     Rule 6: Strictly rejects with 403 FORBIDDEN while attempt is active!
     """
     service = QuizService(db)
     return await service.review_attempt(
         attempt_id=attempt_id,
-        student_id=current_user.id,
+        user=current_user,
     )
+
+
+@router.post(
+    "/attempts/{attempt_id}/allow",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    tags=["Quiz"],
+)
+async def allow_quiz_attempt(
+    attempt_id: uuid.UUID,
+    payload: AllowAttemptRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Parent or admin override to allow an attempt that was warned, paused, or invalidated."""
+    service = QuizService(db)
+    attempt = await service.allow_attempt(attempt_id, current_user, payload.reason)
+    return {
+        "attempt_id": str(attempt.id),
+        "state": attempt.state,
+        "integrity_score": attempt.integrity_score,
+        "invalid_reason": attempt.invalid_reason,
+        "allowed": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Internal Gateway & Chat Support Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/internal/quiz/students/{student_id}/active-attempt",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_200_OK,
+)
+async def is_assessed_attempt_active(
+    student_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    _service_token: Annotated[dict[str, Any], Depends(require_internal_service_token)],
+) -> dict[str, Any]:
+    """Internal service endpoint used by gateway/chat to detect active assessed attempts."""
+    service = QuizService(db)
+    is_active = await service.is_assessed_attempt_active(student_id)
+    attempt_info: dict[str, Any] = {
+        "student_id": str(student_id),
+        "is_active": is_active,
+        "attempt_id": None,
+        "deadline_at": None,
+        "mode": None,
+        "state": None,
+    }
+    if is_active:
+        stmt = (
+            select(QuizAttempt)
+            .where(
+                QuizAttempt.student_id == student_id,
+                QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
+                QuizAttempt.mode == "assessed",
+            )
+            .limit(1)
+        )
+        res = await db.execute(stmt)
+        attempt = res.scalar_one_or_none()
+        if attempt:
+            attempt_info.update(
+                {
+                    "attempt_id": str(attempt.id),
+                    "deadline_at": attempt.deadline_at.isoformat() if attempt.deadline_at else None,
+                    "mode": attempt.mode,
+                    "state": attempt.state,
+                }
+            )
+
+    return attempt_info

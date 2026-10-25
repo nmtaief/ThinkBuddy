@@ -15,12 +15,10 @@ class CoreSettings(BaseSettings):
 
     ENV: str = Field(
         default="local",
-        validation_alias=AliasChoices("ENV", "ENVIRONMENT"),
         description="Runtime environment (local, development, staging, production)",
     )
     ENVIRONMENT: str = Field(
         default="local",
-        validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
         description="Alias for runtime environment",
     )
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
@@ -46,6 +44,14 @@ class CoreSettings(BaseSettings):
     INTERNAL_SERVICE_TOKEN: str = Field(
         default="dev_internal_service_token_placeholder_change_in_production",
         description="Shared secret for gateway-to-core communication",
+    )
+    INTERNAL_SERVICE_SECRET: str = Field(
+        default="dev_internal_service_hmac_secret_32bytes_min_key!",
+        description="HMAC secret key for signing inter-service JWTs",
+    )
+    QUESTION_KEY_ENCRYPTION_KEY: str = Field(
+        default="dev_question_key_aes_gcm_32bytes_secret_key!",
+        description="AES-GCM key for encrypting question keys at rest",
     )
 
     # Database
@@ -120,6 +126,18 @@ class CoreSettings(BaseSettings):
     TEACHER_REVIEW_ENABLED: bool = Field(
         default=False, description="Teacher review feature flag (off in beta)"
     )
+    FEATURE_RAG_CHAT_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for RAG AI Tutor Chat (P05). Disabled by default.",
+    )
+    FEATURE_PROGRESS_MASTERY_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for Progress & Mastery tracking (P06). Disabled by default.",
+    )
+    FEATURE_SPACED_REVISION_ENABLED: bool = Field(
+        default=False,
+        description="Global feature flag for Spaced Revision Scheduler (P06). Disabled by default.",
+    )
 
     # AI Planner Integration (P06a)
     AI_PLANNER_ENABLED: bool = Field(
@@ -188,11 +206,14 @@ class CoreSettings(BaseSettings):
     @property
     def is_local(self) -> bool:
         """Return True only if running in local environment (ENV=local)."""
-        return self.ENV.lower() == "local"
+        return (self.ENV or "").strip().lower() == "local"
 
     @model_validator(mode="after")
     def validate_non_local_secrets(self) -> "CoreSettings":
         """Refuse placeholder or weak secrets in non-local environments."""
+        if self.ENVIRONMENT != "local" and self.ENV == "local":
+            self.ENV = self.ENVIRONMENT
+        self.ENVIRONMENT = self.ENV
         env = self.ENV.lower()
         is_dev_or_local = env in {"local", "development", "dev", "test", "testing"}
         if not is_dev_or_local:
@@ -205,7 +226,7 @@ class CoreSettings(BaseSettings):
                 "dev_link_code_secret_change_in_production",
             }
 
-            # 1. Reject placeholders and known defaults
+            # 1. Internal Service Token
             token_lower = self.INTERNAL_SERVICE_TOKEN.lower()
             if (
                 "placeholder" in token_lower
@@ -217,7 +238,14 @@ class CoreSettings(BaseSettings):
                     "with placeholder INTERNAL_SERVICE_TOKEN."
                 )
                 raise ValueError(msg)
+            if len(self.INTERNAL_SERVICE_TOKEN) < 32:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "INTERNAL_SERVICE_TOKEN must have at least 32 characters."
+                )
+                raise ValueError(msg)
 
+            # 2. Database credentials
             if "thinkbuddy_dev_password" in self.DATABASE_URL.lower():
                 msg = (
                     f"Refusing to start in environment '{self.ENV}' "
@@ -225,6 +253,7 @@ class CoreSettings(BaseSettings):
                 )
                 raise ValueError(msg)
 
+            # 3. JWT Secret Key
             jwt_lower = self.JWT_SECRET_KEY.lower()
             if (
                 "change_in_production" in jwt_lower
@@ -236,7 +265,14 @@ class CoreSettings(BaseSettings):
                     "with placeholder JWT_SECRET_KEY."
                 )
                 raise ValueError(msg)
+            if len(self.JWT_SECRET_KEY) < 32:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "JWT_SECRET_KEY must have at least 32 characters."
+                )
+                raise ValueError(msg)
 
+            # 4. Link Code Secret
             link_lower = self.LINK_CODE_SECRET.lower()
             if (
                 "change_in_production" in link_lower
@@ -248,22 +284,6 @@ class CoreSettings(BaseSettings):
                     "with placeholder LINK_CODE_SECRET."
                 )
                 raise ValueError(msg)
-
-            # 2. Enforce minimum 32 random characters
-            if len(self.INTERNAL_SERVICE_TOKEN) < 32:
-                msg = (
-                    f"Refusing to start in environment '{self.ENV}': "
-                    "INTERNAL_SERVICE_TOKEN must have at least 32 characters."
-                )
-                raise ValueError(msg)
-
-            if len(self.JWT_SECRET_KEY) < 32:
-                msg = (
-                    f"Refusing to start in environment '{self.ENV}': "
-                    "JWT_SECRET_KEY must have at least 32 characters."
-                )
-                raise ValueError(msg)
-
             if len(self.LINK_CODE_SECRET) < 32:
                 msg = (
                     f"Refusing to start in environment '{self.ENV}': "
@@ -271,12 +291,57 @@ class CoreSettings(BaseSettings):
                 )
                 raise ValueError(msg)
 
-            # 3. Require distinct secrets across all keys
-            secrets_set = {self.JWT_SECRET_KEY, self.LINK_CODE_SECRET, self.INTERNAL_SERVICE_TOKEN}
-            if len(secrets_set) < 3:
+            # 5. Internal Service Secret (HMAC)
+            service_secret_lower = self.INTERNAL_SERVICE_SECRET.lower()
+            if (
+                "change_in_production" in service_secret_lower
+                or "dev_" in service_secret_lower
+                or "placeholder" in service_secret_lower
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}' "
+                    "with placeholder INTERNAL_SERVICE_SECRET."
+                )
+                raise ValueError(msg)
+            if len(self.INTERNAL_SERVICE_SECRET) < 32:
                 msg = (
                     f"Refusing to start in environment '{self.ENV}': "
-                    "JWT_SECRET_KEY, LINK_CODE_SECRET, and INTERNAL_SERVICE_TOKEN must be distinct."
+                    "INTERNAL_SERVICE_SECRET must have at least 32 characters."
+                )
+                raise ValueError(msg)
+
+            # 6. Question Key Encryption Key
+            crypto_key_lower = self.QUESTION_KEY_ENCRYPTION_KEY.lower()
+            if (
+                "change_in_production" in crypto_key_lower
+                or "dev_" in crypto_key_lower
+                or "placeholder" in crypto_key_lower
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}' "
+                    "with placeholder QUESTION_KEY_ENCRYPTION_KEY."
+                )
+                raise ValueError(msg)
+            if len(self.QUESTION_KEY_ENCRYPTION_KEY) < 32:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "QUESTION_KEY_ENCRYPTION_KEY must have at least 32 characters."
+                )
+                raise ValueError(msg)
+
+            # 3. Require distinct secrets across all keys
+            secrets_set = {
+                self.JWT_SECRET_KEY,
+                self.LINK_CODE_SECRET,
+                self.INTERNAL_SERVICE_TOKEN,
+                self.INTERNAL_SERVICE_SECRET,
+                self.QUESTION_KEY_ENCRYPTION_KEY,
+            }
+            if len(secrets_set) < 5:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "JWT_SECRET_KEY, LINK_CODE_SECRET, INTERNAL_SERVICE_TOKEN, "
+                    "INTERNAL_SERVICE_SECRET, and QUESTION_KEY_ENCRYPTION_KEY must be distinct."
                 )
                 raise ValueError(msg)
 

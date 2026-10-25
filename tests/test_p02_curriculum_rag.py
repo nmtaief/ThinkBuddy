@@ -38,6 +38,7 @@ CLIENT_HEADERS_ANDROID = {
 }
 
 SAMPLE_MANIFEST_PATH = Path("tests/data/sample_manifest.jsonl")
+SAMPLE_BOOK_ID = uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa1")
 EVAL_DATASET_PATH = Path("tests/data/retrieval_eval_dataset.json")
 
 
@@ -56,7 +57,7 @@ async def test_idempotent_import_does_not_duplicate_chunks() -> None:
     """Verify that re-importing the same manifest does not duplicate books or chunks."""
     async with AsyncSessionLocal() as session:
         # Count chunks initially
-        stmt_count = select(func.count(Chunk.id))
+        stmt_count = select(func.count(Chunk.id)).where(Chunk.book_id == SAMPLE_BOOK_ID)
         res_initial = await session.execute(stmt_count)
         initial_chunk_count = res_initial.scalar_one()
         assert initial_chunk_count == 8
@@ -219,7 +220,10 @@ async def test_invalid_chunks_excluded_from_retrieval() -> None:
 async def test_printed_page_vs_pdf_page_index_separation() -> None:
     """Verify printed_page and pdf_page_index are separate columns and printed_page is returned."""
     async with AsyncSessionLocal() as session:
-        stmt = select(Chunk).where(Chunk.chunk_index == 1)
+        stmt = select(Chunk).where(
+            Chunk.book_id == SAMPLE_BOOK_ID,
+            Chunk.chunk_index == 1,
+        )
         res = await session.execute(stmt)
         chunk = res.scalar_one()
 

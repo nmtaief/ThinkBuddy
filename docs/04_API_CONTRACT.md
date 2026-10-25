@@ -60,15 +60,22 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
-- `POST /quizzes/{id}/attempts` – start attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
-  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit (409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`).
+- `POST /quizzes/{id}/attempts/create` – create attempt in state `created` with short 5-minute expiry; returns `attempt_id`, `state="created"`, `nonce` (bound to `attempt_id`) for client to request Play Integrity attestation.
+- `POST /quizzes/{id}/attempts` – start attempt or activate a `created` attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
+  - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit across all open states (`created`, `active`, `warned`, `paused`) via 409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`.
+  - Device Integrity: Evaluates Play Integrity tokens with package name (`com.thinkbuddy.app`), nonce bound to `attempt_id`, and freshness (< 5 min) checks; in production, client-reported verdict fields are rejected in favor of cryptographic verification; unverified or self-declared-provider devices receive reduced mastery weight (0.7x) and an `unverified_device` flag.
+  - Dual Rate limits: 5 requests / min per authenticated user plus higher 25 requests / min per-IP ceiling.
 - `POST /attempts/{id}/items/{position}/answer` – submit one answer sequentially; returns `next_item` and `has_more`.
   - In assessed mode, correctness feedback is strictly withheld until submit (`is_correct: null`).
-  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
+  - Server-side anomaly detection: single anomaly logs a warning (state enters `warned`); pausing requires $\ge 2$ signals or 1 severe signal (`screenshot_attempt`, `chat_attempt`, `overlay`) and auto-resumes after 60s; deadline strictly never extends on pause. Invalidation strictly requires $\ge 2$ distinct anomaly signals.
+  - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 403 `ATTEMPT_PAUSED`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
+  - Dual Rate limits: 15 requests / min per authenticated user plus 60 requests / min per-IP ceiling.
 - `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state`.
-- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`). Idempotent on repeated calls.
-- `GET /attempts/{id}/review` – get attempt review with correct answers and explanations.
+- `POST /attempts/{id}/allow` – linked parent or admin override to allow an attempt that was warned, paused, or invalidated (verifies linked parent ownership; unpauses attempt, resets state, restores score, and records immutable `AuditLog` entry). Expired attempts cannot be revived (409 `CANNOT_REVIVE_EXPIRED_ATTEMPT`).
+- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`) idempotently via unique constraint with `ON CONFLICT DO NOTHING`.
+- `GET /attempts/{id}/review` – get attempt review with correct answers, explanations, and `unverified_device` status.
   - Strictly blocked with 403 `ATTEMPT_NOT_SUBMITTED` while attempt is active/unsubmitted!
+- `GET /internal/quiz/students/{id}/active-attempt` – internal service route checking whether student has an open assessed attempt (`created`, `active`, `warned`, `paused`). Strictly rejected by gateway with 404; requires signed HS256 JWT service token.
 
 ### Admin Question Bank (`/admin/questions*`, role: admin)
 - `POST /admin/questions` – create question item and isolated question key in `question_keys` table (zero leak to student routes, audit logged).
@@ -79,11 +86,29 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /attempt-items/{id}/broad` (text or image upload refs), `GET /submissions/{id}`.
 
 ### Chat (RAG)
-- `POST /chat/sessions`, `GET /chat/sessions`, `GET /chat/sessions/{id}`.
-- `POST /chat/sessions/{id}/messages` – SSE if `Accept: text/event-stream`, else JSON.
+- `POST /chat/sessions` – create chat session (student only; locked during active assessed quiz with 403 `QUIZ_IN_PROGRESS_CHAT_LOCKED`).
+- `GET /chat/sessions` – list active chat sessions for the authenticated student.
+- `GET /chat/sessions/{id}` – get chat session details and message history with authoritative citations (ownership verified; 404 if not owned).
+- `POST /chat/sessions/{id}/messages` – send prompt to AI tutor.
+  - Response Mode: SSE stream if `Accept: text/event-stream` or `stream: true`; full JSON fallback (`ChatMessageResponse`) if `stream: false`.
+  - Safeguards & Integrity:
+    - Active Assessed Quiz Lockout: Refused with 403 `QUIZ_IN_PROGRESS_CHAT_LOCKED` across all open attempt states (`created`, `active`, `warned`, `paused`); logs `chat_attempt` telemetry infraction.
+    - Daily Quota: Enforced against family entitlement (free plan: 20 messages/day, premium: 100 messages/day). Returns 429 `DAILY_CHAT_QUOTA_EXCEEDED` when reached.
+    - Rate Limits: 20 requests / min per authenticated student plus 60 requests / min per-IP ceiling.
+  - Grounded Citations (Rule 7 & 8): Every assistant answer carrying facts terminates with citations (`book_title`, `chapter_title`, `chapter_number`, `printed_page`, `chunk_id`). Authoritative printed page number is strictly rendered to users; internal PDF page index is kept separate.
+  - Low Confidence Fallback: If retrieval confidence is below threshold (< 0.45), returns explicit "not found in your textbook" message without guessing or hallucinating citations.
 
-### Progress & parent
-- `GET /students/{id}/progress/summary`, `/progress/mastery`, `/progress/weak-points`, `/progress/history`.
+### Progress, Mastery & Spaced Revision (P06)
+- `GET /progress/summary?student_id=` – overall mastery score, confidence, and active streak for student or linked parent dashboard.
+- `GET /progress/mastery?student_id=` – chapter-by-chapter mastery scores with confidence and parent-safe statuses (`mastered`, `needs_practice`, `not_enough_data`).
+- `GET /progress/weak-points?student_id=` – topics needing practice and suggested intervention review types (Requirement 7: strictly parent-safe wording; never labeled "weak").
+- `GET /progress/history?student_id=&days=30` – historical study progress, minutes studied, tasks completed, and quiz averages over lookback period.
+- `GET /revision/daily?student_id=` – 5-box Leitner spaced repetition items due today, ordered by box priority and capped by available daily revision minutes. Excludes subjects in blackout or past exam dates.
+- `POST /revision/{id}/review` – submit revision review result (`result="correct"` promotes to `box + 1`, `result="incorrect"` demotes to `box = 1`).
+- `POST /internal/jobs/daily-composition?student_id=` – internal worker endpoint triggering daily adaptive composition and planner regeneration under student advisory lock.
+- `POST /internal/jobs/three-day-review?student_id=` – internal worker endpoint triggering 3-day review cycle, assembling P04 review quiz, and regenerating planner.
+
+### Parent & Family
 - `GET /parents/me/students` – list of linked children.
 - `GET/PATCH /notifications/settings`.
 
@@ -94,8 +119,12 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /uploads/sign` – signed URL for answer photos; type/size limits enforced.
 
 ## 3. SSE event types (chat)
-`event: meta` (message id, retrieval confidence) → `event: token` (text delta) → `event: citation` (book, chapter, printed page, chunk id) → `event: done` (usage) | `event: error`.
-Clients must tolerate unknown events. Heartbeat comment every 15 s.
+1. `event: meta` – JSON payload with `message_id` and `retrieval_confidence` (0.0 to 1.0).
+2. `event: token` – incremental text chunk delta (`{"delta": "..."}`).
+3. `event: citation` – authoritative curriculum citation for each used chunk (`{"chunk_id": "...", "book_title": "...", "chapter_title": "...", "chapter_number": ..., "printed_page": ...}`).
+4. `event: done` – completion metrics (`{"tokens_in": ..., "tokens_out": ..., "latency_ms": ...}`).
+5. Heartbeat comment `: ping\n\n` emitted periodically (every 15s) on long pauses.
+Clients must tolerate unknown events. Disconnecting the client terminates token generation immediately.
 
 ## 4. Authorization rules
 Every route declares: allowed roles, ownership rule (self / linked parent / assigned teacher), and entitlement requirement. Missing declaration fails CI.

@@ -52,6 +52,188 @@
         }
       }
     },
+    "/internal/{path}": {
+      "patch": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Block Gateway Internal Direct",
+        "description": "Public gateway strictly refuses to expose internal routes.",
+        "operationId": "block_gateway_internal_direct_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/client/config": {
       "get": {
         "tags": [
@@ -1346,6 +1528,370 @@
         }
       }
     },
+    "/v1/v1/internal/{path}": {
+      "patch": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/{path}": {
+      "patch": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Block Gateway Internal Routes",
+        "description": "Public gateway strictly refuses to proxy internal routes.",
+        "operationId": "block_gateway_internal_routes_v1_internal__path__patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/students/{student_id}/quizzes": {
       "post": {
         "tags": [
@@ -1388,13 +1934,67 @@
         }
       }
     },
+    "/v1/quizzes/{quiz_id}/attempts/create": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Create Quiz Attempt Gateway",
+        "description": "Create a quiz attempt in 'created' state with short expiry for Play Integrity attestation.",
+        "operationId": "create_quiz_attempt_gateway_v1_quizzes__quiz_id__attempts_create_post",
+        "parameters": [
+          {
+            "name": "quiz_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Quiz Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAttemptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/quizzes/{quiz_id}/attempts": {
       "post": {
         "tags": [
           "Quiz"
         ],
         "summary": "Start Quiz Attempt Gateway",
-        "description": "Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving.",
+        "description": "Start a quiz attempt with dual user and IP rate limits.",
         "operationId": "start_quiz_attempt_gateway_v1_quizzes__quiz_id__attempts_post",
         "parameters": [
           {
@@ -1448,7 +2048,7 @@
           "Quiz"
         ],
         "summary": "Answer Quiz Item Gateway",
-        "description": "Submit answer for sequential quiz item with nonce and deadline verification.",
+        "description": "Submit answer for sequential quiz item with dual user and IP rate limits.",
         "operationId": "answer_quiz_item_gateway_v1_attempts__attempt_id__items__position__answer_post",
         "parameters": [
           {
@@ -1489,6 +2089,58 @@
                 "schema": {
                   "$ref": "#/components/schemas/AnswerItemResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/allow": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Allow Quiz Attempt Gateway",
+        "description": "Parent or admin override to allow an attempt that was warned, paused, or invalidated.",
+        "operationId": "allow_quiz_attempt_gateway_v1_attempts__attempt_id__allow_post",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -1648,19 +2300,116 @@
       }
     },
     "/v1/chat/sessions": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "List Chat Sessions Gateway",
+        "description": "List active chat sessions for the authenticated student.",
+        "operationId": "list_chat_sessions_gateway_v1_chat_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatSessionResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Chat Sessions Gateway V1 Chat Sessions Get"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "Chat"
         ],
         "summary": "Create Chat Session Gateway",
-        "description": "Create chat session (enforces quiz in-progress lockout).",
+        "description": "Create a new chat session (enforces quiz in-progress lockout).",
         "operationId": "create_chat_session_gateway_v1_chat_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ChatSessionCreateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Get Chat Session Gateway",
+        "description": "Get chat session details and message history with citations.",
+        "operationId": "get_chat_session_gateway_v1_chat_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -1673,7 +2422,7 @@
           "Chat"
         ],
         "summary": "Send Chat Message Gateway",
-        "description": "Send chat message (enforces quiz in-progress lockout).",
+        "description": "Send message to AI tutor with dual user/IP rate limiting and SSE streaming support.",
         "operationId": "send_chat_message_gateway_v1_chat_sessions__session_id__messages_post",
         "parameters": [
           {
@@ -1684,6 +2433,137 @@
               "type": "string",
               "format": "uuid",
               "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/progress/{path}": {
+      "get": {
+        "tags": [
+          "Progress"
+        ],
+        "summary": "Forward Progress Get",
+        "description": "Forward progress and mastery GET requests to Core Service.",
+        "operationId": "gateway_progress_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/revision/{path}": {
+      "get": {
+        "tags": [
+          "Revision"
+        ],
+        "summary": "Forward Revision Get",
+        "description": "Forward spaced revision GET requests to Core Service.",
+        "operationId": "gateway_revision_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Revision"
+        ],
+        "summary": "Forward Revision Post",
+        "description": "Forward spaced revision POST requests to Core Service.",
+        "operationId": "gateway_revision_post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
             }
           }
         ],
@@ -2008,6 +2888,22 @@
         ],
         "title": "AddChildResponse"
       },
+      "AllowAttemptRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "description": "Parent or admin reason for allowing the attempt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "AllowAttemptRequest"
+      },
       "AnswerItemRequest": {
         "properties": {
           "nonce": {
@@ -2246,6 +3142,11 @@
           "integrity_score": {
             "type": "number",
             "title": "Integrity Score"
+          },
+          "unverified_device": {
+            "type": "boolean",
+            "title": "Unverified Device",
+            "default": false
           },
           "started_at": {
             "anyOf": [
@@ -2569,6 +3470,326 @@
         ],
         "title": "ChapterSummary"
       },
+      "ChatCitationItem": {
+        "properties": {
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id"
+          },
+          "book_title": {
+            "type": "string",
+            "title": "Book Title"
+          },
+          "chapter_title": {
+            "type": "string",
+            "title": "Chapter Title"
+          },
+          "chapter_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Number"
+          },
+          "printed_page": {
+            "type": "integer",
+            "title": "Printed Page",
+            "description": "Printed textbook page number"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "Relevance / groundedness confidence score",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "book_title",
+          "chapter_title",
+          "printed_page"
+        ],
+        "title": "ChatCitationItem",
+        "description": "Public textbook citation item.\n\nPer Standing Rule 8:\nPrinted page number != PDF page index.\nOnly printed_page is exposed to students and parents; pdf_page_index remains strictly internal."
+      },
+      "ChatMessageCreateRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Content",
+            "description": "Student's query text"
+          },
+          "document_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional current textbook page context for retrieval boosting"
+          },
+          "stream": {
+            "type": "boolean",
+            "title": "Stream",
+            "description": "Whether to stream response via SSE (True) or return single JSON (False)",
+            "default": true
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language",
+            "description": "Preferred language code ('bn' or 'en'); defaults to student preference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "ChatMessageCreateRequest",
+        "description": "Incoming user message payload."
+      },
+      "ChatMessageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tokens_in": {
+            "type": "integer",
+            "title": "Tokens In",
+            "default": 0
+          },
+          "tokens_out": {
+            "type": "integer",
+            "title": "Tokens Out",
+            "default": 0
+          },
+          "latency_ms": {
+            "type": "integer",
+            "title": "Latency Ms",
+            "default": 0
+          },
+          "retrieval_confidence": {
+            "type": "number",
+            "title": "Retrieval Confidence",
+            "default": 0.0
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatCitationItem"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "role",
+          "content",
+          "language",
+          "created_at"
+        ],
+        "title": "ChatMessageResponse",
+        "description": "Assistant or user message item with citations and metrics."
+      },
+      "ChatSessionCreateRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "default": "New Conversation"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "type": "object",
+        "title": "ChatSessionCreateRequest",
+        "description": "Payload to initiate a new chat session."
+      },
+      "ChatSessionDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageResponse"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "student_id",
+          "title",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChatSessionDetailResponse",
+        "description": "Complete chat session including full message history and citations."
+      },
+      "ChatSessionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "student_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Student Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "student_id",
+          "title",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChatSessionResponse",
+        "description": "Metadata summary of a chat session."
+      },
       "ConceptSummary": {
         "properties": {
           "id": {
@@ -2598,6 +3819,64 @@
           "kind"
         ],
         "title": "ConceptSummary"
+      },
+      "CreateAttemptRequest": {
+        "properties": {
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          }
+        },
+        "type": "object",
+        "title": "CreateAttemptRequest"
+      },
+      "CreateAttemptResponse": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Attempt Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "nonce": {
+            "type": "string",
+            "title": "Nonce"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "attempt_token": {
+            "type": "string",
+            "title": "Attempt Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "state",
+          "nonce",
+          "attempt_token"
+        ],
+        "title": "CreateAttemptResponse"
       },
       "CreateFamilyRequest": {
         "properties": {
@@ -2721,6 +4000,51 @@
           "last_seen_at"
         ],
         "title": "DeviceResponse"
+      },
+      "DocumentContext": {
+        "properties": {
+          "book_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Id",
+            "description": "Book UUID"
+          },
+          "chapter_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Id",
+            "description": "Chapter UUID"
+          },
+          "printed_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printed Page",
+            "description": "Authoritative printed textbook page number (Rule 8)"
+          }
+        },
+        "type": "object",
+        "title": "DocumentContext",
+        "description": "Contextual textbook location currently open on the student's screen."
       },
       "FamilyResponse": {
         "properties": {
@@ -3051,6 +4375,11 @@
             "type": "string",
             "title": "Language"
           },
+          "pool": {
+            "type": "string",
+            "title": "Pool",
+            "default": "both"
+          },
           "stem": {
             "additionalProperties": true,
             "type": "object",
@@ -3250,6 +4579,18 @@
       },
       "StartAttemptRequest": {
         "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
           "device_id": {
             "anyOf": [
               {
@@ -3260,6 +4601,28 @@
               }
             ],
             "title": "Device Id"
+          },
+          "integrity_verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Verdict"
+          },
+          "integrity_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity Token"
           }
         },
         "type": "object",

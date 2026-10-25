@@ -4,17 +4,21 @@ Per docs/03_DATA_MODEL.md §4, §6 and docs/05_SECURE_QUIZ.md:
 - Strictly queries `question_keys` inside this service only.
 - Evaluates MCQ and short answers.
 - Queues broad answers for rubric review.
-- Writes `learning_signals` records for adaptive retention and mastery updates.
+- Writes `learning_signals` records with ON CONFLICT DO NOTHING idempotency.
+- Applies reduced mastery weight for unverified devices (0.7x) and recycled items (0.7x).
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.quiz.models import (
@@ -27,6 +31,20 @@ from core.quiz.models import (
 )
 
 logger = logging.getLogger("thinkbuddy.quiz.grading")
+
+
+BN_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff\u00a0]")
+
+
+def normalize_bangla_text(text: str | None) -> str:
+    """Normalize Bangla and English text for fair and robust short answer grading."""
+    if not text:
+        return ""
+    s = unicodedata.normalize("NFC", str(text))
+    s = ZERO_WIDTH_CHARS.sub("", s)
+    s = s.translate(BN_DIGIT_MAP)
+    return " ".join(s.strip().lower().split())
 
 
 class QuizGradingService:
@@ -58,9 +76,7 @@ class QuizGradingService:
             return False
 
         # Fetch question details for type
-        q_res = await self.db.execute(
-            select(Question).where(Question.id == item.question_id)
-        )
+        q_res = await self.db.execute(select(Question).where(Question.id == item.question_id))
         question = q_res.scalar_one_or_none()
         q_type = question.type if question else "mcq"
 
@@ -74,9 +90,11 @@ class QuizGradingService:
             elif q_key.correct_text and selected_opt == str(q_key.correct_text).strip():
                 is_correct = True
         elif q_type == "short":
-            student_text = str(response.get("text", "")).strip().lower()
-            expected_text = str(q_key.correct_text or "").strip().lower()
-            is_correct = student_text == expected_text
+            norm_student = normalize_bangla_text(response.get("text"))
+            accepted = [normalize_bangla_text(q_key.correct_text)]
+            if q_key.accepted_answers:
+                accepted.extend([normalize_bangla_text(a) for a in q_key.accepted_answers if a])
+            is_correct = any(norm_student == acc for acc in accepted if acc)
         elif q_type == "broad":
             # Broad subjective answer: queue broad submission
             submission = BroadSubmission(
@@ -90,12 +108,13 @@ class QuizGradingService:
             is_correct = False  # Pending evaluation
 
         item.is_correct = is_correct
-        item.points = 1.0 if is_correct else 0.0
+        max_points = 0.7 if getattr(item, "is_recycled", False) else 1.0
+        item.points = max_points if is_correct else 0.0
 
         return is_correct
 
     async def finalize_and_emit_signals(self, attempt: QuizAttempt) -> float:
-        """Compute final score, update attempt, and write learning signals."""
+        """Compute final score, update attempt, and write learning signals with ON CONFLICT DO NOTHING."""
         items_res = await self.db.execute(
             select(AttemptItem).where(AttemptItem.attempt_id == attempt.id)
         )
@@ -106,46 +125,64 @@ class QuizGradingService:
             return 0.0
 
         total_points = sum(it.points for it in items)
-        max_points = float(len(items))
-        final_score = round((total_points / max_points) * 100.0, 1) if max_points > 0 else 0.0
+        max_possible = sum(0.7 if getattr(it, "is_recycled", False) else 1.0 for it in items)
+        final_score = round((total_points / max_possible) * 100.0, 1) if max_possible > 0 else 0.0
         attempt.score = final_score
 
-        # Emit learning signals for mistakes and slow responses
+        # Reduced mastery weight scaling for unverified devices (0.7x)
+        device_mult = 0.7 if getattr(attempt, "unverified_device", False) else 1.0
+
+        # Emit learning signals for mistakes and slow responses idempotently via ON CONFLICT DO NOTHING
         for it in items:
+            recycled_mult = 0.7 if getattr(it, "is_recycled", False) else 1.0
+
             # Mistake signal
             if it.is_correct is False:
-                # Fetch question concept/chapter
-                q_res = await self.db.execute(
-                    select(Question).where(Question.id == it.question_id)
-                )
+                q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    signal = LearningSignal(
-                        student_id=attempt.student_id,
-                        source="quiz_wrong",
-                        chapter_id=q.chapter_id,
-                        concept_id=q.concept_id,
-                        weight=1.0,
-                        ref_id=str(it.id),
+                    weight_wrong = round(1.0 * device_mult * recycled_mult, 2)
+                    stmt_wrong = (
+                        pg_insert(LearningSignal)
+                        .values(
+                            id=uuid.uuid4(),
+                            student_id=attempt.student_id,
+                            source="quiz_wrong",
+                            chapter_id=q.chapter_id,
+                            concept_id=q.concept_id,
+                            weight=weight_wrong,
+                            ref_id=str(it.id),
+                            at=datetime.now(UTC),
+                        )
+                        .on_conflict_do_nothing(
+                            index_elements=["student_id", "source", "ref_id"]
+                        )
                     )
-                    self.db.add(signal)
+                    await self.db.execute(stmt_wrong)
 
             # Slow response signal (> 90s)
             if it.time_spent_ms > 90000:
-                q_res = await self.db.execute(
-                    select(Question).where(Question.id == it.question_id)
-                )
+                q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    signal_slow = LearningSignal(
-                        student_id=attempt.student_id,
-                        source="quiz_slow",
-                        chapter_id=q.chapter_id,
-                        concept_id=q.concept_id,
-                        weight=0.5,
-                        ref_id=str(it.id),
+                    weight_slow = round(0.5 * device_mult * recycled_mult, 2)
+                    stmt_slow = (
+                        pg_insert(LearningSignal)
+                        .values(
+                            id=uuid.uuid4(),
+                            student_id=attempt.student_id,
+                            source="quiz_slow",
+                            chapter_id=q.chapter_id,
+                            concept_id=q.concept_id,
+                            weight=weight_slow,
+                            ref_id=str(it.id),
+                            at=datetime.now(UTC),
+                        )
+                        .on_conflict_do_nothing(
+                            index_elements=["student_id", "source", "ref_id"]
+                        )
                     )
-                    self.db.add(signal_slow)
+                    await self.db.execute(stmt_slow)
 
         await self.db.flush()
         return final_score

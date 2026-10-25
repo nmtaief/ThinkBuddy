@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.auth.router import (
     AuthExchangeRequest,
@@ -18,9 +18,16 @@ from core.auth.router import (
     TokenResponse,
     UserResponse,
 )
-from core.auth.tokens import hash_link_code
+from core.auth.tokens import decode_access_jwt, hash_link_code
+from core.chat.schemas import (
+    ChatMessageCreateRequest,
+    ChatSessionCreateRequest,
+    ChatSessionDetailResponse,
+    ChatSessionResponse,
+)
+from core.common.config import settings
 from core.common.logging import request_id_ctx
-from core.common.rate_limit import RateLimiter, get_trusted_client_ip
+from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip
 from core.curriculum.schemas import (
     BookListResponse,
     BookSummary,
@@ -94,6 +101,39 @@ async def forward_to_core(request: Request, json_body: Any = None) -> Response:
     )
 
 
+async def forward_stream_to_core(request: Request, json_body: Any = None) -> Response:
+    """Forward incoming streaming Gateway request to Core and stream chunks in real-time."""
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    headers.pop("content-length", None)
+
+    if json_body is None and request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            json_body = await request.json()
+        except Exception:
+            json_body = None
+
+    status_code, resp_headers, stream_gen = await core_client.stream_request(
+        method=request.method,
+        path=request.url.path,
+        params=dict(request.query_params),
+        json_data=json_body,
+        headers=headers,
+    )
+
+    clean_headers: dict[str, str] = {}
+    for k, v in resp_headers.items():
+        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}:
+            clean_headers[k] = v
+
+    return StreamingResponse(
+        stream_gen,
+        status_code=status_code,
+        headers=clean_headers,
+        media_type=resp_headers.get("content-type", "text/event-stream"),
+    )
+
+
 def _get_client_rate_key(request: Request, prefix: str) -> str:
     trusted_ip = get_trusted_client_ip(request)
     return f"rl:{prefix}:ip:{trusted_ip}"
@@ -129,6 +169,9 @@ async def get_client_config(
             "teacher_reviews": False,  # Beta flag: teacher features flagged off per architecture
             "broad_questions_ai_assist": True,
             "bangla_voice_input": False,
+            "rag_chat": settings.FEATURE_RAG_CHAT_ENABLED,
+            "progress_mastery": settings.FEATURE_PROGRESS_MASTERY_ENABLED,
+            "spaced_revision": settings.FEATURE_SPACED_REVISION_ENABLED,
         },
         "entitlements": {
             "daily_chat_quota": 50,
@@ -615,15 +658,40 @@ async def submit_student_settings_change_request(
 # Quiz Engine (docs/04_API_CONTRACT.md §2, docs/05_SECURE_QUIZ.md)
 # -------------------------------------------------------------------------
 from core.quiz.schemas import (
+    AllowAttemptRequest,
     AnswerItemRequest,
     AnswerItemResponse,
     AttemptEventRequest,
     AttemptEventResponse,
     AttemptReviewResponse,
+    CreateAttemptRequest,
+    CreateAttemptResponse,
     StartAttemptRequest,
     StartAttemptResponse,
     SubmitAttemptResponse,
 )
+
+
+def _get_authenticated_user_id(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ").strip()
+        try:
+            claims = decode_access_jwt(token)
+            return claims.get("sub")
+        except Exception:
+            return None
+    return None
+
+
+@router.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@router.api_route("/v1/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def block_gateway_internal_routes(path: str) -> Response:
+    """Public gateway strictly refuses to proxy internal routes."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"error": {"code": "NOT_FOUND", "message": "Resource not found."}},
+    )
 
 
 @router.post(
@@ -637,6 +705,21 @@ async def create_student_quiz_gateway(student_id: uuid.UUID, request: Request) -
 
 
 @router.post(
+    "/quizzes/{quiz_id}/attempts/create",
+    response_model=CreateAttemptResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def create_quiz_attempt_gateway(
+    quiz_id: uuid.UUID,
+    payload: CreateAttemptRequest,
+    request: Request,
+) -> Response:
+    """Create a quiz attempt in 'created' state with short expiry for Play Integrity attestation."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
     "/quizzes/{quiz_id}/attempts",
     response_model=StartAttemptResponse,
     status_code=status.HTTP_201_CREATED,
@@ -647,7 +730,54 @@ async def start_quiz_attempt_gateway(
     payload: StartAttemptRequest,
     request: Request,
 ) -> Response:
-    """Start a quiz attempt. Enforces platform rules, deadline, and sequential question serving."""
+    """Start a quiz attempt with dual user and IP rate limits."""
+    client_ip = get_trusted_client_ip(request)
+    device_id = payload.device_id or request.headers.get("X-Device-Id")
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (5 requests / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("start_attempt_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=5,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many quiz attempt requests for this user account. Please wait.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (25 requests / min per IP)
+    ip_rate_key = build_rate_limit_key("start_attempt_ip", client_ip, device_id)
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=25,
+        window_seconds=60,
+    )
+    if not ip_ok:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(ip_retry)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests from this IP network. Please wait.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
@@ -662,7 +792,66 @@ async def answer_quiz_item_gateway(
     payload: AnswerItemRequest,
     request: Request,
 ) -> Response:
-    """Submit answer for sequential quiz item with nonce and deadline verification."""
+    """Submit answer for sequential quiz item with dual user and IP rate limits."""
+    client_ip = get_trusted_client_ip(request)
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (20 answers / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("answer_item_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=20,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many answer submissions for this user account. Please slow down.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (60 answers / min per IP)
+    ip_rate_key = build_rate_limit_key("answer_item_ip", client_ip, str(attempt_id))
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=60,
+        window_seconds=60,
+    )
+    if not ip_ok:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(ip_retry)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many answer submissions from this network. Please slow down.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+@router.post(
+    "/attempts/{attempt_id}/allow",
+    tags=["Quiz"],
+)
+async def allow_quiz_attempt_gateway(
+    attempt_id: uuid.UUID,
+    payload: AllowAttemptRequest,
+    request: Request,
+) -> Response:
+    """Parent or admin override to allow an attempt that was warned, paused, or invalidated."""
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
@@ -707,17 +896,42 @@ async def review_quiz_attempt_gateway(
 
 
 # -------------------------------------------------------------------------
-# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2)
+# Chat & In-App AI Tutor (docs/04_API_CONTRACT.md §2, §3)
 # -------------------------------------------------------------------------
 
 
 @router.post(
     "/chat/sessions",
+    response_model=ChatSessionResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["Chat"],
 )
-async def create_chat_session_gateway(request: Request) -> Response:
-    """Create chat session (enforces quiz in-progress lockout)."""
+async def create_chat_session_gateway(
+    request: Request,
+    payload: ChatSessionCreateRequest | None = None,
+) -> Response:
+    """Create a new chat session (enforces quiz in-progress lockout)."""
+    body = payload.model_dump(mode="json") if payload else {}
+    return await forward_to_core(request, json_body=body)
+
+
+@router.get(
+    "/chat/sessions",
+    response_model=list[ChatSessionResponse],
+    tags=["Chat"],
+)
+async def list_chat_sessions_gateway(request: Request) -> Response:
+    """List active chat sessions for the authenticated student."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/chat/sessions/{session_id}",
+    response_model=ChatSessionDetailResponse,
+    tags=["Chat"],
+)
+async def get_chat_session_gateway(session_id: uuid.UUID, request: Request) -> Response:
+    """Get chat session details and message history with citations."""
     return await forward_to_core(request)
 
 
@@ -725,8 +939,88 @@ async def create_chat_session_gateway(request: Request) -> Response:
     "/chat/sessions/{session_id}/messages",
     tags=["Chat"],
 )
-async def send_chat_message_gateway(session_id: uuid.UUID, request: Request) -> Response:
-    """Send chat message (enforces quiz in-progress lockout)."""
+async def send_chat_message_gateway(
+    session_id: uuid.UUID,
+    payload: ChatMessageCreateRequest,
+    request: Request,
+) -> Response:
+    """Send message to AI tutor with dual user/IP rate limiting and SSE streaming support."""
+    client_ip = get_trusted_client_ip(request)
+    user_id = _get_authenticated_user_id(request)
+
+    # 1. User-level rate limit (20 chat requests / min per user)
+    if user_id:
+        user_rate_key = build_rate_limit_key("chat_message_user", user_id)
+        user_ok, user_retry = await RateLimiter.check_rate_limit(
+            key=user_rate_key,
+            max_requests=20,
+            window_seconds=60,
+        )
+        if not user_ok:
+            req_id = request_id_ctx.get() or ""
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(user_retry)},
+                content={
+                    "error": {
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "message": "Too many chat messages. Please wait a moment.",
+                        "request_id": req_id,
+                    }
+                },
+            )
+
+    # 2. IP-level ceiling (60 chat requests / min per IP)
+    ip_rate_key = build_rate_limit_key("chat_message_ip", client_ip)
+    ip_ok, ip_retry = await RateLimiter.check_rate_limit(
+        key=ip_rate_key,
+        max_requests=60,
+        window_seconds=60,
+    )
+    if not ip_ok:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(ip_retry)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests from this network. Please wait.",
+                    "request_id": req_id,
+                }
+            },
+        )
+
+    accept = request.headers.get("accept", "")
+    wants_sse = ("text/event-stream" in accept) or payload.stream
+
+    if wants_sse:
+        return await forward_stream_to_core(request, json_body=payload.model_dump(mode="json"))
+
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
+# -------------------------------------------------------------------------
+# Progress & Mastery (docs/04_API_CONTRACT.md §7)
+# -------------------------------------------------------------------------
+@router.get("/progress/{path:path}", tags=["Progress"], operation_id="gateway_progress_get")
+async def forward_progress_get(path: str, request: Request) -> Response:
+    """Forward progress and mastery GET requests to Core Service."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Spaced Revision (docs/04_API_CONTRACT.md §7)
+# -------------------------------------------------------------------------
+@router.get("/revision/{path:path}", tags=["Revision"], operation_id="gateway_revision_get")
+async def forward_revision_get(path: str, request: Request) -> Response:
+    """Forward spaced revision GET requests to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post("/revision/{path:path}", tags=["Revision"], operation_id="gateway_revision_post")
+async def forward_revision_post(path: str, request: Request) -> Response:
+    """Forward spaced revision POST requests to Core Service."""
     return await forward_to_core(request)
 
 

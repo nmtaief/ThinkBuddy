@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +49,7 @@ async def create_question_admin(
         source_chunk_ids=payload.source_chunk_ids,
         origin=payload.origin,
         review_status=payload.review_status,
+        pool=payload.pool,
         variant_group_id=payload.variant_group_id,
     )
     db.add(q)
@@ -60,6 +60,7 @@ async def create_question_admin(
         question_id=q.id,
         correct_option_id=payload.correct_option_id,
         correct_text=payload.correct_text,
+        accepted_answers=payload.accepted_answers,
         grading_rules=payload.grading_rules,
         explanation=payload.explanation,
     )
@@ -110,6 +111,7 @@ async def import_questions_bulk(
             source_chunk_ids=payload.source_chunk_ids,
             origin=payload.origin,
             review_status=payload.review_status,
+            pool=payload.pool,
             variant_group_id=payload.variant_group_id,
         )
         db.add(q)
@@ -119,6 +121,7 @@ async def import_questions_bulk(
             question_id=q.id,
             correct_option_id=payload.correct_option_id,
             correct_text=payload.correct_text,
+            accepted_answers=payload.accepted_answers,
             grading_rules=payload.grading_rules,
             explanation=payload.explanation,
         )

@@ -62,6 +62,9 @@ async def import_jsonl_file(file_path: Path, admin_id: uuid.UUID | None = None) 
                 concept_id = data.get("concept_id")
                 variant_grp = uuid.UUID(data["variant_group_id"]) if "variant_group_id" in data and data["variant_group_id"] else None
 
+                pool = data.get("pool", "both")
+                accepted_answers = data.get("accepted_answers", [])
+
                 q = Question(
                     type=q_type,
                     chapter_id=None,
@@ -74,6 +77,7 @@ async def import_jsonl_file(file_path: Path, admin_id: uuid.UUID | None = None) 
                     explanation=explanation,
                     origin=origin,
                     review_status=review_status,
+                    pool=pool,
                     variant_group_id=variant_grp,
                 )
                 session.add(q)
@@ -84,6 +88,7 @@ async def import_jsonl_file(file_path: Path, admin_id: uuid.UUID | None = None) 
                     question_id=q.id,
                     correct_option_id=correct_opt,
                     correct_text=correct_text,
+                    accepted_answers=accepted_answers,
                     grading_rules={},
                     explanation=explanation,
                 )

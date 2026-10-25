@@ -456,7 +456,7 @@ async def test_ai_planner_provider_normal_success() -> None:
         provider = AiPlannerProvider(
             client=client,
             service_url="http://mock-ai",
-            api_key="valid-key",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
         )
         result = await provider.generate_plan(ctx)
 
@@ -479,7 +479,7 @@ async def test_ai_planner_provider_fallback_on_500_error() -> None:
         provider = AiPlannerProvider(
             client=client,
             service_url="http://mock-ai",
-            api_key="valid-key",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
             max_retries=1,
         )
         result = await provider.generate_plan(ctx)
@@ -500,7 +500,7 @@ async def test_ai_planner_provider_fallback_on_untrusted_hard_violation() -> Non
         provider = AiPlannerProvider(
             client=client,
             service_url="http://mock-ai",
-            api_key="valid-key",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
         )
         result = await provider.generate_plan(ctx)
 
@@ -1159,7 +1159,7 @@ async def test_ai_planner_stubs_quizzes_revision_drafts_explain() -> None:
         provider = AiPlannerProvider(
             client=client,
             service_url="http://mock-ai",
-            api_key="valid-key",
+            api_key="test-ai-planner-secret-key-32bytes-min!",
         )
 
         # 1. Propose Quizzes

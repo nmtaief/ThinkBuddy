@@ -112,5 +112,14 @@ async def readyz() -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
+@app.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def block_gateway_internal_direct(path: str) -> JSONResponse:
+    """Public gateway strictly refuses to expose internal routes."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"error": {"code": "NOT_FOUND", "message": "Endpoint not found"}},
+    )
+
+
 # Mount public API routes
 app.include_router(v1_router)

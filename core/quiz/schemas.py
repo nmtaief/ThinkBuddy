@@ -8,8 +8,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Any, Literal
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Public Question Schemas (Zero Leakage)
@@ -18,27 +18,31 @@ from pydantic import BaseModel, Field
 
 class QuestionOptionPublic(BaseModel):
     """Option with opaque ID and localized text/blocks."""
+
     id: str = Field(description="Opaque option identifier")
     text: str = Field(description="Localized option text (Bangla/English)")
 
 
 class QuestionPublic(BaseModel):
     """Question representation served to students during active quizzes.
-    
+
     Zero answer keys, rubrics, or explanations are present.
     """
+
     id: uuid.UUID
     type: Literal["mcq", "short", "broad"]
     chapter_id: uuid.UUID | None = None
     concept_id: str | None = None
     difficulty: float
     language: str
+    pool: str = "both"
     stem: dict[str, Any]
     options: list[QuestionOptionPublic] = Field(default_factory=list)
 
 
 class AttemptItemPublic(BaseModel):
     """Sequential quiz item served to the student."""
+
     position: int
     nonce: str
     time_limit_s: int | None = None
@@ -50,8 +54,23 @@ class AttemptItemPublic(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class StartAttemptRequest(BaseModel):
+class CreateAttemptRequest(BaseModel):
     device_id: str | None = None
+
+
+class CreateAttemptResponse(BaseModel):
+    attempt_id: uuid.UUID
+    state: str
+    nonce: str
+    deadline_at: datetime | None = None
+    attempt_token: str
+
+
+class StartAttemptRequest(BaseModel):
+    attempt_id: uuid.UUID | None = None
+    device_id: str | None = None
+    integrity_verdict: str | None = None
+    integrity_token: str | None = None
 
 
 class StartAttemptResponse(BaseModel):
@@ -126,9 +145,14 @@ class AttemptReviewResponse(BaseModel):
     score: float
     total_possible_score: float
     integrity_score: float
+    unverified_device: bool = False
     started_at: datetime | None
     submitted_at: datetime | None
     items: list[AttemptItemReview]
+
+
+class AllowAttemptRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500, description="Parent or admin reason for allowing the attempt")
 
 
 # ---------------------------------------------------------------------------
@@ -146,10 +170,12 @@ class QuestionAdminCreate(BaseModel):
     options: list[QuestionOptionPublic] = Field(default_factory=list)
     correct_option_id: str | None = None
     correct_text: str | None = None
+    accepted_answers: list[str] = Field(default_factory=list)
     grading_rules: dict[str, Any] = Field(default_factory=dict)
     explanation: dict[str, Any] = Field(default_factory=dict)
     rubric: dict[str, Any] = Field(default_factory=dict)
     source_chunk_ids: list[str] = Field(default_factory=list)
     origin: str = "curated"
     review_status: str = "approved"
+    pool: str = "both"
     variant_group_id: uuid.UUID | None = None
