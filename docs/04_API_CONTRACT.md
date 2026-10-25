@@ -60,19 +60,20 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
-- `POST /quizzes/{id}/attempts` – start attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
+- `POST /quizzes/{id}/attempts/create` – create attempt in state `created` with short 5-minute expiry; returns `attempt_id`, `state="created"`, `nonce` (bound to `attempt_id`) for client to request Play Integrity attestation.
+- `POST /quizzes/{id}/attempts` – start attempt or activate a `created` attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
   - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit across all open states (`created`, `active`, `warned`, `paused`) via 409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`.
-  - Device Integrity: Evaluates Play Integrity tokens with package name (`com.thinkbuddy.app`), nonce, and freshness (< 5 min) checks; stubs report `UNVERIFIED` and are forbidden outside `ENV=local`; non-Play devices receive `LOW_TRUST` with scrutiny.
+  - Device Integrity: Evaluates Play Integrity tokens with package name (`com.thinkbuddy.app`), nonce bound to `attempt_id`, and freshness (< 5 min) checks; in production, client-reported verdict fields are rejected in favor of cryptographic verification; unverified or self-declared-provider devices receive reduced mastery weight (0.7x) and an `unverified_device` flag.
   - Dual Rate limits: 5 requests / min per authenticated user plus higher 25 requests / min per-IP ceiling.
 - `POST /attempts/{id}/items/{position}/answer` – submit one answer sequentially; returns `next_item` and `has_more`.
   - In assessed mode, correctness feedback is strictly withheld until submit (`is_correct: null`).
-  - Server-side anomaly detection: checks too-fast responses (scaled by question type and stem character length), unnatural answer submission right after focus loss, and suspicious streaks. Invalidation strictly requires $\ge 2$ distinct anomaly signals; deadline never extends on pause.
+  - Server-side anomaly detection: single anomaly logs a warning (state enters `warned`); pausing requires $\ge 2$ signals or 1 severe signal (`screenshot_attempt`, `chat_attempt`, `overlay`) and auto-resumes after 60s; deadline strictly never extends on pause. Invalidation strictly requires $\ge 2$ distinct anomaly signals.
   - Errors: 401 `INVALID_ATTEMPT_TOKEN`, 403 `ATTEMPT_PAUSED`, 409 `INVALID_ITEM_NONCE`, 409 `ITEM_ALREADY_ANSWERED`, 410 `ATTEMPT_EXPIRED`.
   - Dual Rate limits: 15 requests / min per authenticated user plus 60 requests / min per-IP ceiling.
 - `POST /attempts/{id}/events` – record anti-cheat telemetry events (`app_background`, `focus_lost`, `screenshot_attempt`, `multi_window`, `overlay`, `clipboard`). Returns updated `integrity_score` and `state`.
-- `POST /attempts/{id}/allow` – linked parent or admin override to allow an attempt that was warned, paused, or invalidated (verifies linked parent ownership; resets state, restores score, and records immutable `AuditLog` entry).
-- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`) idempotently.
-- `GET /attempts/{id}/review` – get attempt review with correct answers and explanations.
+- `POST /attempts/{id}/allow` – linked parent or admin override to allow an attempt that was warned, paused, or invalidated (verifies linked parent ownership; unpauses attempt, resets state, restores score, and records immutable `AuditLog` entry). Expired attempts cannot be revived (409 `CANNOT_REVIVE_EXPIRED_ATTEMPT`).
+- `POST /attempts/{id}/submit` – finalize attempt; evaluates score, updates attempt state, and emits `learning_signals` (`quiz_wrong`, `quiz_slow`) idempotently via unique constraint with `ON CONFLICT DO NOTHING`.
+- `GET /attempts/{id}/review` – get attempt review with correct answers, explanations, and `unverified_device` status.
   - Strictly blocked with 403 `ATTEMPT_NOT_SUBMITTED` while attempt is active/unsubmitted!
 - `GET /internal/quiz/students/{id}/active-attempt` – internal service route checking whether student has an open assessed attempt (`created`, `active`, `warned`, `paused`). Strictly rejected by gateway with 404; requires signed HS256 JWT service token.
 

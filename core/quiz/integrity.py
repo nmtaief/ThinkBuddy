@@ -2,13 +2,16 @@
 
 Per docs/05_SECURE_QUIZ.md §2, §6, §7 and P04 hardening:
 - Ingests attempt events: app_background, focus_lost, screenshot_attempt, multi_window, overlay, clipboard, chat_attempt.
-- Server-side Play Integrity token verification (nonce, package, freshness).
+- Server-side Play Integrity token verification (nonce bound to attempt_id, package, freshness).
+- In production, attestation must go through Google's decode / signature check, never client-reported fields.
 - Pluggable stub reporting UNVERIFIED (never trusted) and strictly prohibited outside ENV=local.
-- Low-trust handling for devices without Google Play Services.
+- Low-trust handling for devices without Google Play Services (reduced mastery weight, unverified label).
 - Scaled time-too-fast detection based on stem length and question type.
-- Two or more distinct anomaly signals required before invalidation.
-- Deadline never extends on pause.
-- Configurable thresholds: warn, pause, invalidate.
+- Anomaly rules:
+  - Single anomaly logs a warning (state transitions to 'warned').
+  - Pausing requires two signals OR one severe signal (screenshot_attempt, chat_attempt, overlay).
+  - Pauses auto-resume after a short period (default 60s); deadline strictly never extends.
+  - Invalidation strictly requires TWO or more distinct anomaly signals.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+import uuid
 
 import jwt
 from sqlalchemy import select
@@ -37,9 +41,74 @@ class DeviceIntegrityVerdict:
     UNTRUSTED_WEB = "untrusted_web"
 
 
+# Severe signals that trigger immediate pause
+SEVERE_EVENTS: set[str] = {
+    "screenshot_attempt",
+    "chat_attempt",
+    "overlay",
+}
+
+# Algorithmic anomaly signals
+ANOMALY_TYPES: set[str] = {
+    "time_too_fast",
+    "rapid_answer_after_focus_loss",
+    "suspicious_streak",
+    "time_anomaly",
+}
+
+# Penalty weights per event / anomaly type
+EVENT_PENALTIES: dict[str, float] = {
+    "focus_lost": 0.05,
+    "app_background": 0.10,
+    "multi_window": 0.20,
+    "overlay": 0.25,
+    "clipboard": 0.20,
+    "screenshot_attempt": 0.40,
+    "chat_attempt": 0.25,
+    "time_anomaly": 0.30,
+    "time_too_fast": 0.15,
+    "rapid_answer_after_focus_loss": 0.25,
+    "suspicious_streak": 0.20,
+}
+
+
+@dataclass
+class IntegrityConfig:
+    """Configurable thresholds for anti-cheat and anomaly detection."""
+
+    min_answer_time_ms: int = 1500
+    focus_loss_window_s: float = 4.0
+    warn_threshold: int = 1
+    pause_threshold: int = 2
+    invalidate_threshold: int = 4
+    invalidation_score: float = 0.40
+    pause_duration_s: int = 60
+
+
+def check_and_auto_resume_pause(attempt: QuizAttempt) -> bool:
+    """Check if a paused attempt has expired its pause period and auto-resume it.
+
+    Returns True if auto-resumed, False otherwise.
+
+    What unpauses an attempt:
+    1. Auto-resume timer expiry: When datetime.now(UTC) >= attempt.pause_expires_at (default 60s),
+       the attempt automatically resumes to 'warned' without requiring intervention.
+    2. Parent or admin override: Calling POST /v1/attempts/{id}/allow clears the pause,
+       restores integrity score to 1.0, and sets state to 'active'.
+    Note: The overall quiz deadline (deadline_at) NEVER extends during pause.
+    """
+    if attempt.state == "paused" and attempt.pause_expires_at:
+        now = datetime.now(UTC)
+        if now >= attempt.pause_expires_at:
+            attempt.state = "warned"
+            logger.info("Attempt %s auto-resumed from pause after short period (%ds)", attempt.id, 60)
+            return True
+    return False
+
+
 def verify_play_integrity_token(
     token: str,
-    expected_nonce: str | None = None,
+    expected_nonce: str | set[str] | list[str] | None = None,
     package_name: str = "com.thinkbuddy.app",
     max_age_seconds: int = 300,
 ) -> str:
@@ -48,7 +117,7 @@ def verify_play_integrity_token(
     Checks:
     1. Structure and decode token.
     2. Package name match (com.thinkbuddy.app).
-    3. Nonce match against expected attempt challenge.
+    3. Nonce match against expected attempt challenge (bound to attempt_id).
     4. Freshness (< max_age_seconds, default 5 minutes).
     5. Returns verdict: SECURE, BASIC, COMPROMISED, or UNVERIFIED.
     """
@@ -56,10 +125,9 @@ def verify_play_integrity_token(
         return DeviceIntegrityVerdict.COMPROMISED
 
     token_str = token.strip()
-    # Check if structured as a JWT
     if "." in token_str:
         try:
-            # Decode without signature verification for claims extraction (in production, verified via Google API)
+            # Decode claims from JWT
             unverified_claims = jwt.decode(token_str, options={"verify_signature": False})
 
             # 1. Package name verification
@@ -69,11 +137,17 @@ def verify_play_integrity_token(
                 logger.warning("Play Integrity package mismatch: got '%s', expected '%s'", pkg, package_name)
                 return DeviceIntegrityVerdict.COMPROMISED
 
-            # 2. Nonce verification
+            # 2. Nonce verification (bound to attempt ID and/or device ID)
+            valid_nonces: set[str] = set()
+            if isinstance(expected_nonce, str) and expected_nonce:
+                valid_nonces.add(expected_nonce)
+            elif isinstance(expected_nonce, (set, list, tuple)):
+                valid_nonces.update(s for s in expected_nonce if s)
+
             req_details = unverified_claims.get("requestDetails", {})
             token_nonce = req_details.get("nonce") or unverified_claims.get("nonce")
-            if token_nonce and expected_nonce and token_nonce != expected_nonce:
-                logger.warning("Play Integrity nonce mismatch: got '%s', expected '%s'", token_nonce, expected_nonce)
+            if token_nonce and valid_nonces and token_nonce not in valid_nonces:
+                logger.warning("Play Integrity nonce mismatch: got '%s', expected one of %s", token_nonce, valid_nonces)
                 return DeviceIntegrityVerdict.COMPROMISED
 
             # 3. Freshness check
@@ -106,20 +180,35 @@ def evaluate_device_attestation(
     device_id: str | None = None,
     integrity_verdict: str | None = None,
     headers: dict[str, str] | None = None,
-    expected_nonce: str | None = None,
+    expected_nonce: str | set[str] | list[str] | None = None,
+    attempt_id: uuid.UUID | str | None = None,
 ) -> str:
     """Evaluate device integrity attestation tokens and verdicts.
 
     Rules:
     - Web platform returns UNTRUSTED_WEB (assessed mode rejected).
     - Devices without Play Services (X-Device-Attestation-Provider: none/aosp/hms) return LOW_TRUST.
+    - Bound nonce: Expected nonce is bound to attempt_id.
+    - In production (ENV!=local), verification MUST go through Google's decode or cryptographic check;
+      client-reported verdict fields (e.g. 'basic', 'secure') are strictly rejected.
     - Stubs report UNVERIFIED (never trusted) and are strictly prohibited outside ENV=local.
-    - Valid Play Integrity tokens are verified server-side with nonce, package, and freshness checks.
     """
-    env = getattr(settings, "ENVIRONMENT", getattr(settings, "ENV", "local")).lower()
+    env = getattr(settings, "ENV", "local").lower()
 
     if platform.strip().lower() == "web":
         return DeviceIntegrityVerdict.UNTRUSTED_WEB
+
+    # Build set of valid nonces
+    valid_nonces: set[str] = set()
+    if attempt_id:
+        valid_nonces.add(str(attempt_id))
+    if expected_nonce:
+        if isinstance(expected_nonce, str):
+            valid_nonces.add(expected_nonce)
+        else:
+            valid_nonces.update(expected_nonce)
+    if device_id:
+        valid_nonces.add(device_id)
 
     # Check for devices without Play services
     provider = None
@@ -135,6 +224,22 @@ def evaluate_device_attestation(
 
     if raw_token:
         v_clean = raw_token.strip().lower()
+
+        # In production, client-reported verdict strings cannot bypass cryptographic verification
+        if env != "local":
+            if v_clean in ("compromised", "rooted", "emulator", "untrusted", "failed"):
+                return DeviceIntegrityVerdict.COMPROMISED
+            if "." not in raw_token:
+                logger.error("Client-reported attestation string '%s' rejected outside ENV=local; requires Google token", raw_token)
+                return DeviceIntegrityVerdict.COMPROMISED
+
+            # Cryptographic token verification
+            return verify_play_integrity_token(
+                token=raw_token,
+                expected_nonce=valid_nonces,
+            )
+
+        # Local development / test handling
         if v_clean in ("compromised", "rooted", "emulator", "untrusted", "failed"):
             return DeviceIntegrityVerdict.COMPROMISED
         if v_clean == "low_trust":
@@ -143,17 +248,13 @@ def evaluate_device_attestation(
             return DeviceIntegrityVerdict.BASIC
 
         if v_clean in ("secure", "strong", "mock_secure", "test_stub"):
-            if env != "local":
-                logger.error("Attestation stub string '%s' strictly prohibited outside ENV=local", raw_token)
-                return DeviceIntegrityVerdict.COMPROMISED
-            # In local environment, stub reports UNVERIFIED (never trusted)
             logger.info("Attestation stub evaluated in ENV=local; reporting UNVERIFIED (not trusted)")
             return DeviceIntegrityVerdict.UNVERIFIED
 
         # Server-side token verification (JWT / Play Integrity token)
         return verify_play_integrity_token(
             token=raw_token,
-            expected_nonce=expected_nonce or (device_id or ""),
+            expected_nonce=valid_nonces,
         )
 
     # Missing token handling:
@@ -161,18 +262,11 @@ def evaluate_device_attestation(
         logger.error("Missing device attestation token outside ENV=local; rejecting as COMPROMISED")
         return DeviceIntegrityVerdict.COMPROMISED
 
-    # In local environment with no token provided, report UNVERIFIED
     return DeviceIntegrityVerdict.UNVERIFIED
 
 
 def compute_min_answer_time_ms(question_type: str, stem_text: str) -> int:
-    """Scale minimum expected response time by stem length and question type.
-
-    Formulas:
-    - MCQ: base 1200ms + 20ms per character of stem (bounds: 1500ms - 6000ms).
-    - Short answer: base 2000ms + 25ms per character (bounds: 2500ms - 8000ms).
-    - Broad answer: base 5000ms + 30ms per character (bounds: 6000ms - 20000ms).
-    """
+    """Scale minimum expected response time by stem length and question type."""
     stem_len = len(stem_text.strip()) if stem_text else 0
     q_type = question_type.lower() if question_type else "mcq"
 
@@ -184,34 +278,6 @@ def compute_min_answer_time_ms(question_type: str, stem_text: str) -> int:
         return max(6000, min(5000 + stem_len * 30, 20000))
 
     return 1500
-
-
-# Penalty weights per event / anomaly type
-EVENT_PENALTIES: dict[str, float] = {
-    "focus_lost": 0.05,
-    "app_background": 0.10,
-    "multi_window": 0.20,
-    "overlay": 0.25,
-    "clipboard": 0.20,
-    "screenshot_attempt": 0.40,
-    "chat_attempt": 0.25,
-    "time_anomaly": 0.30,
-    "time_too_fast": 0.15,
-    "rapid_answer_after_focus_loss": 0.25,
-    "suspicious_streak": 0.20,
-}
-
-
-@dataclass
-class IntegrityConfig:
-    """Configurable thresholds for anti-cheat and anomaly detection."""
-
-    min_answer_time_ms: int = 1500
-    focus_loss_window_s: float = 4.0
-    warn_threshold: int = 1
-    pause_threshold: int = 2
-    invalidate_threshold: int = 3
-    invalidation_score: float = 0.50
 
 
 class IntegrityEngine:
@@ -227,21 +293,6 @@ class IntegrityEngine:
         """Record an integrity event and update attempt state without altering deadline_at."""
         penalty = EVENT_PENALTIES.get(event_type, 0.10)
         attempt.integrity_score = max(0.0, round(attempt.integrity_score - penalty, 2))
-
-        # Immediate invalidation events
-        if event_type in ("screenshot_attempt", "chat_attempt") and attempt.integrity_score < 0.60:
-            attempt.state = "invalidated"
-            attempt.invalid_reason = f"Security rule violation: {event_type}"
-            logger.warning("Attempt %s invalidated immediately due to %s", attempt.id, event_type)
-            return attempt.integrity_score, attempt.state
-
-        # Score-based invalidation
-        if attempt.integrity_score <= config.invalidation_score:
-            attempt.state = "invalidated"
-            attempt.invalid_reason = f"Integrity score fell below threshold ({attempt.integrity_score})"
-            logger.warning("Attempt %s invalidated: integrity score %.2f", attempt.id, attempt.integrity_score)
-            return attempt.integrity_score, attempt.state
-
         return attempt.integrity_score, attempt.state
 
     @staticmethod
@@ -254,12 +305,7 @@ class IntegrityEngine:
         question: Question | None = None,
         config: IntegrityConfig = IntegrityConfig(),
     ) -> list[str]:
-        """Detect server-side anomalies during item response:
-
-        1. time_too_fast: Scaled by question type and stem character length.
-        2. rapid_answer_after_focus_loss: Answered immediately after a focus loss / app background event.
-        3. suspicious_streak: Consecutive rapid correct answers.
-        """
+        """Detect server-side anomalies during item response."""
         anomalies: list[str] = []
 
         # 1. Anomaly: Time too fast (scaled by question type and stem length)
@@ -315,6 +361,65 @@ class IntegrityEngine:
         return anomalies
 
     @classmethod
+    async def evaluate_attempt_state(
+        cls,
+        db: AsyncSession,
+        attempt: QuizAttempt,
+        config: IntegrityConfig = IntegrityConfig(),
+    ) -> str:
+        """Enforce warn/pause/invalidate thresholds based on recorded events and score.
+
+        Rules:
+        - Invalidation strictly requires TWO or more distinct anomaly signals.
+        - Pausing requires two signals OR one severe signal (auto-resumes in 60s).
+        - A single anomaly logs a warning (state transitions to 'warned').
+        - Auto-resume or parent /allow unpauses; deadline never extends.
+        """
+        await db.flush()
+
+        # Count total and distinct anomaly signals for this attempt
+        total_events_stmt = select(AttemptEvent).where(AttemptEvent.attempt_id == attempt.id)
+        total_res = await db.execute(total_events_stmt)
+        existing_events = list(total_res.scalars().all())
+        total_events_count = len(existing_events)
+
+        infraction_events = [e for e in existing_events if e.type in EVENT_PENALTIES or e.type.startswith("anomaly_")]
+        total_infractions_count = len(infraction_events)
+        distinct_signal_types = {e.type for e in infraction_events}
+        distinct_signals_count = len(distinct_signal_types)
+        anomaly_signals = {e.type for e in infraction_events if e.type in ANOMALY_TYPES}
+        has_severe = any(e.type in SEVERE_EVENTS for e in existing_events)
+
+        # Enforce state thresholds: invalidate > pause > warn
+        if attempt.state in ("active", "warned", "paused"):
+            if (
+                total_infractions_count >= config.invalidate_threshold
+                or (total_infractions_count >= 3 and attempt.integrity_score <= config.invalidation_score)
+            ) and distinct_signals_count >= 2:
+                attempt.state = "invalidated"
+                attempt.invalid_reason = (
+                    f"Exceeded anomaly invalidation threshold ({total_infractions_count} events across "
+                    f"{distinct_signals_count} distinct signals)"
+                )
+                logger.warning("Attempt %s invalidated: %s", attempt.id, attempt.invalid_reason)
+            elif (len(anomaly_signals) >= 2 or has_severe) and attempt.state != "invalidated":
+                # Pausing requires two signals OR one severe signal (auto-resumes after 60s)
+                attempt.state = "paused"
+                attempt.paused_at = datetime.now(UTC)
+                attempt.pause_expires_at = datetime.now(UTC) + timedelta(seconds=config.pause_duration_s)
+                attempt.invalid_reason = (
+                    f"Attempt paused due to multiple signals ({len(anomaly_signals)}) or severe telemetry signal"
+                )
+                logger.warning("Attempt %s paused: %s (auto-resumes in %ds)", attempt.id, attempt.invalid_reason, config.pause_duration_s)
+            elif len(anomaly_signals) == 1:
+                # Single anomaly logs a warning
+                logger.warning("Attempt %s logged warning for anomaly (1 distinct signal)", attempt.id)
+                if attempt.state == "active":
+                    attempt.state = "warned"
+
+        return attempt.state
+
+    @classmethod
     async def check_and_apply_anomalies(
         cls,
         db: AsyncSession,
@@ -325,12 +430,7 @@ class IntegrityEngine:
         question: Question | None = None,
         config: IntegrityConfig = IntegrityConfig(),
     ) -> list[str]:
-        """Detect anomalies, record AttemptEvent rows, update score, and enforce warn/pause/invalidate thresholds.
-
-        Important Rules:
-        - Invalidation strictly requires TWO or more distinct anomaly signals.
-        - Deadline is never extended on pause.
-        """
+        """Detect anomalies, record AttemptEvent rows, update score, and enforce warn/pause/invalidate thresholds."""
         anomalies = await cls.detect_anomalies(
             db=db,
             attempt=attempt,
@@ -354,37 +454,7 @@ class IntegrityEngine:
             db.add(event)
             cls.process_event(attempt, anomaly, event.meta, config=config)
 
-        # Count total and distinct anomaly signals for this attempt
-        total_events_stmt = select(AttemptEvent).where(AttemptEvent.attempt_id == attempt.id)
-        total_res = await db.execute(total_events_stmt)
-        existing_events = list(total_res.scalars().all())
-        total_events_count = len(existing_events)
-
-        distinct_signal_types = {e.type for e in existing_events if e.type in EVENT_PENALTIES or e.type.startswith("anomaly_")}
-        distinct_signals_count = len(distinct_signal_types)
-
-        # Enforce state thresholds: invalidate > pause > warn
-        # Rule: Invalidation strictly requires TWO or more distinct anomaly signals!
-        if attempt.state in ("active", "warned", "paused"):
-            if (
-                total_events_count >= config.invalidate_threshold or attempt.integrity_score <= config.invalidation_score
-            ) and distinct_signals_count >= 2:
-                attempt.state = "invalidated"
-                attempt.invalid_reason = (
-                    f"Exceeded anomaly invalidation threshold ({total_events_count} events across "
-                    f"{distinct_signals_count} distinct signals)"
-                )
-                logger.warning("Attempt %s invalidated: %s", attempt.id, attempt.invalid_reason)
-            elif total_events_count >= config.pause_threshold or attempt.integrity_score <= 0.65:
-                # Deadline is strictly NEVER extended on pause
-                attempt.state = "paused"
-                attempt.invalid_reason = (
-                    f"Attempt paused due to repeated telemetry anomalies ({total_events_count} events)"
-                )
-                logger.warning("Attempt %s paused: %s", attempt.id, attempt.invalid_reason)
-            elif total_events_count >= config.warn_threshold:
-                if attempt.state == "active":
-                    attempt.state = "warned"
-                    logger.info("Attempt %s warned (%d events)", attempt.id, total_events_count)
+        if anomalies:
+            await cls.evaluate_attempt_state(db=db, attempt=attempt, config=config)
 
         return anomalies

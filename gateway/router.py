@@ -621,6 +621,8 @@ from core.quiz.schemas import (
     AttemptEventRequest,
     AttemptEventResponse,
     AttemptReviewResponse,
+    CreateAttemptRequest,
+    CreateAttemptResponse,
     StartAttemptRequest,
     StartAttemptResponse,
     SubmitAttemptResponse,
@@ -657,6 +659,21 @@ async def block_gateway_internal_routes(path: str) -> Response:
 async def create_student_quiz_gateway(student_id: uuid.UUID, request: Request) -> Response:
     """Create a new quiz session for student."""
     return await forward_to_core(request)
+
+
+@router.post(
+    "/quizzes/{quiz_id}/attempts/create",
+    response_model=CreateAttemptResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Quiz"],
+)
+async def create_quiz_attempt_gateway(
+    quiz_id: uuid.UUID,
+    payload: CreateAttemptRequest,
+    request: Request,
+) -> Response:
+    """Create a quiz attempt in 'created' state with short expiry for Play Integrity attestation."""
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
 @router.post(

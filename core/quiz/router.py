@@ -105,6 +105,39 @@ async def create_student_quiz(
 
 
 @router.post(
+    "/quizzes/{quiz_id}/attempts/create",
+    response_model=dict[str, Any],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_quiz_attempt_endpoint(
+    quiz_id: uuid.UUID,
+    payload: StartAttemptRequest,
+    current_user: Annotated[User, Depends(require_role("student"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_client_platform: str = Header("android", alias="X-Client-Platform"),
+    x_device_id: str | None = Header(None, alias="X-Device-Id"),
+) -> dict[str, Any]:
+    """Create a quiz attempt in state 'created' with a short 5-minute expiry.
+
+    Returns attempt_id and integrity_nonce (bound to attempt_id) for Play Integrity.
+    """
+    service = QuizService(db)
+    attempt = await service.create_attempt(
+        quiz_id=quiz_id,
+        student_id=current_user.id,
+        client_platform=x_client_platform,
+        device_id=payload.device_id or x_device_id,
+    )
+    return {
+        "attempt_id": str(attempt.id),
+        "state": attempt.state,
+        "nonce": str(attempt.id),
+        "deadline_at": attempt.deadline_at.isoformat() if attempt.deadline_at else None,
+        "attempt_token": attempt.attempt_token,
+    }
+
+
+@router.post(
     "/quizzes/{quiz_id}/attempts",
     response_model=StartAttemptResponse,
     status_code=status.HTTP_201_CREATED,
@@ -133,8 +166,9 @@ async def start_quiz_attempt(
         student_id=current_user.id,
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
-        integrity_verdict=payload.integrity_verdict or x_device_integrity,
+        integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
         headers=dict(request.headers),
+        attempt_id=payload.attempt_id,
     )
 
 

@@ -132,6 +132,8 @@ def test_refuse_placeholder_secrets_in_production() -> None:
             DATABASE_URL="postgresql+asyncpg://prod_user:prod_pass@prod-db:5432/thinkbuddy",
             JWT_SECRET_KEY="super_secure_random_production_service_token_987654321",
             LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
+            INTERNAL_SERVICE_SECRET="prod_valid_high_entropy_service_secret_5839201948201",
+            QUESTION_KEY_ENCRYPTION_KEY="prod_valid_high_entropy_question_crypto_key_58392",
         )
 
     # Gateway in staging with short token -> must raise ValueError
@@ -148,6 +150,8 @@ def test_refuse_placeholder_secrets_in_production() -> None:
         DATABASE_URL="postgresql+asyncpg://prod_user:prod_secure_pass_4738@prod-db:5432/thinkbuddy",
         JWT_SECRET_KEY="prod_valid_high_entropy_jwt_secret_94827398472938472",
         LINK_CODE_SECRET="prod_valid_high_entropy_link_code_secret_389274982374",
+        INTERNAL_SERVICE_SECRET="prod_valid_high_entropy_service_secret_5839201948201",
+        QUESTION_KEY_ENCRYPTION_KEY="prod_valid_high_entropy_question_crypto_key_58392",
     )
     assert prod_core.ENVIRONMENT == "production"
 

@@ -54,7 +54,20 @@ class AttemptItemPublic(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CreateAttemptRequest(BaseModel):
+    device_id: str | None = None
+
+
+class CreateAttemptResponse(BaseModel):
+    attempt_id: uuid.UUID
+    state: str
+    nonce: str
+    deadline_at: datetime | None = None
+    attempt_token: str
+
+
 class StartAttemptRequest(BaseModel):
+    attempt_id: uuid.UUID | None = None
     device_id: str | None = None
     integrity_verdict: str | None = None
     integrity_token: str | None = None
@@ -132,6 +145,7 @@ class AttemptReviewResponse(BaseModel):
     score: float
     total_possible_score: float
     integrity_score: float
+    unverified_device: bool = False
     started_at: datetime | None
     submitted_at: datetime | None
     items: list[AttemptItemReview]

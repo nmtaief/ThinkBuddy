@@ -25,6 +25,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -173,6 +174,9 @@ class QuizAttempt(Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     integrity_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     invalid_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    unverified_device: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -227,6 +231,7 @@ class AttemptItem(Base):
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     time_spent_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_recycled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     attempt: Mapped[QuizAttempt] = relationship("QuizAttempt", back_populates="items")
     question: Mapped[Question] = relationship("Question")
@@ -311,3 +316,7 @@ class LearningSignal(Base):
     weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "source", "ref_id", name="uq_learning_signals_student_source_ref"),
+    )

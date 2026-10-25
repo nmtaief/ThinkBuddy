@@ -28,6 +28,7 @@ from core.quiz.grading import QuizGradingService
 from core.quiz.integrity import (
     DeviceIntegrityVerdict,
     IntegrityEngine,
+    check_and_auto_resume_pause,
     evaluate_device_attestation,
 )
 from core.quiz.models import (
@@ -104,6 +105,11 @@ class QuizService:
         if not active_attempt:
             return False
 
+        # Check if pause has expired and auto-resume if so
+        if active_attempt.state == "paused":
+            if check_and_auto_resume_pause(active_attempt):
+                await self.db.commit()
+
         # Check if expired by server deadline (deadline never extends on pause)
         now = utcnow()
         if active_attempt.deadline_at and now > active_attempt.deadline_at:
@@ -115,6 +121,85 @@ class QuizService:
 
         return True
 
+    async def create_attempt(
+        self,
+        quiz_id: uuid.UUID,
+        student_id: uuid.UUID,
+        client_platform: str,
+        device_id: str | None = None,
+    ) -> QuizAttempt:
+        """Create a new attempt in state 'created' with short 5-minute expiry.
+
+        Binds the Play Integrity nonce to attempt.id.
+        """
+        quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))
+        quiz = quiz_res.scalar_one_or_none()
+        if not quiz:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "QUIZ_NOT_FOUND", "message": "Quiz not found."},
+            )
+
+        if client_platform.lower() == "web" and quiz.mode == "assessed":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "WEB_PLATFORM_PRACTICE_ONLY",
+                    "message": "Assessed mode quizzes are mobile-only. Web is practice-only.",
+                },
+            )
+
+        if quiz.mode == "assessed":
+            is_active = await self.is_assessed_attempt_active(student_id)
+            if is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
+                        "message": "You already have an active assessed attempt in progress.",
+                    },
+                )
+
+        now = utcnow()
+        # Created attempts get a short expiry (5 minutes) per P04 requirement 6
+        deadline = now + timedelta(minutes=5)
+        attempt_id = uuid.uuid4()
+        attempt = QuizAttempt(
+            id=attempt_id,
+            quiz_id=quiz.id,
+            student_id=student_id,
+            device_id=device_id,
+            state="created",
+            mode=quiz.mode,
+            attempt_token=f"att_{secrets.token_hex(24)}",
+            started_at=now,
+            deadline_at=deadline,
+            integrity_score=1.0,
+            unverified_device=False,
+        )
+        try:
+            self.db.add(attempt)
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
+                    "message": "You already have an active assessed attempt in progress.",
+                },
+            ) from None
+
+        questions = await self.builder.select_and_randomize_questions(
+            question_count=quiz.question_count,
+            student_id=student_id,
+            mode=quiz.mode,
+        )
+        await self.builder.initialize_attempt_items(attempt, questions)
+        await self.db.commit()
+        await self.db.refresh(attempt)
+        return attempt
+
     async def start_attempt(
         self,
         quiz_id: uuid.UUID,
@@ -123,8 +208,9 @@ class QuizService:
         device_id: str | None = None,
         integrity_verdict: str | None = None,
         headers: dict[str, str] | None = None,
+        attempt_id: uuid.UUID | None = None,
     ) -> StartAttemptResponse:
-        """Start a new attempt enforcing platform, device integrity, and active attempt rules."""
+        """Start a new attempt or activate a created attempt, binding nonce to attempt_id."""
         # 1. Fetch quiz definition
         quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == quiz_id))
         quiz = quiz_res.scalar_one_or_none()
@@ -144,15 +230,129 @@ class QuizService:
                 },
             )
 
-        # 3. Check device integrity verdict for assessed mode (Play Integrity / App Attest)
+        now = utcnow()
+
+        # Handle existing created attempt
+        if attempt_id:
+            attempt_res = await self.db.execute(
+                select(QuizAttempt).where(QuizAttempt.id == attempt_id)
+            )
+            attempt = attempt_res.scalar_one_or_none()
+            if not attempt:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+                )
+            if attempt.student_id != student_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"code": "FORBIDDEN", "message": "Cannot start another student's attempt."},
+                )
+
+            # Check created attempt short expiry (5 minutes)
+            if attempt.deadline_at and now > attempt.deadline_at:
+                attempt.state = "expired"
+                attempt.submitted_at = attempt.deadline_at
+                await self.grading.finalize_and_emit_signals(attempt)
+                await self.db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail={"code": "ATTEMPT_EXPIRED", "message": "Quiz attempt deadline has passed."},
+                )
+
+            # Verify device integrity bound to attempt_id
+            init_integrity_score = 1.0
+            is_unverified = False
+            if quiz.mode == "assessed":
+                attestation = evaluate_device_attestation(
+                    platform=client_platform,
+                    device_id=device_id or attempt.device_id,
+                    integrity_verdict=integrity_verdict,
+                    headers=headers,
+                    expected_nonce=str(attempt.id),
+                    attempt_id=attempt.id,
+                )
+                if attestation == DeviceIntegrityVerdict.COMPROMISED:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "DEVICE_INTEGRITY_FAILED",
+                            "message": (
+                                "Assessed mode is not permitted on rooted or emulated devices. "
+                                "Please use practice mode."
+                            ),
+                        },
+                    )
+                elif attestation == DeviceIntegrityVerdict.LOW_TRUST:
+                    init_integrity_score = 0.85
+                    is_unverified = True
+                elif attestation == DeviceIntegrityVerdict.UNVERIFIED:
+                    init_integrity_score = 0.90
+                    is_unverified = True
+
+            attempt.state = "active"
+            attempt.started_at = now
+            attempt.deadline_at = now + timedelta(seconds=quiz.time_limit_s)
+            attempt.integrity_score = init_integrity_score
+            attempt.unverified_device = is_unverified
+            await self.db.commit()
+            await self.db.refresh(attempt)
+
+            items_res = await self.db.execute(
+                select(AttemptItem).where(AttemptItem.attempt_id == attempt.id).order_by(AttemptItem.position.asc())
+            )
+            items = list(items_res.scalars().all())
+            first_item_public: AttemptItemPublic | None = None
+            if items:
+                q_res = await self.db.execute(
+                    select(Question).where(Question.id == items[0].question_id)
+                )
+                q_first = q_res.scalar_one()
+                first_item_public = AttemptItemPublic(
+                    position=items[0].position,
+                    nonce=items[0].nonce,
+                    time_limit_s=quiz.per_question_limit_s,
+                    question=_format_attempt_question_public(q_first, attempt.id),
+                )
+
+            return StartAttemptResponse(
+                attempt_id=attempt.id,
+                quiz_id=quiz.id,
+                state=attempt.state,
+                mode=quiz.mode,
+                started_at=attempt.started_at,  # type: ignore[arg-type]
+                deadline_at=attempt.deadline_at,  # type: ignore[arg-type]
+                attempt_token=attempt.attempt_token,
+                total_items=len(items),
+                current_item=first_item_public,
+            )
+
+        # 3. Check one-active-assessed-attempt rule across all open states
+        if quiz.mode == "assessed":
+            is_active = await self.is_assessed_attempt_active(student_id)
+            if is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
+                        "message": "You already have an active assessed attempt in progress.",
+                    },
+                )
+
+        target_attempt_id = uuid.uuid4()
+
+        # 4. Check device integrity verdict for assessed mode (Play Integrity / App Attest)
         init_integrity_score = 1.0
         init_event_type: str | None = None
+        is_unverified_device = False
         if quiz.mode == "assessed":
             attestation = evaluate_device_attestation(
                 platform=client_platform,
                 device_id=device_id,
                 integrity_verdict=integrity_verdict,
                 headers=headers,
+                expected_nonce=str(target_attempt_id),
+                attempt_id=target_attempt_id,
             )
             if attestation == DeviceIntegrityVerdict.COMPROMISED:
                 raise HTTPException(
@@ -169,28 +369,18 @@ class QuizService:
                 # Device without Google Play services: allowed under low-trust policy with scrutiny
                 init_integrity_score = 0.85
                 init_event_type = "low_trust_device_active"
+                is_unverified_device = True
             elif attestation == DeviceIntegrityVerdict.UNVERIFIED:
-                # Attestation unverified (local test or stub): recorded as unverified
+                # Attestation unverified: recorded as unverified device
                 init_integrity_score = 0.90
                 init_event_type = "unverified_device_attestation"
+                is_unverified_device = True
 
-        # 4. Check one-active-assessed-attempt rule across all open states
-        if quiz.mode == "assessed":
-            is_active = await self.is_assessed_attempt_active(student_id)
-            if is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "code": "ACTIVE_ATTEMPT_ALREADY_EXISTS",
-                        "message": "You already have an active assessed attempt in progress.",
-                    },
-                )
-
-        now = utcnow()
         deadline = now + timedelta(seconds=quiz.time_limit_s)
         attempt_token = f"att_{secrets.token_hex(24)}"
 
         attempt = QuizAttempt(
+            id=target_attempt_id,
             quiz_id=quiz.id,
             student_id=student_id,
             device_id=device_id,
@@ -200,6 +390,7 @@ class QuizService:
             started_at=now,
             deadline_at=deadline,
             integrity_score=init_integrity_score,
+            unverified_device=is_unverified_device,
         )
         try:
             self.db.add(attempt)
@@ -222,7 +413,7 @@ class QuizService:
             )
             self.db.add(event)
 
-        # 4. Select questions & initialize items
+        # 5. Select questions & initialize items
         questions = await self.builder.select_and_randomize_questions(
             question_count=quiz.question_count,
             student_id=student_id,
@@ -314,6 +505,11 @@ class QuizService:
                 status_code=status.HTTP_410_GONE,
                 detail={"code": "ATTEMPT_EXPIRED", "message": "Quiz deadline has passed."},
             )
+
+        # Auto-resume pause if pause timeout has expired
+        if attempt.state == "paused":
+            if check_and_auto_resume_pause(attempt):
+                await self.db.commit()
 
         if attempt.state == "paused":
             raise HTTPException(
@@ -452,9 +648,10 @@ class QuizService:
         )
         self.db.add(event)
 
-        new_score, new_state = IntegrityEngine.process_event(attempt, event_type, meta)
+        IntegrityEngine.process_event(attempt, event_type, meta)
+        await IntegrityEngine.evaluate_attempt_state(self.db, attempt)
         await self.db.commit()
-        return True, new_score, new_state
+        return True, attempt.integrity_score, attempt.state
 
     async def submit_attempt(
         self,
@@ -498,7 +695,7 @@ class QuizService:
             )
 
         attempt.submitted_at = utcnow()
-        if attempt.state in ("active", "created"):
+        if attempt.state in OPEN_ATTEMPT_STATES:
             attempt.state = "submitted"
 
         final_score = await self.grading.finalize_and_emit_signals(attempt)
@@ -648,6 +845,7 @@ class QuizService:
             score=attempt.score or 0.0,
             total_possible_score=100.0,
             integrity_score=attempt.integrity_score,
+            unverified_device=getattr(attempt, "unverified_device", False),
             started_at=attempt.started_at,
             submitted_at=attempt.submitted_at,
             items=review_items,
@@ -698,12 +896,24 @@ class QuizService:
         prev_score = attempt.integrity_score
 
         now = utcnow()
+        # Requirement 6: Parent allow cannot revive an expired attempt
+        if attempt.state == "expired" or (attempt.deadline_at and now >= attempt.deadline_at):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CANNOT_REVIVE_EXPIRED_ATTEMPT",
+                    "message": "Parent or admin override cannot revive an expired attempt.",
+                },
+            )
+
         if attempt.submitted_at is None and attempt.deadline_at and now < attempt.deadline_at:
             attempt.state = "active"
         elif attempt.submitted_at is not None:
             attempt.state = "submitted"
 
         attempt.integrity_score = 1.0
+        attempt.paused_at = None
+        attempt.pause_expires_at = None
         attempt.invalid_reason = f"Override allowed by parent: {reason}"
 
         event = AttemptEvent(

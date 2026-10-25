@@ -1606,7 +1606,7 @@ async def test_open_attempt_states_unique_index_and_lockouts(gateway_client: Asy
         f"/v1/attempts/{attempt_id}/items/1/answer",
         json={
             "nonce": item["nonce"],
-            "response": {"selected_option_id": item["question"]["options"][0]["id"]},
+            "response": {"selected_option_id": item["question"]["options"][0]["id"] if item["question"]["options"] else "opt_0"},
             "time_spent_ms": 5000,
         },
         headers=ans_headers,
@@ -2207,4 +2207,529 @@ async def test_gateway_never_proxies_internal_and_signed_jwt_service_token(
             headers={"X-Internal-Service-Token": expired_jwt},
         )
         assert res_core_expired.status_code == 403
+
+
+# =============================================================================
+# 27. Anomaly Warning, Severe/Multi-Signal Pause & Auto-Resume Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_single_anomaly_warns_severe_or_two_signals_pause_and_autoresumes(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (1):
+    - A single anomaly logs a warning (state transitions to 'warned').
+    - Pausing requires two signals OR one severe signal (screenshot_attempt, chat_attempt, overlay).
+    - A pause auto-resumes after a short period (60s); deadline never extends.
+    - Document what unpauses: auto-resume timeout or parent allow.
+    """
+    student = await create_test_user(role="student", display_name="Student Anomaly Pause Check")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=3)
+
+    # 1. Start attempt
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    data = res_start.json()
+    attempt_id = data["attempt_id"]
+    attempt_token = data["attempt_token"]
+
+    # 2. Single anomaly (time_too_fast during answer) -> logs warning, transitions to 'warned'
+    res_ans_fast = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": data["current_item"]["nonce"], "response": {"selected_option_id": "opt_0"}, "time_spent_ms": 200},
+        headers={**auth_headers, "X-Attempt-Token": attempt_token},
+    )
+    assert res_ans_fast.status_code == 200
+
+    async with AsyncSessionLocal() as session:
+        att = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == uuid.UUID(attempt_id)))).scalar_one()
+        assert att.state == "warned"
+
+    # 3. Severe signal (screenshot_attempt) -> transitions to 'paused'
+    res_ev2 = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/events",
+        json={"type": "screenshot_attempt", "meta": {}},
+        headers={**auth_headers, "X-Attempt-Token": attempt_token},
+    )
+    assert res_ev2.status_code == 200
+    ev2_data = res_ev2.json()
+    assert ev2_data["state"] == "paused"
+
+    # Attempt answering next item while paused -> 403 ATTEMPT_PAUSED
+    res_ans_blocked = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/2/answer",
+        json={"nonce": res_ans_fast.json()["next_item"]["nonce"], "response": {"selected_option_id": "opt_0"}, "time_spent_ms": 3000},
+        headers={**auth_headers, "X-Attempt-Token": attempt_token},
+    )
+    assert res_ans_blocked.status_code == 403
+    ans_err = res_ans_blocked.json()
+    err_code = ans_err.get("error", {}).get("code") or ans_err.get("detail", {}).get("code")
+    assert err_code == "ATTEMPT_PAUSED"
+
+    # 4. Fast forward time past pause_expires_at (60s) -> auto-resumes to 'warned'
+    async with AsyncSessionLocal() as session:
+        attempt_obj = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == uuid.UUID(attempt_id)))).scalar_one()
+        assert attempt_obj.pause_expires_at is not None
+        # Simulate expiry of pause period
+        attempt_obj.pause_expires_at = datetime.now(UTC) - timedelta(seconds=5)
+        await session.commit()
+
+    # Answering now should succeed after auto-resume!
+    res_ans_ok = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/2/answer",
+        json={"nonce": res_ans_fast.json()["next_item"]["nonce"], "response": {"selected_option_id": "opt_0"}, "time_spent_ms": 3000},
+        headers={**auth_headers, "X-Attempt-Token": attempt_token},
+    )
+    assert res_ans_ok.status_code == 200
+    assert res_ans_ok.json()["answered"] is True
+
+
+# =============================================================================
+# 28. Play Integrity Nonce Bound to Attempt ID & Production Check Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_play_integrity_nonce_bound_to_attempt_id_and_production_checks(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (2):
+    - Integrity nonce is strictly bound to attempt_id.
+    - Production verification must go through Google's decode or cryptographic signature check,
+      never client-reported verdict fields.
+    """
+    from core.quiz.integrity import evaluate_device_attestation, DeviceIntegrityVerdict
+
+    target_attempt_id = uuid.uuid4()
+
+    # 1. Valid token with nonce matching target_attempt_id -> SECURE
+    token_valid_nonce = create_mock_play_integrity_token(
+        nonce=str(target_attempt_id),
+        package_name="com.thinkbuddy.app",
+        verdicts=["MEETS_STRONG_INTEGRITY"],
+    )
+    verdict_valid = evaluate_device_attestation(
+        platform="android",
+        integrity_verdict=token_valid_nonce,
+        attempt_id=target_attempt_id,
+    )
+    assert verdict_valid == DeviceIntegrityVerdict.SECURE
+
+    # 2. Token with mismatched nonce -> COMPROMISED
+    token_mismatched_nonce = create_mock_play_integrity_token(
+        nonce="mismatched-nonce-value",
+        package_name="com.thinkbuddy.app",
+        verdicts=["MEETS_STRONG_INTEGRITY"],
+    )
+    verdict_mismatch = evaluate_device_attestation(
+        platform="android",
+        integrity_verdict=token_mismatched_nonce,
+        attempt_id=target_attempt_id,
+    )
+    assert verdict_mismatch == DeviceIntegrityVerdict.COMPROMISED
+
+    # 3. Production check: client-reported string 'secure' outside ENV=local is rejected
+    orig_env = settings.ENV
+    try:
+        settings.ENV = "production"
+        verdict_prod_client_string = evaluate_device_attestation(
+            platform="android",
+            integrity_verdict="secure",
+            attempt_id=target_attempt_id,
+        )
+        assert verdict_prod_client_string == DeviceIntegrityVerdict.COMPROMISED
+    finally:
+        settings.ENV = orig_env
+
+
+# =============================================================================
+# 29. Unverified Device Reduced Mastery Weight & Parent View Label Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_unverified_device_reduced_mastery_and_parent_view_label(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (3):
+    - Unverified or self-declared-provider devices get reduced mastery weight (0.7x).
+    - Parent review view carries 'unverified_device: true'.
+    """
+    await seed_sample_questions()
+    parent = await create_test_user(role="parent", display_name="Parent Trust Check")
+    student = await create_test_user(role="student", display_name="Student Trust Check")
+    p_token = create_access_jwt(parent.id, "parent")
+    s_token = create_access_jwt(student.id, "student")
+    parent_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {p_token}"}
+    student_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {s_token}"}
+
+    # Link parent and student
+    async with AsyncSessionLocal() as session:
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            parent_id=parent.id,
+            student_id=student.id,
+            status="active",
+        )
+        session.add(link)
+        await session.commit()
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=2)
+
+    # Start attempt on unverified device (X-Device-Attestation-Provider: none)
+    headers_low_trust = {
+        **student_headers,
+        "X-Device-Attestation-Provider": "none",
+    }
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-low-trust-001"},
+        headers=headers_low_trust,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+
+    # Submit item with wrong answer to trigger quiz_wrong learning signal
+    it1 = start_data["current_item"]
+    await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": it1["nonce"], "response": {"selected_option_id": "opt_wrong_nonexistent"}, "time_spent_ms": 3000},
+        headers={**student_headers, "X-Attempt-Token": attempt_token},
+    )
+
+    # Submit quiz
+    res_submit = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/submit",
+        headers={**student_headers, "X-Attempt-Token": attempt_token},
+    )
+    assert res_submit.status_code == 200
+
+    # 1. Check parent review response includes unverified_device: True
+    res_review = await gateway_client.get(
+        f"/v1/attempts/{attempt_id}/review",
+        headers=parent_headers,
+    )
+    assert res_review.status_code == 200
+    rev_data = res_review.json()
+    assert rev_data["unverified_device"] is True
+
+    # 2. Check emitted learning signal has reduced weight (0.7 instead of 1.0)
+    async with AsyncSessionLocal() as session:
+        sig_stmt = select(LearningSignal).where(
+            LearningSignal.student_id == student.id,
+            LearningSignal.source == "quiz_wrong",
+        )
+        res_sig = await session.execute(sig_stmt)
+        signal = res_sig.scalar_one_or_none()
+        assert signal is not None
+        assert signal.weight == 0.7
+
+
+# =============================================================================
+# 30. Learning Signals Unique Constraint & Concurrent Submit vs Expiry Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_learning_signals_unique_constraint_and_concurrent_submit_expiry(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (4):
+    - Unique constraint uq_learning_signals_student_source_ref with ON CONFLICT DO NOTHING.
+    - Concurrent submit-versus-expiry test racing simultaneously without duplicate signals or deadlocks.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student", display_name="Student Concurrency Race")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=2)
+
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={"device_id": "device-p04-android-001"},
+        headers=auth_headers,
+    )
+    assert res_start.status_code == 201
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+
+    # Answer item 1 incorrectly
+    await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": start_data["current_item"]["nonce"], "response": {"selected_option_id": "opt_wrong"}, "time_spent_ms": 3000},
+        headers={**auth_headers, "X-Attempt-Token": attempt_token},
+    )
+
+    # Set deadline to now so background expiry task can race against student submit
+    async with AsyncSessionLocal() as session:
+        attempt_obj = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == uuid.UUID(attempt_id)))).scalar_one()
+        attempt_obj.deadline_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+
+    # Race student submit vs background auto-submit worker
+    async def run_submit() -> Any:
+        return await gateway_client.post(
+            f"/v1/attempts/{attempt_id}/submit",
+            headers={**auth_headers, "X-Attempt-Token": attempt_token},
+        )
+
+    async def run_worker() -> Any:
+        return await auto_submit_expired_attempts()
+
+    results = await asyncio.gather(run_submit(), run_worker(), return_exceptions=True)
+    res_sub, res_work = results[0], results[1]
+
+    # Verify both completed without unhandled exceptions
+    assert not isinstance(res_sub, Exception)
+    assert not isinstance(res_work, Exception)
+
+    # Verify database has exactly 1 learning signal for this item (no duplicates!)
+    async with AsyncSessionLocal() as session:
+        sigs = list((await session.execute(select(LearningSignal).where(LearningSignal.student_id == student.id))).scalars().all())
+        ref_ids = [s.ref_id for s in sigs]
+        assert len(ref_ids) == len(set(ref_ids)), "Duplicate learning signals emitted!"
+
+
+# =============================================================================
+# 31. Created Attempts Short Expiry & No Reviving Expired Attempts Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_created_attempts_short_expiry_and_no_reviving_expired(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (6):
+    - created attempts get a short expiry (5 minutes).
+    - parent allow cannot revive an expired attempt.
+    """
+    parent = await create_test_user(role="parent", display_name="Parent Revive Check")
+    student = await create_test_user(role="student", display_name="Student Created Expiry Check")
+    p_token = create_access_jwt(parent.id, "parent")
+    s_token = create_access_jwt(student.id, "student")
+    parent_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {p_token}"}
+    student_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {s_token}"}
+
+    async with AsyncSessionLocal() as session:
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            parent_id=parent.id,
+            student_id=student.id,
+            status="active",
+        )
+        session.add(link)
+        await session.commit()
+
+    quiz = await create_test_quiz(student.id, mode="assessed", question_count=2)
+
+    # 1. Create attempt in state 'created'
+    res_create = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts/create",
+        json={"device_id": "device-p04-android-001"},
+        headers=student_headers,
+    )
+    assert res_create.status_code == 201
+    create_data = res_create.json()
+    attempt_id = create_data["attempt_id"]
+    assert create_data["state"] == "created"
+    assert create_data["nonce"] == attempt_id
+
+    # 2. Simulate expiration of created attempt (5-minute deadline passed)
+    async with AsyncSessionLocal() as session:
+        attempt_obj = (await session.execute(select(QuizAttempt).where(QuizAttempt.id == uuid.UUID(attempt_id)))).scalar_one()
+        attempt_obj.deadline_at = datetime.now(UTC) - timedelta(minutes=1)
+        attempt_obj.state = "expired"
+        await session.commit()
+
+    # 3. Parent /allow MUST NOT revive an expired attempt -> 409 CANNOT_REVIVE_EXPIRED_ATTEMPT
+    res_allow = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/allow",
+        json={"reason": "Parent trying to revive expired attempt"},
+        headers=parent_headers,
+    )
+    assert res_allow.status_code == 409
+    data = res_allow.json()
+    err_code = data.get("error", {}).get("code") or data.get("detail", {}).get("code")
+    assert err_code == "CANNOT_REVIVE_EXPIRED_ATTEMPT"
+
+
+# =============================================================================
+# 32. Recycled Questions Marking, Variant Preference & Low Pool Alert Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_recycled_questions_variant_preference_and_low_pool_alert(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P04 tail (7):
+    - Prefer unseen variants first.
+    - Mark recycled questions (is_recycled=True), weight them lower (points=0.7).
+    - Alert admins when assessed question pool runs low.
+    """
+    variant_grp = uuid.uuid4()
+    test_concept = f"concept_variant_pref_{uuid.uuid4().hex[:6]}"
+
+    async with AsyncSessionLocal() as session:
+        # Create Question 1 (variant A) and Question 2 (variant B) in same variant group
+        q_v1 = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            concept_id=test_concept,
+            difficulty=0.5,
+            language="bn",
+            stem={"text": "ভেরিয়েন্ট ১ (Variant 1)"},
+            options=[{"id": "opt_0", "text": "ক"}, {"id": "opt_1", "text": "খ"}],
+            pool="assessed",
+            variant_group_id=variant_grp,
+        )
+        q_v2 = Question(
+            id=uuid.uuid4(),
+            type="mcq",
+            concept_id=test_concept,
+            difficulty=0.5,
+            language="bn",
+            stem={"text": "ভেরিয়েন্ট ২ (Variant 2)"},
+            options=[{"id": "opt_0", "text": "ক"}, {"id": "opt_1", "text": "খ"}],
+            pool="assessed",
+            variant_group_id=variant_grp,
+        )
+        session.add_all([q_v1, q_v2])
+        await session.flush()
+
+        # Add keys
+        k1 = QuestionKey(question_id=q_v1.id, correct_option_id="opt_0")
+        k2 = QuestionKey(question_id=q_v2.id, correct_option_id="opt_0")
+        session.add_all([k1, k2])
+        await session.commit()
+
+        # Student has previously seen and answered Question 1
+        student = await create_test_user(role="student", display_name="Variant Preference Student")
+        student_id = student.id
+        prev_quiz = Quiz(id=uuid.uuid4(), student_id=student_id, title="Previous Quiz", mode="assessed")
+        session.add(prev_quiz)
+        await session.flush()
+
+        prev_attempt = QuizAttempt(
+            id=uuid.uuid4(),
+            quiz_id=prev_quiz.id,
+            student_id=student_id,
+            state="submitted",
+            mode="assessed",
+            attempt_token="prev_tok",
+            started_at=datetime.now(UTC) - timedelta(hours=1),
+            submitted_at=datetime.now(UTC) - timedelta(minutes=30),
+        )
+        session.add(prev_attempt)
+        await session.flush()
+
+        prev_item = AttemptItem(
+            attempt_id=prev_attempt.id,
+            question_id=q_v1.id,
+            position=1,
+            nonce="prev_nonce",
+            answered_at=datetime.now(UTC) - timedelta(minutes=45),
+            points=1.0,
+        )
+        session.add(prev_item)
+        await session.commit()
+
+        # Select questions for student: MUST prefer unseen variant Question 2 over recycling Question 1
+        builder = QuizBuilderService(session)
+        selected = await builder.select_and_randomize_questions(
+            question_count=1,
+            student_id=student_id,
+            concept_ids=[test_concept],
+            mode="assessed",
+        )
+        assert len(selected) == 1
+        assert selected[0].id == q_v2.id, "Did not prefer unseen variant first!"
+        assert getattr(selected[0], "_is_recycled", False) is False
+
+        # Now test recycled marking when ALL variants have been answered
+        prev_item2 = AttemptItem(
+            attempt_id=prev_attempt.id,
+            question_id=q_v2.id,
+            position=2,
+            nonce="prev_nonce_2",
+            answered_at=datetime.now(UTC) - timedelta(minutes=40),
+            points=1.0,
+        )
+        session.add(prev_item2)
+        await session.commit()
+
+        selected_recycled = await builder.select_and_randomize_questions(
+            question_count=1,
+            student_id=student_id,
+            concept_ids=[test_concept],
+            mode="assessed",
+        )
+        assert len(selected_recycled) == 1
+        assert getattr(selected_recycled[0], "_is_recycled", False) is True
+
+        # Initialize attempt items: recycled item points must be weighted lower (0.7)
+        new_attempt = QuizAttempt(
+            id=uuid.uuid4(),
+            quiz_id=prev_quiz.id,
+            student_id=student_id,
+            state="active",
+            mode="assessed",
+            attempt_token="new_tok_recycled",
+            started_at=datetime.now(UTC),
+        )
+        session.add(new_attempt)
+        await session.flush()
+
+        items = await builder.initialize_attempt_items(new_attempt, selected_recycled)
+        assert items[0].is_recycled is True
+        assert items[0].points == 0.7
+
+
+# =============================================================================
+# 33. Production Secret Validation Check for Distinct Service Secret Test
+# =============================================================================
+def test_production_secret_check_covers_distinct_service_token_secret() -> None:
+    """Per P04 tail (8):
+    - Confirm the service-token secret is distinct and covered by the production secret check.
+    """
+    from pydantic import ValidationError
+    from core.common.config import CoreSettings
+
+    prod_db = "postgresql+asyncpg://thinkbuddy_prod:safe_pass_here@127.0.0.1:5432/thinkbuddy_prod"
+
+    # 1. Non-local environment rejects placeholder INTERNAL_SERVICE_SECRET
+    with pytest.raises(ValidationError, match="placeholder INTERNAL_SERVICE_SECRET"):
+        CoreSettings(
+            ENV="production",
+            DATABASE_URL=prod_db,
+            JWT_SECRET_KEY="prod_super_secret_key_random_value_1234567890!",
+            LINK_CODE_SECRET="prod_super_secret_link_key_random_value_1234567890!",
+            INTERNAL_SERVICE_TOKEN="prod_super_secret_token_random_value_1234567890!",
+            INTERNAL_SERVICE_SECRET="dev_internal_service_hmac_secret_32bytes_min_key!",  # dev placeholder
+            QUESTION_KEY_ENCRYPTION_KEY="prod_super_secret_crypto_key_random_value_1234567890!",
+        )
+
+    # 2. Non-local environment rejects identical / duplicate secrets
+    shared_key = "prod_super_secret_shared_key_random_value_1234567890!"
+    with pytest.raises(ValidationError, match="must be distinct"):
+        CoreSettings(
+            ENV="production",
+            DATABASE_URL=prod_db,
+            JWT_SECRET_KEY="prod_super_secret_key_random_value_1234567890_1!",
+            LINK_CODE_SECRET="prod_super_secret_link_key_random_value_1234567890_2!",
+            INTERNAL_SERVICE_TOKEN=shared_key,
+            INTERNAL_SERVICE_SECRET=shared_key,  # Duplicate!
+            QUESTION_KEY_ENCRYPTION_KEY="prod_super_secret_crypto_key_random_value_1234567890_3!",
+        )
+
+    # 3. Valid distinct production configuration succeeds
+    valid_cfg = CoreSettings(
+        ENV="production",
+        DATABASE_URL=prod_db,
+        JWT_SECRET_KEY="prod_super_secret_key_random_value_1234567890_1!",
+        LINK_CODE_SECRET="prod_super_secret_link_key_random_value_1234567890_2!",
+        INTERNAL_SERVICE_TOKEN="prod_super_secret_token_random_value_1234567890_3!",
+        INTERNAL_SERVICE_SECRET="prod_super_secret_hmac_key_random_value_1234567890_4!",
+        QUESTION_KEY_ENCRYPTION_KEY="prod_super_secret_crypto_key_random_value_1234567890_5!",
+    )
+    assert valid_cfg.INTERNAL_SERVICE_SECRET == "prod_super_secret_hmac_key_random_value_1234567890_4!"
+
 

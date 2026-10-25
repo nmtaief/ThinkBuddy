@@ -1,8 +1,11 @@
 """Quiz Builder Service (core/quiz/builder.py).
 
-Per docs/05_SECURE_QUIZ.md §2, §4, §5:
+Per docs/05_SECURE_QUIZ.md §2, §4, §5 and P04 tail:
 - Selects questions from pool matching chapter/concept/difficulty.
-- Variant group deduplication: At most 1 question per variant_group_id.
+- Variant group handling: Prefers unseen variants first before recycling.
+- Excludes seen questions in assessed mode; LRU recycling fallback when pool exhausted.
+- Recycled questions are marked (is_recycled=True) and weighted lower (0.7 points).
+- Admin alert triggered when assessed pools run low (< 2x requested question count).
 - Per-student randomization of question order.
 - Randomized option order with opaque IDs (opt_0, opt_1, etc.) to guarantee zero key leakage.
 - Generates server-authoritative nonce per item.
@@ -19,7 +22,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("thinkbuddy.quiz.builder")
 
 from core.quiz.models import (
     AttemptItem,
@@ -72,7 +75,7 @@ class QuizBuilderService:
         difficulty_target: float = 0.5,
         seed: int | None = None,
     ) -> list[Question]:
-        """Query question bank, filter by pool, exclude seen questions, deduplicate variants, and randomize order."""
+        """Query question bank, filter by pool, prefer unseen variants, mark recycled questions, and randomize order."""
         rng = random.Random(seed)
 
         # 1. Base query filtered by mode pool ('both' or matching mode)
@@ -103,7 +106,19 @@ class QuizBuilderService:
             )
             candidates = list(fallback_res.scalars().all())
 
-        # 2. Exclude questions the student has seen and answered in assessed quizzes
+        # Low pool alert for administrators
+        if mode == "assessed" and len(candidates) < question_count * 2:
+            logger.warning(
+                "ADMIN_ALERT: Assessed question pool running low (total=%d, recommended_minimum=%d) "
+                "for student=%s, chapter_ids=%s, concept_ids=%s",
+                len(candidates),
+                question_count * 2,
+                student_id,
+                chapter_ids,
+                concept_ids,
+            )
+
+        # 2. Exclude seen questions and prefer unseen variants
         if student_id and mode == "assessed":
             answered_stmt = (
                 select(AttemptItem.question_id, AttemptItem.answered_at)
@@ -118,51 +133,87 @@ class QuizBuilderService:
             answered_rows = list(answered_res.all())
             answered_q_ids = {r[0] for r in answered_rows}
 
-            unseen = [q for q in candidates if q.id not in answered_q_ids]
-            if len(unseen) >= question_count:
-                candidates = unseen
+            earliest_answered: dict[uuid.UUID, datetime] = {}
+            for q_id, ans_at in answered_rows:
+                if q_id not in earliest_answered and ans_at:
+                    earliest_answered[q_id] = ans_at
+
+            # Group candidates into variant groups vs standalones
+            variant_groups: dict[uuid.UUID, list[Question]] = {}
+            standalones: list[Question] = []
+            for q in candidates:
+                if q.variant_group_id:
+                    variant_groups.setdefault(q.variant_group_id, []).append(q)
+                else:
+                    standalones.append(q)
+
+            primary_unseen: list[Question] = []
+            recycled_pool: list[Question] = []
+
+            # Prefer unseen variants first for each variant group
+            for grp_id, group_questions in variant_groups.items():
+                unseen_in_group = [q for q in group_questions if q.id not in answered_q_ids]
+                if unseen_in_group:
+                    # Prefer unseen variant!
+                    chosen = rng.choice(unseen_in_group)
+                    setattr(chosen, "_is_recycled", False)
+                    primary_unseen.append(chosen)
+                else:
+                    # All variants seen: least recently answered variant candidate
+                    group_questions_sorted = sorted(
+                        group_questions,
+                        key=lambda q: earliest_answered.get(q.id, datetime.min),
+                    )
+                    chosen_seen = group_questions_sorted[0]
+                    setattr(chosen_seen, "_is_recycled", True)
+                    recycled_pool.append(chosen_seen)
+
+            for q in standalones:
+                if q.id not in answered_q_ids:
+                    setattr(q, "_is_recycled", False)
+                    primary_unseen.append(q)
+                else:
+                    setattr(q, "_is_recycled", True)
+                    recycled_pool.append(q)
+
+            rng.shuffle(primary_unseen)
+
+            if len(primary_unseen) >= question_count:
+                selected_pool = primary_unseen[:question_count]
             else:
-                # Fallback for exhausted assessed pools:
-                # 1. Take all available unseen questions
-                # 2. Recycle oldest-answered questions (LRU) from candidates (never practice-only)
-                needed = question_count - len(unseen)
+                # Fallback for exhausted assessed pools: take all unseen, then LRU recycle
+                needed = question_count - len(primary_unseen)
                 logger.warning(
                     "Assessed question pool exhausted for student %s (unseen=%d, needed=%d). "
                     "Applying LRU recycling fallback within allowed pool %s.",
                     student_id,
-                    len(unseen),
+                    len(primary_unseen),
                     needed,
                     allowed_pools,
                 )
-                earliest_answered: dict[uuid.UUID, datetime] = {}
-                for q_id, ans_at in answered_rows:
-                    if q_id not in earliest_answered and ans_at:
-                        earliest_answered[q_id] = ans_at
+                recycled_pool.sort(key=lambda q: earliest_answered.get(q.id, datetime.min))
+                recycled = recycled_pool[:needed]
+                for r in recycled:
+                    setattr(r, "_is_recycled", True)
+                selected_pool = primary_unseen + recycled
+        else:
+            # Practice mode or no student context: normal variant group deduplication
+            variant_groups_dict: dict[uuid.UUID, list[Question]] = {}
+            standalones_list: list[Question] = []
+            for q in candidates:
+                setattr(q, "_is_recycled", False)
+                if q.variant_group_id:
+                    variant_groups_dict.setdefault(q.variant_group_id, []).append(q)
+                else:
+                    standalones_list.append(q)
 
-                seen_candidates = [q for q in candidates if q.id in answered_q_ids]
-                seen_candidates.sort(key=lambda q: earliest_answered.get(q.id, datetime.min))
-                recycled = seen_candidates[:needed]
-                candidates = unseen + recycled
+            selected_pool = list(standalones_list)
+            for grp_id, group_questions in variant_groups_dict.items():
+                chosen = rng.choice(group_questions)
+                selected_pool.append(chosen)
 
-        # 3. Group by variant_group_id to enforce deduplication
-        variant_groups: dict[uuid.UUID, list[Question]] = {}
-        standalones: list[Question] = []
-
-        for q in candidates:
-            if q.variant_group_id:
-                variant_groups.setdefault(q.variant_group_id, []).append(q)
-            else:
-                standalones.append(q)
-
-        # Pick at most 1 question per variant group
-        selected_pool: list[Question] = list(standalones)
-        for grp_id, group_questions in variant_groups.items():
-            chosen = rng.choice(group_questions)
-            selected_pool.append(chosen)
-
-        # 4. Shuffle per student
+        # Shuffle selected questions per student
         rng.shuffle(selected_pool)
-
         return selected_pool[:question_count]
 
     async def initialize_attempt_items(
@@ -170,19 +221,24 @@ class QuizBuilderService:
         attempt: QuizAttempt,
         questions: list[Question],
         seed: int | None = None,
+        recycled_ids: set[uuid.UUID] | None = None,
     ) -> list[AttemptItem]:
-        """Create sequential AttemptItems with randomized opaque options and server nonces."""
-        rng = random.Random(seed)
+        """Create sequential AttemptItems with randomized opaque options, server nonces, and recycling flags."""
         items: list[AttemptItem] = []
 
         for pos, q in enumerate(questions, start=1):
             nonce = secrets.token_hex(16)
+            is_recycled = getattr(q, "_is_recycled", False) or (recycled_ids is not None and q.id in recycled_ids)
+            # Recycled questions are weighted lower (0.7 points vs 1.0)
+            item_points = 0.7 if is_recycled else 1.0
+
             item = AttemptItem(
                 attempt_id=attempt.id,
                 position=pos,
                 question_id=q.id,
                 nonce=nonce,
-                points=1.0,
+                points=item_points,
+                is_recycled=is_recycled,
             )
             self.db.add(item)
             items.append(item)

@@ -138,11 +138,56 @@ All 8 hardening and security directives have been implemented and verified with 
   - Claims require `iss="thinkbuddy-gateway"`, `aud="thinkbuddy-core"`, `exp`, and `role="internal_service"`.
   - Core validates signatures, expiration, and audience via `require_internal_service_token`.
 
+### 3.7 Tail Commit Security & Integrity Hardening (P04 Tail)
+
+#### (1) Anomaly Warning, Severe/Multi-Signal Pause & Auto-Resume Policy
+- **Warning on Single Anomaly:** When a student incurs a single algorithmic anomaly (e.g. `time_too_fast`), the engine logs a warning and transitions `state` from `active` to `warned`.
+- **Pausing on Severe Signal or $\ge 2$ Signals:**
+  - Severe signals (`screenshot_attempt`, `chat_attempt`, `overlay`) or $\ge 2$ distinct anomaly signals immediately transition the attempt to `paused`.
+  - While paused, the student is blocked from answering items (`403 ATTEMPT_PAUSED`), but the quiz deadline (`deadline_at`) **strictly never extends**.
+- **What Unpauses an Attempt:**
+  1. **Auto-Resume Timer Expiry:** The pause window expires after 60 seconds (`pause_expires_at = paused_at + 60s`). On the next request after expiry, `check_and_auto_resume_pause` automatically unpauses the attempt, transitioning it back to `warned`.
+  2. **Parent or Admin `/allow`:** Linked parents or admins can call `POST /v1/attempts/{id}/allow` with a verified reason, clearing penalties and resetting the attempt to `active`.
+
+#### (2) Nonce Binding to Attempt ID & Server-Side Integrity Verification
+- **Bound Nonce:** The Play Integrity attestation challenge nonce is strictly bound to `attempt_id`. Nonce mismatch results in `DeviceIntegrityVerdict.COMPROMISED`.
+- **Production Verification:** In production (`ENV != local`), verification must go through Google's decode / cryptographic signature verification. Client-reported verdict strings (e.g. `"secure"`) outside `local` are strictly rejected with `COMPROMISED`.
+
+#### (3) Unverified Device Mastery Reduction & Parent View Label
+- **Reduced Mastery Weight:** When an attempt runs on an unverified device (`attestation == UNVERIFIED` or `X-Device-Attestation-Provider: none`), emitted learning signals receive a reduced mastery weight of `0.7x` (instead of `1.0x`).
+- **Parent Review View:** `GET /v1/attempts/{id}/review` includes `"unverified_device": true`, clearly informing parents that the exam was taken on an unverified device.
+
+#### (4) Learning Signals Unique Constraint & Concurrent Submit/Expiry
+- **Database Unique Constraint:** Added partial unique constraint `uq_learning_signals_student_source_ref` on `learning_signals(student_id, source, ref_id)`.
+- **Atomic Deduplication:** Grading operations use PostgreSQL `INSERT ... ON CONFLICT (student_id, source, ref_id) DO NOTHING`.
+- **Concurrency Test:** `test_learning_signals_unique_constraint_and_concurrent_submit_expiry` races student submission against background auto-submit workers without deadlocks or duplicate signal emissions.
+
+#### (5) Column-Level Encryption, Key Source, Rotation & Database Roles
+- **Status:** Enabled via AES-256-GCM application-level encryption (`core/quiz/crypto.py`).
+- **Key Source:** Supplied via `QUESTION_KEY_ENCRYPTION_KEY` from environment variables / secrets manager.
+- **Rotation Approach:** Versioned key envelopes (`v1:<nonce+ciphertext>`) with rotation fallback dictionary (`FALLBACK_ENCRYPTION_KEYS`). During rotation, old keys remain in fallback for seamless decryption while newly written data is encrypted with the primary key.
+- **Runtime Database Roles:**
+  - API process connects using PostgreSQL role `thinkbuddy_api` (revoked from `question_keys`, restricted to public view `v_questions_public`).
+  - Background grading workers connect using PostgreSQL role `thinkbuddy_grading` (authorized for `question_keys`).
+
+#### (6) Short Expiry for Created Attempts & No Reviving Expired Attempts
+- **Short Expiry:** `POST /quizzes/{id}/attempts/create` generates an attempt in state `created` with a 5-minute expiry (`deadline_at = now + 5 minutes`) to obtain Play Integrity attestation before starting.
+- **No Reviving Expired Attempts:** Parent or admin `/allow` strictly rejects reviving expired attempts with HTTP 409 `CANNOT_REVIVE_EXPIRED_ATTEMPT`.
+
+#### (7) Recycled Questions Marking, Lower Points, Variant Preference & Low Pool Alert
+- **Variant Preference:** The question selector prioritizes unseen variants in the same `variant_group_id` before falling back to recycled questions.
+- **Recycled Marking & Weight:** Recycled questions have `is_recycled = True` on `attempt_items` and are awarded a reduced point value (0.7 points instead of 1.0).
+- **Admin Alerts:** When the assessed question pool is exhausted, the builder logs an alert warning admins that question inventory is depleted.
+
+#### (8) Distinct Service-Token Secret & Production Secret Enforcement
+- **Distinct Secret:** `INTERNAL_SERVICE_SECRET` is decoupled from `INTERNAL_SERVICE_TOKEN`, enforcing separate keys for JWT HMAC signing.
+- **Production Validator:** `CoreSettings.validate_non_local_secrets` verifies that all 5 secrets (`JWT_SECRET_KEY`, `LINK_CODE_SECRET`, `INTERNAL_SERVICE_TOKEN`, `INTERNAL_SERVICE_SECRET`, `QUESTION_KEY_ENCRYPTION_KEY`) have at least 32 characters, contain no dev placeholders, and are strictly distinct.
+
 ---
 
 ## 4. Test Suite Execution Results
 
-All 134 automated unit, integration, and security tests pass:
+All 141 automated unit, integration, and security tests pass:
 
 ```text
 ============================= test session starts =============================
@@ -151,25 +196,25 @@ rootdir: E:\ThinkBuddy Arc
 configfile: pyproject.toml
 testpaths: tests
 plugins: anyio-4.13.0, hypothesis-6.170.8, jaxtyping-0.3.11, platformdirs-4.13.5, asyncio-1.4.0, cov-7.1.0
-collected 134 items
+collected 141 items
 
 tests\test_compose_integration.py ....                                   [  2%]
 tests\test_core_health.py .....                                          [  6%]
-tests\test_gateway_health.py .....                                       [ 10%]
+tests\test_gateway_health.py .....                                       [  9%]
 tests\test_logging_security.py ..                                        [ 11%]
 tests\test_openapi_export.py .                                           [ 12%]
-tests\test_p01_auth_family.py ..............                             [ 23%]
-tests\test_p02_curriculum_rag.py .........                               [ 29%]
-tests\test_p03_golden_plans.py ....                                      [ 32%]
-tests\test_p03_planner.py .................                              [ 45%]
-tests\test_p03_planner_v2.py .....................                       [ 61%]
-tests\test_p04_secure_quiz.py ..........................                 [ 80%]
+tests\test_p01_auth_family.py ..............                             [ 21%]
+tests\test_p02_curriculum_rag.py .........                               [ 28%]
+tests\test_p03_golden_plans.py ....                                      [ 31%]
+tests\test_p03_planner.py .................                              [ 43%]
+tests\test_p03_planner_v2.py .....................                       [ 58%]
+tests\test_p04_secure_quiz.py .................................          [ 81%]
 tests\test_p06a_ai_planner.py ..........................                 [100%]
 
-====================== 134 passed, 8 warnings in 10.44s =======================
+====================== 141 passed, 9 warnings in 13.19s =======================
 ```
 
-All 26 specific P04 security and hardening test cases pass:
+All 33 specific P04 security and hardening test cases pass:
 1. `test_zero_answer_key_leakage_during_active_quiz`
 2. `test_server_deadline_and_clock_tampering`
 3. `test_token_and_nonce_replay_protection`
@@ -196,11 +241,18 @@ All 26 specific P04 security and hardening test cases pass:
 24. `test_concurrent_submit_versus_expiry_and_worker_schedule`
 25. `test_exhausted_assessed_pool_fallback_lru`
 26. `test_gateway_never_proxies_internal_and_signed_jwt_service_token`
+27. `test_single_anomaly_warns_severe_or_two_signals_pause_and_autoresumes`
+28. `test_play_integrity_nonce_bound_to_attempt_id_and_production_checks`
+29. `test_unverified_device_reduced_mastery_and_parent_view_label`
+30. `test_learning_signals_unique_constraint_and_concurrent_submit_expiry`
+31. `test_created_attempts_short_expiry_and_no_reviving_expired`
+32. `test_recycled_questions_variant_preference_and_low_pool_alert`
+33. `test_production_secret_check_covers_distinct_service_token_secret`
 
 ---
 
 ## 5. Conclusion & Review Readiness
 
-All conditional acceptance requirements for Milestone P04 are fully implemented, verified, and tested against live PostgreSQL and Redis services. Database role boundaries are active, AES-256-GCM column encryption protects answer keys at rest, server-side Play Integrity tokens are cryptographically verified, anomaly rules are scaled by stem length with parent override audit logging, and internal routes are isolated behind signed JWT tokens.
+All conditional acceptance and tail requirements for Milestone P04 are fully implemented, verified, and tested against live PostgreSQL and Redis services. Database role boundaries are active, AES-256-GCM column encryption protects answer keys at rest, server-side Play Integrity tokens are cryptographically verified and bound to attempt IDs, anomaly rules are scaled by stem length with parent override audit logging, and internal routes are isolated behind signed JWT tokens.
 
 Antigravity stops here for review on branch `feat/P04_secure_quiz` prior to Milestone P05.

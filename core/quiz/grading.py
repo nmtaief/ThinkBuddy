@@ -4,7 +4,8 @@ Per docs/03_DATA_MODEL.md §4, §6 and docs/05_SECURE_QUIZ.md:
 - Strictly queries `question_keys` inside this service only.
 - Evaluates MCQ and short answers.
 - Queues broad answers for rubric review.
-- Writes `learning_signals` records for adaptive retention and mastery updates.
+- Writes `learning_signals` records with ON CONFLICT DO NOTHING idempotency.
+- Applies reduced mastery weight for unverified devices (0.7x) and recycled items (0.7x).
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.quiz.models import (
@@ -35,14 +38,7 @@ ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff\u00a0]")
 
 
 def normalize_bangla_text(text: str | None) -> str:
-    """Normalize Bangla and English text for fair and robust short answer grading.
-
-    1. Unicode NFC normalization.
-    2. Strips zero-width and invisible control characters (\u200b, \u200c, \u200d, \ufeff).
-    3. Normalizes Bengali digits to ASCII digits so Bengali '৫' and '5' match.
-    4. Strips leading/trailing whitespace and collapses internal whitespace.
-    5. Case-folding for English characters.
-    """
+    """Normalize Bangla and English text for fair and robust short answer grading."""
     if not text:
         return ""
     s = unicodedata.normalize("NFC", str(text))
@@ -112,12 +108,13 @@ class QuizGradingService:
             is_correct = False  # Pending evaluation
 
         item.is_correct = is_correct
-        item.points = 1.0 if is_correct else 0.0
+        max_points = 0.7 if getattr(item, "is_recycled", False) else 1.0
+        item.points = max_points if is_correct else 0.0
 
         return is_correct
 
     async def finalize_and_emit_signals(self, attempt: QuizAttempt) -> float:
-        """Compute final score, update attempt, and write learning signals."""
+        """Compute final score, update attempt, and write learning signals with ON CONFLICT DO NOTHING."""
         items_res = await self.db.execute(
             select(AttemptItem).where(AttemptItem.attempt_id == attempt.id)
         )
@@ -128,56 +125,64 @@ class QuizGradingService:
             return 0.0
 
         total_points = sum(it.points for it in items)
-        max_points = float(len(items))
-        final_score = round((total_points / max_points) * 100.0, 1) if max_points > 0 else 0.0
+        max_possible = sum(0.7 if getattr(it, "is_recycled", False) else 1.0 for it in items)
+        final_score = round((total_points / max_possible) * 100.0, 1) if max_possible > 0 else 0.0
         attempt.score = final_score
 
-        # Emit learning signals for mistakes and slow responses (idempotent check)
+        # Reduced mastery weight scaling for unverified devices (0.7x)
+        device_mult = 0.7 if getattr(attempt, "unverified_device", False) else 1.0
+
+        # Emit learning signals for mistakes and slow responses idempotently via ON CONFLICT DO NOTHING
         for it in items:
+            recycled_mult = 0.7 if getattr(it, "is_recycled", False) else 1.0
+
             # Mistake signal
             if it.is_correct is False:
-                # Fetch question concept/chapter
                 q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    existing_wrong = await self.db.execute(
-                        select(LearningSignal.id).where(
-                            LearningSignal.ref_id == str(it.id),
-                            LearningSignal.source == "quiz_wrong",
-                        )
-                    )
-                    if not existing_wrong.scalar_one_or_none():
-                        signal = LearningSignal(
+                    weight_wrong = round(1.0 * device_mult * recycled_mult, 2)
+                    stmt_wrong = (
+                        pg_insert(LearningSignal)
+                        .values(
+                            id=uuid.uuid4(),
                             student_id=attempt.student_id,
                             source="quiz_wrong",
                             chapter_id=q.chapter_id,
                             concept_id=q.concept_id,
-                            weight=1.0,
+                            weight=weight_wrong,
                             ref_id=str(it.id),
+                            at=datetime.now(UTC),
                         )
-                        self.db.add(signal)
+                        .on_conflict_do_nothing(
+                            index_elements=["student_id", "source", "ref_id"]
+                        )
+                    )
+                    await self.db.execute(stmt_wrong)
 
             # Slow response signal (> 90s)
             if it.time_spent_ms > 90000:
                 q_res = await self.db.execute(select(Question).where(Question.id == it.question_id))
                 q = q_res.scalar_one_or_none()
                 if q:
-                    existing_slow = await self.db.execute(
-                        select(LearningSignal.id).where(
-                            LearningSignal.ref_id == str(it.id),
-                            LearningSignal.source == "quiz_slow",
-                        )
-                    )
-                    if not existing_slow.scalar_one_or_none():
-                        signal_slow = LearningSignal(
+                    weight_slow = round(0.5 * device_mult * recycled_mult, 2)
+                    stmt_slow = (
+                        pg_insert(LearningSignal)
+                        .values(
+                            id=uuid.uuid4(),
                             student_id=attempt.student_id,
                             source="quiz_slow",
                             chapter_id=q.chapter_id,
                             concept_id=q.concept_id,
-                            weight=0.5,
+                            weight=weight_slow,
                             ref_id=str(it.id),
+                            at=datetime.now(UTC),
                         )
-                        self.db.add(signal_slow)
+                        .on_conflict_do_nothing(
+                            index_elements=["student_id", "source", "ref_id"]
+                        )
+                    )
+                    await self.db.execute(stmt_slow)
 
         await self.db.flush()
         return final_score
