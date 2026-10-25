@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.dependencies import get_current_user
@@ -52,7 +52,14 @@ async def register_device(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> DeviceResponse:
-    """Register or refresh client device registration."""
+    if payload.push_token:
+        # Reassign push token: nullify on any other device across users (Item 3 & 4: shared devices)
+        await db.execute(
+            update(Device)
+            .where(Device.push_token == payload.push_token)
+            .values(push_token=None)
+        )
+
     device = Device(
         id=uuid.uuid4(),
         user_id=current_user.id,
@@ -96,6 +103,13 @@ async def update_device(
         )
 
     if payload.push_token is not None:
+        if payload.push_token:
+            # Reassign push token: nullify on any other device (Item 3 & 4)
+            await db.execute(
+                update(Device)
+                .where(Device.push_token == payload.push_token, Device.id != device_id)
+                .values(push_token=None)
+            )
         device.push_token = payload.push_token
     if payload.app_version is not None:
         device.app_version = payload.app_version

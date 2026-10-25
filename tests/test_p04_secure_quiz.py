@@ -81,7 +81,7 @@ def create_mock_play_integrity_token(
         "requestDetails": {"nonce": nonce, "timestampMillis": ts_millis},
         "deviceIntegrity": {"deviceRecognitionVerdict": verdicts},
     }
-    return jwt.encode(claims, "test_secret_for_claims", algorithm="HS256")
+    return jwt.encode(claims, "test_secret_for_claims_32_bytes_ok!", algorithm="HS256")
 
 
 def utcnow() -> datetime:

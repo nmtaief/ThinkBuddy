@@ -24,6 +24,14 @@ celery_app.conf.update(
             "task": "auto_submit_expired_attempts",
             "schedule": 30.0,
         },
+        "purge-shadow-runs-retention": {
+            "task": "purge_shadow_runs_retention_task",
+            "schedule": 86400.0,  # daily purge
+        },
+        "dispatch-deferred-pushes-every-minute": {
+            "task": "dispatch_deferred_pushes_task",
+            "schedule": 60.0,  # every minute
+        },
     },
 )
 

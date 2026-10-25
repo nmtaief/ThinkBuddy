@@ -30,6 +30,7 @@ from core.planner.engine import (
     SubjectSetupInput,
     generate_student_plan,
 )
+from core.families.models import StudentProfile
 from core.planner.provider import (
     AiPlannerProvider,
     PlanProviderContext,
@@ -309,12 +310,27 @@ async def execute_student_plan_regeneration(
             revision_items=revision_records,
         )
 
-        plan_provider = get_plan_provider(resolved_settings)
+        # Check per-student override and dynamic rollout config (Item 3)
+        from core.planner.rollout import get_ai_planner_rollout_config
+        from core.planner.models import AiPlannerShadowRun
+
+        stmt_sett = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+        res_sett = await db.execute(stmt_sett)
+        settings_record = res_sett.scalars().first()
+        per_student_override = settings_record.ai_planner_override if settings_record else None
+
+        rollout_cfg = await get_ai_planner_rollout_config()
+        plan_provider = get_plan_provider(
+            resolved_settings,
+            per_student_override=per_student_override,
+            rollout_config=rollout_cfg,
+        )
         provider_result = await plan_provider.generate_plan(provider_ctx)
         plan_out = provider_result.plan_out
 
-        # Shadow Mode: if enabled and primary is deterministic, evaluate AI planner in background
-        if app_settings.AI_PLANNER_SHADOW_MODE and provider_result.provider == "deterministic":
+        # Shadow Mode: if enabled and primary is deterministic, evaluate AI planner in background (Item 5)
+        shadow_enabled = rollout_cfg.get("shadow_mode", app_settings.AI_PLANNER_SHADOW_MODE)
+        if shadow_enabled and provider_result.provider == "deterministic":
             try:
                 ai_shadow_provider = AiPlannerProvider()
                 ai_shadow_res = await ai_shadow_provider.generate_plan(provider_ctx)
@@ -322,12 +338,30 @@ async def execute_student_plan_regeneration(
                     from core.planner.shadow_comparator import compare_plans
                     shadow_report = compare_plans(ai_shadow_res.plan_out, plan_out)
                     provider_result.shadow_comparison = shadow_report
-                    # Persist shadow evaluation to audit_log
+                    # Persist shadow evaluation to dedicated table (no payload data, no prompt, no PII) (Item 5)
+                    shadow_run = AiPlannerShadowRun(
+                        student_id=student_id,
+                        at=datetime.now(UTC),
+                        recommendation=shadow_report.get("recommendation", "review_delta"),
+                        coverage_parity_met=bool(shadow_report.get("coverage_parity_met", False)),
+                        churn_rate_pct=float(shadow_report.get("churn_rate_pct", 0.0)),
+                        minutes_delta=int(shadow_report.get("minutes_delta", 0)),
+                        ai_warnings_count=int(shadow_report.get("ai_warnings_count", 0)),
+                        metrics={
+                            "total_ai_tasks": shadow_report.get("total_ai_tasks", 0),
+                            "total_deterministic_tasks": shadow_report.get("total_deterministic_tasks", 0),
+                            "ai_total_minutes": shadow_report.get("ai_total_minutes", 0),
+                            "deterministic_total_minutes": shadow_report.get("deterministic_total_minutes", 0),
+                            "subject_coverage_delta": shadow_report.get("subject_coverage_delta", {}),
+                        },
+                    )
+                    db.add(shadow_run)
+                    # Also persist to audit_log
                     audit_shadow = AuditLog(
                         actor_id=student_id,
                         action="ai_planner.shadow_comparison",
                         target_type="plan",
-                        target_id=student_id,
+                        target_id=str(student_id),
                         meta={
                             **shadow_report,
                             "student_id": str(student_id),
@@ -338,23 +372,211 @@ async def execute_student_plan_regeneration(
             except Exception as shadow_exc:
                 logger.warning("AI Planner Shadow Mode execution error: %s", shadow_exc)
 
-        # Record AI priority suggestions in 'suggest' mode for parent review
-        if provider_result.priority_suggestions and resolved_settings.adaptive_mode in ("suggest", "manual"):
-            for ps in provider_result.priority_suggestions:
-                scr = StudentChangeRequest(
-                    setup_id=None,
-                    student_id=student_id,
-                    requested_changes={
-                        "type": "ai_priority_suggestion",
-                        "subject": ps.get("subject"),
-                        "current_level": ps.get("current_level"),
-                        "suggested_level": ps.get("suggested_level"),
-                        "evidence_codes": ps.get("evidence_codes", []),
-                        "rationale": ps.get("rationale", ""),
-                    },
-                    status="pending",
+        # Suggestions processing: de-duplication, daily cap (3/day), non-labeling rationales, and auto_within_limits (Items 2, 4, 7)
+        from core.parent.service import sanitize_non_labeling_reason, localize_rationale_bn
+        from core.notifications.service import NotificationService
+        from core.families.models import ParentStudentLink
+
+        stmt_plink = select(ParentStudentLink.parent_id).where(
+            ParentStudentLink.student_id == student_id,
+            ParentStudentLink.status == "active",
+        )
+        res_plink = await db.execute(stmt_plink)
+        linked_parent_id = res_plink.scalars().first()
+
+        suggestions_to_process = list(provider_result.priority_suggestions or [])
+        # Minute-change suggestion if exam is within 14 days or skipped tasks
+        if resolved_settings.adaptive_mode in ("suggest", "auto_within_limits"):
+            exam_proximity = exam_dates and min((ed - today_dhaka).days for ed in exam_dates) < 14
+            if (exam_proximity or learning_signals.get("skipped_tasks_count", 0) > 3) and resolved_settings.school_day_minutes < 240:
+                suggestions_to_process.append({
+                    "type": "ai_minute_suggestion",
+                    "field": "school_day_minutes",
+                    "current_minutes": resolved_settings.school_day_minutes,
+                    "suggested_minutes": min(resolved_settings.school_day_minutes + 15, 240),
+                    "minutes_delta": 15,
+                    "evidence_codes": ["PACING_ALIGNMENT"],
+                    "rationale": "Recommended pacing adjustment of +15 daily study minutes to reinforce exam preparation.",
+                })
+
+        if suggestions_to_process and settings_record:
+            today_start = datetime.combine(today_dhaka, datetime.min.time(), tzinfo=UTC)
+            stmt_cap = select(func.count(StudentChangeRequest.id)).where(
+                StudentChangeRequest.student_id == student_id,
+                StudentChangeRequest.created_at >= today_start,
+            )
+            daily_count = (await db.execute(stmt_cap)).scalar() or 0
+
+            stmt_pending = select(StudentChangeRequest).where(
+                StudentChangeRequest.student_id == student_id,
+                StudentChangeRequest.status == "pending",
+            )
+            res_pending = await db.execute(stmt_pending)
+            pending_reqs = res_pending.scalars().all()
+            pending_keys = {
+                (
+                    (r.requested_changes or {}).get("type"),
+                    (r.requested_changes or {}).get("subject") or (r.requested_changes or {}).get("field"),
                 )
-                db.add(scr)
+                for r in pending_reqs
+            }
+
+            locked_fields = set(settings_record.parent_locked_fields or [])
+
+            for ps in suggestions_to_process:
+                sugg_type = ps.get("type", "ai_priority_suggestion")
+                target_key = ps.get("subject") if sugg_type == "ai_priority_suggestion" else ps.get("field")
+                if (sugg_type, target_key) in pending_keys:
+                    continue
+
+                raw_rationale = ps.get("rationale") or "Balanced pacing recommendation."
+                clean_rationale = sanitize_non_labeling_reason(raw_rationale)
+                clean_rationale_bn = localize_rationale_bn(clean_rationale, ps.get("subject"))
+
+                # Check if target is locked by parent
+                is_locked = False
+                if sugg_type == "ai_priority_suggestion":
+                    sub = ps.get("subject")
+                    if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+                        is_locked = True
+                elif sugg_type == "ai_minute_suggestion":
+                    fld = ps.get("field")
+                    if fld in locked_fields:
+                        is_locked = True
+
+                if settings_record.adaptive_mode == "auto_within_limits" and not is_locked:
+                    # Item 2 & 5: Auto-apply strictly within caps
+                    adj_id = str(uuid.uuid4())
+                    prev_state: dict[str, Any] = {}
+                    summary_en = ""
+                    summary_bn = ""
+
+                    if sugg_type == "ai_priority_suggestion":
+                        sub = ps.get("subject")
+                        raw_lvl = ps.get("suggested_level", "main")
+                        # Rule: At most one priority level step per cycle (Item 5)
+                        prio_map = {"normal": 0, "main": 1, "difficult": 2}
+                        rev_prio = {0: "normal", 1: "main", 2: "difficult"}
+                        curr_prios = dict(settings_record.subject_priorities or {})
+                        curr_lvl = curr_prios.get(sub, "normal")
+                        curr_idx = prio_map.get(curr_lvl, 0)
+                        req_idx = prio_map.get(raw_lvl, 1)
+                        if abs(req_idx - curr_idx) > 1:
+                            step = 1 if req_idx > curr_idx else -1
+                            new_lvl = rev_prio.get(curr_idx + step, curr_lvl)
+                        else:
+                            new_lvl = raw_lvl
+
+                        prev_state["subject_priorities"] = dict(settings_record.subject_priorities or {})
+                        new_prios = dict(settings_record.subject_priorities or {})
+                        new_prios[sub] = new_lvl
+                        settings_record.subject_priorities = new_prios
+                        summary_en = f"Adjusted study priority for {sub} to {new_lvl} to build foundational mastery."
+                        summary_bn = f"{sub}-এর পড়ার গুরুত্ব সমন্বয় করা হয়েছে।"
+                    elif sugg_type == "ai_minute_suggestion":
+                        fld = ps.get("field", "school_day_minutes")
+                        raw_mins = ps.get("suggested_minutes", settings_record.school_day_minutes)
+                        cur_mins = getattr(settings_record, fld, 60)
+
+                        # Rule: At most a set percentage (<= 20%) of minutes per cycle (Item 5)
+                        max_delta = max(5, int(cur_mins * 0.20))
+                        if raw_mins > cur_mins:
+                            clamped_mins = min(raw_mins, cur_mins + max_delta)
+                        elif raw_mins < cur_mins:
+                            clamped_mins = max(raw_mins, cur_mins - max_delta)
+                        else:
+                            clamped_mins = raw_mins
+
+                        # Rule: Ceilings per class band and day type from admin_policies table
+                        # Auto mode never lowers a parent setting, never raises above the ceiling,
+                        # and leaves a parent value that is already above the ceiling unchanged.
+                        stmt_prof = select(StudentProfile.class_level).where(StudentProfile.user_id == student_id)
+                        res_prof = await db.execute(stmt_prof)
+                        cls_lvl = res_prof.scalar_one_or_none() or 10
+                        band = "6-8" if cls_lvl <= 8 else ("9-10" if cls_lvl <= 10 else "11-12")
+
+                        stmt_pol = (
+                            select(AdminPolicy)
+                            .where(AdminPolicy.class_band == band, AdminPolicy.status == "published")
+                            .order_by(AdminPolicy.version.desc())
+                        )
+                        res_pol = await db.execute(stmt_pol)
+                        pol_rec = res_pol.scalars().first()
+
+                        if fld == "holiday_minutes":
+                            ceiling = pol_rec.holiday_ceiling_minutes if pol_rec else (180 if band == "6-8" else (240 if band == "9-10" else 300))
+                        else:
+                            ceiling = pol_rec.school_day_ceiling_minutes if pol_rec else (120 if band == "6-8" else (180 if band == "9-10" else 240))
+
+                        # Invariant 1: Leaves a parent value that is already above the ceiling unchanged
+                        if cur_mins >= ceiling:
+                            final_mins = cur_mins
+                        else:
+                            # Invariant 2: Auto mode never lowers a parent setting
+                            # Invariant 3: Never raises above the ceiling
+                            final_mins = max(cur_mins, min(clamped_mins, ceiling))
+
+                        prev_state[fld] = cur_mins
+                        setattr(settings_record, fld, final_mins)
+                        summary_en = f"Adjusted daily study time to {final_mins} minutes for exam pacing."
+                        summary_bn = f"দৈনিক পড়ার সময় {final_mins} মিনিটে সমন্বয় করা হয়েছে।"
+
+                    settings_record.version += 1
+                    cur_adj = dict(settings_record.ai_adjustments or {})
+                    recent_adj = list(cur_adj.get("recent_adjustments", []))
+                    recent_adj.append({
+                        "adjustment_id": adj_id,
+                        "type": sugg_type,
+                        "previous_state": prev_state,
+                        "summary": summary_en,
+                        "summary_bn": summary_bn,
+                        "applied_at": datetime.now(UTC).isoformat(),
+                        "undone": False,
+                    })
+                    cur_adj["recent_adjustments"] = recent_adj
+                    settings_record.ai_adjustments = cur_adj
+
+                    # Notify parent with one-tap undo option (Item 2)
+                    if linked_parent_id:
+                        await NotificationService.create_notification(
+                            db=db,
+                            user_id=linked_parent_id,
+                            type="ai_adjustment_auto_applied",
+                            title="Study plan automatically adjusted",
+                            body=f"{summary_en} You can undo this anytime from your dashboard.",
+                            title_bn="পড়ার রুটিন স্বয়ংক্রিয়ভাবে সমন্বয় করা হয়েছে",
+                            body_bn=f"{summary_bn} আপনি যেকোনো সময় পূর্বাবস্থায় ফিরিয়ে নিতে পারেন।",
+                            data={
+                                "student_id": str(student_id),
+                                "adjustment_id": adj_id,
+                                "can_undo": True,
+                            },
+                        )
+                    continue
+
+                # In 'suggest' mode (or if locked), enqueue pending suggestion if under daily cap (Item 4)
+                if daily_count < 3:
+                    scr = StudentChangeRequest(
+                        setup_id=None,
+                        student_id=student_id,
+                        requested_changes={
+                            "type": sugg_type,
+                            "subject": ps.get("subject"),
+                            "field": ps.get("field"),
+                            "current_level": ps.get("current_level"),
+                            "suggested_level": ps.get("suggested_level"),
+                            "current_minutes": ps.get("current_minutes"),
+                            "suggested_minutes": ps.get("suggested_minutes"),
+                            "evidence_codes": ps.get("evidence_codes", []),
+                            "rationale": clean_rationale,
+                            "rationale_bn": clean_rationale_bn,
+                            "expires_at": (datetime.now(UTC) + timedelta(days=14)).isoformat(),
+                        },
+                        status="pending",
+                    )
+                    db.add(scr)
+                    daily_count += 1
+                    pending_keys.add((sugg_type, target_key))
 
         all_warnings = (
             list(plan_out.warnings)
@@ -774,6 +996,8 @@ async def submit_student_change_request(
         student_id=student_id,
         requested_changes=payload.requested_changes,
         status="pending",
+        setup_version=setup.version,
+        expires_at=utcnow() + timedelta(days=7),
     )
     db.add(req)
     await db.commit()
@@ -785,6 +1009,8 @@ async def submit_student_change_request(
         student_id=req.student_id,
         requested_changes=req.requested_changes,
         status=req.status,
+        setup_version=req.setup_version,
+        expires_at=req.expires_at,
         created_at=req.created_at,
     )
 
@@ -1517,11 +1743,17 @@ async def submit_student_settings_change_request(
             },
         )
 
+    stmt_sett = select(StudentStudySettings.version).where(StudentStudySettings.student_id == student_id)
+    res_sett = await db.execute(stmt_sett)
+    sett_ver = res_sett.scalar_one_or_none()
+
     req = StudentChangeRequest(
         setup_id=None,
         student_id=student_id,
         requested_changes=payload.requested_changes,
         status="pending",
+        setup_version=sett_ver,
+        expires_at=utcnow() + timedelta(days=7),
     )
     db.add(req)
     await db.commit()
@@ -1533,6 +1765,8 @@ async def submit_student_settings_change_request(
         student_id=req.student_id,
         requested_changes=req.requested_changes,
         status=req.status,
+        setup_version=req.setup_version,
+        expires_at=req.expires_at,
         created_at=req.created_at,
     )
 
@@ -1582,18 +1816,27 @@ async def list_ai_suggestions(
     output: list[AiSuggestionResponse] = []
     for r in records:
         ch = r.requested_changes or {}
-        if ch.get("type") == "ai_priority_suggestion":
+        ch_type = ch.get("type", "ai_priority_suggestion")
+        if ch_type in ("ai_priority_suggestion", "ai_minute_suggestion"):
+            exp_raw = ch.get("expires_at")
+            exp_dt = datetime.fromisoformat(exp_raw) if exp_raw else None
             output.append(
                 AiSuggestionResponse(
                     id=r.id,
                     student_id=r.student_id,
-                    subject=ch.get("subject", ""),
-                    current_level=ch.get("current_level", "normal"),
-                    suggested_level=ch.get("suggested_level", "main"),
+                    type=ch_type,
+                    subject=ch.get("subject"),
+                    field=ch.get("field"),
+                    current_level=ch.get("current_level"),
+                    suggested_level=ch.get("suggested_level"),
+                    current_minutes=ch.get("current_minutes"),
+                    suggested_minutes=ch.get("suggested_minutes"),
                     evidence_codes=ch.get("evidence_codes", []),
                     rationale=ch.get("rationale", ""),
+                    rationale_bn=ch.get("rationale_bn"),
                     status=r.status,
                     created_at=r.created_at,
+                    expires_at=exp_dt,
                 )
             )
     return output
@@ -1609,46 +1852,100 @@ async def approve_ai_suggestion(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
-    """Parent approves an AI planner priority suggestion, updating settings and regenerating plan."""
+    """Parent approves an AI planner suggestion (priority or minute-change), updating settings and regenerating plan."""
     if current_user.role != "parent" and current_user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required")
     if current_user.role == "parent":
         await verify_parent_access_to_student(current_user, student_id, db)
 
-    stmt = select(StudentChangeRequest).where(
-        StudentChangeRequest.id == suggestion_id,
-        StudentChangeRequest.student_id == student_id,
+    # 1. Row-level lock to prevent race conditions (Item 4)
+    stmt = (
+        select(StudentChangeRequest)
+        .where(
+            StudentChangeRequest.id == suggestion_id,
+            StudentChangeRequest.student_id == student_id,
+        )
+        .with_for_update()
     )
     res = await db.execute(stmt)
     req = res.scalars().first()
-    if not req or req.status != "pending":
+    if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found")
 
-    ch = req.requested_changes or {}
-    sub = ch.get("subject")
-    sugg_level = ch.get("suggested_level")
+    # Item (4): Concurrent approvals return 409 Conflict
+    if req.status in ("approved", "rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Suggestion has already been processed",
+        )
 
-    # Apply to student study settings
+    if req.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot approve suggestion in status '{req.status}'",
+        )
+
+    ch = req.requested_changes or {}
+    sugg_type = ch.get("type", "ai_priority_suggestion")
+
+    # Item (4): Expire after set time
+    expires_at_raw = ch.get("expires_at")
+    if expires_at_raw:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at_raw)
+            if datetime.now(UTC) > exp_dt:
+                req.status = "expired"
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="Suggestion has expired",
+                )
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Re-validate at approval against active student study settings (Item 4)
     stmt_settings = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id).with_for_update()
     res_s = await db.execute(stmt_settings)
     settings_obj = res_s.scalars().first()
 
-    # Rule V09: Locked fields check
-    if settings_obj and sub:
-        locked_fields = set(settings_obj.parent_locked_fields or [])
-        if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+    locked_fields = set(settings_obj.parent_locked_fields or []) if settings_obj else set()
+    old_val: Any = None
+    new_val: Any = None
+    sub: str | None = None
+    sugg_level: str | None = None
+
+    if sugg_type == "ai_priority_suggestion":
+        sub = ch.get("subject")
+        sugg_level = ch.get("suggested_level")
+        if settings_obj and sub:
+            if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Subject priority for '{sub}' is locked by parent against AI suggestions (Rule V09)",
+                )
+        old_prios = dict(settings_obj.subject_priorities) if settings_obj else {}
+        old_val = old_prios.get(sub, "normal")
+        new_val = sugg_level
+        if settings_obj and sub and sugg_level:
+            new_prios = dict(settings_obj.subject_priorities or {})
+            new_prios[sub] = sugg_level
+            settings_obj.subject_priorities = new_prios
+            settings_obj.version += 1
+            settings_obj.updated_at = datetime.now(UTC)
+    elif sugg_type == "ai_minute_suggestion":
+        fld = ch.get("field", "school_day_minutes")
+        sugg_mins = ch.get("suggested_minutes")
+        if fld in locked_fields:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Subject priority for '{sub}' is locked by parent against AI suggestions (Rule V09)",
+                detail=f"Daily minute field '{fld}' is locked by parent against AI suggestions",
             )
-
-    old_prios = dict(settings_obj.subject_priorities) if settings_obj else {}
-    if settings_obj and sub and sugg_level:
-        new_prios = dict(settings_obj.subject_priorities or {})
-        new_prios[sub] = sugg_level
-        settings_obj.subject_priorities = new_prios
-        settings_obj.version += 1
-        settings_obj.updated_at = datetime.now(UTC)
+        old_val = getattr(settings_obj, fld, 60) if settings_obj else 60
+        new_val = sugg_mins
+        if settings_obj and sugg_mins:
+            setattr(settings_obj, fld, sugg_mins)
+            settings_obj.version += 1
+            settings_obj.updated_at = datetime.now(UTC)
 
     req.status = "approved"
     req.reviewed_at = datetime.now(UTC)
@@ -1662,9 +1959,9 @@ async def approve_ai_suggestion(
         target_id=str(student_id),
         meta={
             "suggestion_id": str(suggestion_id),
-            "subject": sub,
-            "old_priority": old_prios.get(sub),
-            "new_priority": sugg_level,
+            "type": sugg_type,
+            "old_value": old_val,
+            "new_value": new_val,
             "at": datetime.now(UTC).isoformat(),
         },
     )

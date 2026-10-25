@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from core.common.database import AsyncSessionLocal
@@ -19,7 +20,14 @@ from core.planner.engine import (
     SubjectSetupInput,
     generate_student_plan,
 )
-from core.planner.models import Plan, PlanDay, StudySetup, SyllabusItem, Task
+from core.planner.models import (
+    AiPlannerShadowRun,
+    Plan,
+    PlanDay,
+    StudySetup,
+    SyllabusItem,
+    Task,
+)
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -240,3 +248,38 @@ async def _async_extend_rolling_plans() -> dict[str, Any]:
 def extend_rolling_plans_task() -> dict[str, Any]:
     """Scheduled task to extend rolling plan horizon for students with upcoming horizon."""
     return asyncio.run(_async_extend_rolling_plans())
+
+
+async def _async_purge_shadow_runs_retention(retention_days: int = 30) -> dict[str, Any]:
+    """Purge AI planner shadow run evaluation records older than retention threshold (Item 7)."""
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    async with AsyncSessionLocal() as session:
+        stmt = delete(AiPlannerShadowRun).where(AiPlannerShadowRun.at < cutoff)
+        res = await session.execute(stmt)
+        purged = getattr(res, "rowcount", 0)
+        await session.commit()
+    logger.info("Purged %d shadow runs older than %d days", purged, retention_days)
+    return {"status": "ok", "purged_count": purged, "retention_days": retention_days}
+
+
+@celery_app.task(name="purge_shadow_runs_retention_task")
+def purge_shadow_runs_retention_task(retention_days: int = 30) -> dict[str, Any]:
+    """Scheduled periodic task to clean up old shadow runs from ai_planner_shadow_runs (Item 7)."""
+    return asyncio.run(_async_purge_shadow_runs_retention(retention_days))
+
+
+async def _async_dispatch_deferred_pushes() -> dict[str, Any]:
+    """Execute deferred pushes dispatch within an async session."""
+    from core.notifications.service import NotificationService
+
+    async with AsyncSessionLocal() as session:
+        processed = await NotificationService.dispatch_deferred_pushes(session)
+        await session.commit()
+        return {"status": "ok", "processed_count": len(processed)}
+
+
+@celery_app.task(name="dispatch_deferred_pushes_task")
+def dispatch_deferred_pushes_task() -> dict[str, Any]:
+    """Scheduled periodic task every minute to dispatch deferred pushes whose quiet hours have ended."""
+    return asyncio.run(_async_dispatch_deferred_pushes())
+

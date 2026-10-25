@@ -275,6 +275,13 @@ async def refresh_session(
             .values(revoked_at=utcnow())
         )
         await db.execute(revoke_all_stmt)
+        # Token cleanup on session revocation (Item 3)
+        from core.devices.models import Device
+        await db.execute(
+            update(Device)
+            .where(Device.user_id == old_session.user_id)
+            .values(push_token=None)
+        )
 
         audit = AuditLog(
             id=uuid.uuid4(),
@@ -372,6 +379,14 @@ async def logout_session(
 
     if sess and sess.revoked_at is None:
         sess.revoked_at = utcnow()
+        # Item 3: Logout affects ONLY that specific device
+        if sess.device_id:
+            from core.devices.models import Device
+            await db.execute(
+                update(Device)
+                .where(Device.id == sess.device_id, Device.user_id == sess.user_id)
+                .values(push_token=None)
+            )
         await db.flush()
 
     return {"status": "logged_out"}

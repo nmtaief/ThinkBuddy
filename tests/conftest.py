@@ -36,6 +36,8 @@ async def wire_gateway_and_reset_rate_limits() -> AsyncGenerator[None, None]:
     gateway.client.core_client.base_url = original_url
     await RateLimiter.reset()
     await engine.dispose()
+    from core.common.redis import close_redis
+    await close_redis()
 
 
 @pytest.fixture

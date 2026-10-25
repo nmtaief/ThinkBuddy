@@ -843,8 +843,8 @@ async def update_ai_planner_config(
     current_user: Annotated[User, Depends(require_role("admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AiPlannerStatusResponse:
-    """Update AI planner global kill switch, shadow mode, and class band rollout."""
     from core.common.config import settings as cfg
+    from core.planner.rollout import set_ai_planner_rollout_config
 
     old_meta = {
         "enabled": cfg.AI_PLANNER_ENABLED,
@@ -852,17 +852,19 @@ async def update_ai_planner_config(
         "enabled_class_bands": list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
     }
 
-    if payload.enabled is not None:
-        cfg.AI_PLANNER_ENABLED = payload.enabled
-    if payload.shadow_mode is not None:
-        cfg.AI_PLANNER_SHADOW_MODE = payload.shadow_mode
-    if payload.enabled_class_bands is not None:
-        cfg.AI_PLANNER_ENABLED_CLASS_BANDS = payload.enabled_class_bands
+    # Store rollout config and kill switch in Redis, versioned and audited across all workers immediately
+    updated_cfg = await set_ai_planner_rollout_config(
+        enabled=payload.enabled,
+        shadow_mode=payload.shadow_mode,
+        enabled_class_bands=payload.enabled_class_bands,
+        updated_by=str(current_user.id),
+    )
 
     new_meta = {
-        "enabled": cfg.AI_PLANNER_ENABLED,
-        "shadow_mode": cfg.AI_PLANNER_SHADOW_MODE,
-        "enabled_class_bands": list(cfg.AI_PLANNER_ENABLED_CLASS_BANDS),
+        "enabled": updated_cfg["enabled"],
+        "shadow_mode": updated_cfg["shadow_mode"],
+        "enabled_class_bands": updated_cfg["enabled_class_bands"],
+        "version": updated_cfg["version"],
     }
 
     # Immutable Audit Log
@@ -871,7 +873,7 @@ async def update_ai_planner_config(
         action="ai_planner.config_update",
         target_type="system_config",
         target_id=str(current_user.id),
-        meta={"old": old_meta, "new": new_meta, "at": datetime.now(UTC).isoformat()},
+        meta={"old": old_meta, "new": new_meta, "version": updated_cfg["version"], "at": datetime.now(UTC).isoformat()},
     )
     db.add(audit)
     await db.commit()
@@ -902,57 +904,109 @@ async def get_ai_planner_shadow_metrics(
     current_user: Annotated[User, Depends(require_role("admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ShadowMetricsResponse:
-    """Get aggregated metrics and latest reports from AI planner shadow-mode runs."""
+    """Get aggregated metrics and latest reports from AI planner shadow-mode runs (from dedicated table)."""
+    from core.planner.models import AiPlannerShadowRun
+
+    # Query dedicated shadow runs table
     stmt = (
-        select(AuditLog)
-        .where(AuditLog.action == "ai_planner.shadow_comparison")
-        .order_by(AuditLog.at.desc())
+        select(AiPlannerShadowRun)
+        .order_by(AiPlannerShadowRun.at.desc())
         .limit(100)
     )
     res = await db.execute(stmt)
-    logs = res.scalars().all()
+    shadow_runs = res.scalars().all()
 
-    total_runs = len(logs)
-    if total_runs == 0:
+    # Fallback to AuditLog if table is empty
+    if not shadow_runs:
+        stmt_audit = (
+            select(AuditLog)
+            .where(AuditLog.action == "ai_planner.shadow_comparison")
+            .order_by(AuditLog.at.desc())
+            .limit(100)
+        )
+        res_audit = await db.execute(stmt_audit)
+        logs = res_audit.scalars().all()
+        if not logs:
+            return ShadowMetricsResponse(
+                total_runs=0,
+                coverage_parity_pass_count=0,
+                coverage_parity_pass_rate_pct=100.0,
+                avg_churn_rate_pct=0.0,
+                avg_minute_delta=0.0,
+                total_warnings=0,
+                recent_runs=[],
+            )
+
+        pass_count = 0
+        total_churn = 0.0
+        total_delta = 0.0
+        total_warns = 0
+        recent_runs: list[dict[str, Any]] = []
+
+        for l in logs:
+            meta = l.meta or {}
+            metrics = meta.get("metrics", {})
+            parity = metrics.get("coverage_parity_met", True)
+            if parity:
+                pass_count += 1
+            churn = metrics.get("churn_rate_pct", 0.0)
+            total_churn += churn
+            delta = metrics.get("minutes_delta", 0.0)
+            total_delta += delta
+            warns = metrics.get("ai_warnings_count", 0)
+            total_warns += warns
+
+            if len(recent_runs) < 10:
+                recent_runs.append(
+                    {
+                        "student_id": meta.get("student_id"),
+                        "at": meta.get("at") or l.at.isoformat(),
+                        "recommendation": meta.get("recommendation", "PASS"),
+                        "parity_met": parity,
+                        "churn_rate_pct": churn,
+                        "minutes_delta": delta,
+                        "ai_warnings_count": warns,
+                    }
+                )
+
+        pass_rate = round((pass_count / len(logs)) * 100.0, 1)
+        avg_churn = round(total_churn / len(logs), 1)
+        avg_delta = round(total_delta / len(logs), 1)
+
         return ShadowMetricsResponse(
-            total_runs=0,
-            coverage_parity_pass_count=0,
-            coverage_parity_pass_rate_pct=100.0,
-            avg_churn_rate_pct=0.0,
-            avg_minute_delta=0.0,
-            total_warnings=0,
-            recent_runs=[],
+            total_runs=len(logs),
+            coverage_parity_pass_count=pass_count,
+            coverage_parity_pass_rate_pct=pass_rate,
+            avg_churn_rate_pct=avg_churn,
+            avg_minute_delta=avg_delta,
+            total_warnings=total_warns,
+            recent_runs=recent_runs,
         )
 
+    total_runs = len(shadow_runs)
     pass_count = 0
     total_churn = 0.0
     total_delta = 0.0
     total_warns = 0
-    recent_runs: list[dict[str, Any]] = []
+    recent_runs_list: list[dict[str, Any]] = []
 
-    for l in logs:
-        meta = l.meta or {}
-        metrics = meta.get("metrics", {})
-        parity = metrics.get("coverage_parity_met", True)
-        if parity:
+    for sr in shadow_runs:
+        if sr.coverage_parity_met:
             pass_count += 1
-        churn = metrics.get("churn_rate_pct", 0.0)
-        total_churn += churn
-        delta = metrics.get("minutes_delta", 0.0)
-        total_delta += delta
-        warns = metrics.get("ai_warnings_count", 0)
-        total_warns += warns
+        total_churn += sr.churn_rate_pct
+        total_delta += sr.minutes_delta
+        total_warns += sr.ai_warnings_count
 
-        if len(recent_runs) < 10:
-            recent_runs.append(
+        if len(recent_runs_list) < 10:
+            recent_runs_list.append(
                 {
-                    "student_id": meta.get("student_id"),
-                    "at": meta.get("at") or l.at.isoformat(),
-                    "recommendation": meta.get("recommendation", "PASS"),
-                    "parity_met": parity,
-                    "churn_rate_pct": churn,
-                    "minutes_delta": delta,
-                    "ai_warnings_count": warns,
+                    "student_id": str(sr.student_id),
+                    "at": sr.at.isoformat(),
+                    "recommendation": sr.recommendation,
+                    "parity_met": sr.coverage_parity_met,
+                    "churn_rate_pct": sr.churn_rate_pct,
+                    "minutes_delta": float(sr.minutes_delta),
+                    "ai_warnings_count": sr.ai_warnings_count,
                 }
             )
 
@@ -967,7 +1021,29 @@ async def get_ai_planner_shadow_metrics(
         avg_churn_rate_pct=avg_churn,
         avg_minute_delta=avg_delta,
         total_warnings=total_warns,
-        recent_runs=recent_runs,
+        recent_runs=recent_runs_list,
     )
+
+
+@router.delete(
+    "/ai-planner/shadow-metrics/retention",
+    status_code=status.HTTP_200_OK,
+)
+async def cleanup_shadow_metrics_retention(
+    current_user: Annotated[User, Depends(require_role("admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    retention_days: int = Query(default=30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Purge shadow-mode comparison records older than retention_days (Item 5)."""
+    from datetime import timedelta
+    from sqlalchemy import delete
+    from core.planner.models import AiPlannerShadowRun
+
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    stmt = delete(AiPlannerShadowRun).where(AiPlannerShadowRun.at < cutoff)
+    res = await db.execute(stmt)
+    await db.commit()
+    purged = getattr(res, "rowcount", 0)
+    return {"status": "ok", "purged_count": purged, "retention_days": retention_days}
 
 

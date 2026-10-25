@@ -1,1 +1,1 @@
-"""ThinkBuddy core module: notifications."""
+"""Notifications module (P07)."""

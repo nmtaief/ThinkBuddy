@@ -610,23 +610,34 @@ class AiPlannerProvider(PlanProvider):
 def get_plan_provider(
     resolved_settings: ResolvedPlannerSettings,
     client: httpx.AsyncClient | None = None,
+    per_student_override: bool | None = None,
+    rollout_config: dict[str, Any] | None = None,
 ) -> PlanProvider:
-    """Return appropriate PlanProvider taking into account kill switches, class band rollout, and per-student mode."""
-    # 1. Global Kill Switch
-    if not app_settings.AI_PLANNER_ENABLED:
+    """Return appropriate PlanProvider taking into account kill switches, class band rollout, and per-student override."""
+    # 1. Per-student explicit override takes precedence
+    if per_student_override is not None:
+        if per_student_override is True:
+            return AiPlannerProvider(client=client)
         return DeterministicProvider()
 
-    # 2. Per-class-band rollout gate
-    if resolved_settings.class_band not in app_settings.AI_PLANNER_ENABLED_CLASS_BANDS:
+    # 2. Per-student mode override: manual mode forces deterministic planner
+    if resolved_settings.adaptive_mode == "manual":
+        return DeterministicProvider()
+
+    # 3. Dynamic Rollout configuration / Global Kill Switch
+    cfg = rollout_config or {}
+    is_enabled = cfg.get("enabled", app_settings.AI_PLANNER_ENABLED)
+    if not is_enabled:
+        return DeterministicProvider()
+
+    # 4. Per-class-band rollout gate
+    enabled_bands = cfg.get("enabled_class_bands", app_settings.AI_PLANNER_ENABLED_CLASS_BANDS)
+    if resolved_settings.class_band not in enabled_bands:
         logger.info(
             "AI planner not enabled for class band %s (active rollout: %s). Using deterministic.",
             resolved_settings.class_band,
-            app_settings.AI_PLANNER_ENABLED_CLASS_BANDS,
+            enabled_bands,
         )
-        return DeterministicProvider()
-
-    # 3. Per-student override: manual mode forces deterministic planner
-    if resolved_settings.adaptive_mode == "manual":
         return DeterministicProvider()
 
     return AiPlannerProvider(client=client)

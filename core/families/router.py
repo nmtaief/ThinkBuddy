@@ -343,6 +343,25 @@ async def revoke_parent_student_link(
     link.revoked_at = utcnow()
     link.link_code_hash = None
 
+    # Invalidate dashboard cache for student (Item 5)
+    from core.parent.service import ParentService
+    await ParentService.invalidate_student_dashboard_cache(link.student_id)
+
+    # Token cleanup on parent link revocation (Item 3: shared devices)
+    from core.devices.models import Device
+    stmt_shared = (
+        select(Device.push_token)
+        .where(Device.user_id == link.student_id, Device.push_token.is_not(None))
+    )
+    res_shared = await db.execute(stmt_shared)
+    student_tokens = [t for t in res_shared.scalars().all() if t]
+    if student_tokens:
+        await db.execute(
+            update(Device)
+            .where(Device.user_id == current_user.id, Device.push_token.in_(student_tokens))
+            .values(push_token=None)
+        )
+
     # Audit log
     audit = AuditLog(
         id=uuid.uuid4(),

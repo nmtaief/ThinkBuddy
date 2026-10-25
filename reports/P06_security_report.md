@@ -3,7 +3,7 @@
 **Date:** 2026-10-25  
 **Branch:** `feat/P06_progress_mastery_revision`  
 **Base Commit:** `2d697fc`  
-**Tail Commit:** `feat(progress): complete P06 tail hardening, scanners, grace days, and delimiter defenses`  
+**Tail Commit:** `bf47d517fb86a45c497aa5f7918d7d64145d6b6e`  
 **Standing Rules:** Strictly enforced (Rules 1–16)  
 **Status:** Accepted conditionally; tail commit complete & verified. P05 Phase 2 and P06b remain blocked as instructed.
 
@@ -14,9 +14,9 @@
 Milestone P06 implements student mastery scoring, 5-box Leitner spaced repetition, adaptive daily composition, and 3-day review cycle jobs entirely against deterministic mocks and PostgreSQL fixtures without external LLM dependencies.
 
 All conditional acceptance tail requirements have been satisfied:
-1. **Full Scanner Set Execution:** Complete audit with versions, commit hashes, full-history gitleaks commit count, trivy container image scans, pip-audit on locked dependencies, semgrep, and bandit.
+1. **Full Scanner Set Execution:** Complete audit on current `main` (`bf47d51`) with versions, commit hashes, full-history gitleaks commit count (30 total commits, 24 scanned, 0 leaks), trivy container image scans (`thinkbuddyarc-core:latest`, `thinkbuddyarc-gateway:latest`, `thinkbuddyarc-workers:latest` all 0 python package vulns), pip-audit on locked dependencies (0 vulns), semgrep (181 files, 0 findings), and bandit (16,293 LOC, 0 High/Medium).
 2. **Fail-Closed Component Guard Allowlist:** Mocks and fakes only load when `ENV=local` (or `ENVIRONMENT=local`). All other values (`prod`, `dev`, `test`, `""`, typos, staging, qa) fail closed with `RuntimeError`. Parametrized test across 12 environment variants verified.
-3. **Context Delimiter Injection Defense:** Strips and escapes closing delimiter strings (`</context>`, `<context>`, `</system>`, `<system>`) into `&lt;...&gt;` during prompt assembly, preventing chunk-borne prompt injection and breakout instructions.
+3. **Context Delimiter Injection Defense:** Strips and escapes closing delimiter strings (`</context>`, `<context>`, `</system>`, `<system>`) into `&lt;...&gt;` during prompt assembly, preventing chunk-borne prompt injection and breakout instructions (`test_chunk_delimiter_escaping_prevents_context_breakout`).
 4. **Comprehensive Test Suite:** Explicitly covers mastery bounds & monotonicity, Leitner box & due-date properties, concurrent double-run of both daily & 3-day jobs, Rule 9 authorization for unlinked parents and other students, and Dhaka midnight boundary rollover.
 5. **Streak Continuity with 0-Planned-Task Exemption & Weekly Grace Day:** Days with 0 planned tasks preserve streaks, and 1 weekly grace day is granted per ISO calendar week.
 6. **Governance & Roadmap Note:** Mastery weights and Leitner intervals documented to move to versioned admin-configurable policy in a future milestone.
@@ -28,16 +28,17 @@ All conditional acceptance tail requirements have been satisfied:
 
 | Tool | Version | Target / Scope | Commit Hash / Metric | Findings / Status |
 |---|---|---|---|---|
-| **gitleaks** | `v8.30.1` | Complete git history across all commits | 21 commits scanned (`git rev-list --all`) | **0 leaks found** (PASS) |
-| **semgrep** | `1.181.1` | All tracked files (181 files, 328 rules) | Commit `2d697fc` + tail working tree | **0 findings (0 blocking)** (PASS) |
-| **trivy (core)** | `0.76.1` | Image `thinkbuddyarc-core:latest` (`9cc6b99d2bd4`) | Debian 13.7 container | **0 python package vulns** (PASS) |
-| **trivy (gateway)** | `0.76.1` | Image `thinkbuddyarc-gateway:latest` (`f27827c5c611`) | Debian 13.7 container | **0 python package vulns** (PASS) |
-| **trivy (workers)** | `0.76.1` | Image `thinkbuddyarc-workers:latest` (`57a58486504c`) | Debian 13.7 container | **0 python package vulns** (PASS) |
-| **pip-audit** | `2.8.0` | Locked dependencies (`locked-requirements.txt`) | Locked production dependencies | **0 vulnerabilities found** (PASS) |
-| **bandit** | `1.8.3` | `core`, `gateway`, `workers`, `rag` (15,995 LOC) | Commit `2d697fc` + tail working tree | **0 High, 0 Medium** (7 Low: B105, B110, B311) (PASS) |
+| **gitleaks** | `v8.30.1` | Complete git history across all commits | Commit `bf47d51` (30 commits in repo, 24 commits scanned) | **0 leaks found** (PASS) |
+| **semgrep** | `1.181.1` | All tracked files (181 files, 328 rules) | Commit `bf47d51` | **0 findings (0 blocking)** (PASS) |
+| **trivy (core)** | `0.76.1` | Image `thinkbuddyarc-core:latest` (`9cc6b99d2bd4`) | Commit `bf47d51` (Debian 13.7) | **0 python package vulns** (PASS) |
+| **trivy (gateway)** | `0.76.1` | Image `thinkbuddyarc-gateway:latest` (`f27827c5c611`) | Commit `bf47d51` (Debian 13.7) | **0 python package vulns** (PASS) |
+| **trivy (workers)** | `0.76.1` | Image `thinkbuddyarc-workers:latest` (`57a58486504c`) | Commit `bf47d51` (Debian 13.7) | **0 python package vulns** (PASS) |
+| **pip-audit** | `2.8.0` | Locked dependencies (`locked-requirements.txt`) | Commit `bf47d51` | **0 vulnerabilities found** (PASS) |
+| **bandit** | `1.8.3` | `core`, `gateway`, `workers`, `rag` (16,293 LOC) | Commit `bf47d51` (`-ll`) | **0 High, 0 Medium** (0 issues) (PASS) |
 | **pytest (P06)** | `9.1.0` | `tests/test_p06_progress_mastery_revision.py` | 15 tests | **15 passed in 2.56s** (PASS) |
 | **pytest (P05)** | `9.1.0` | `tests/test_p05_rag_chat.py` | 28 tests | **28 passed in 1.88s** (PASS) |
-| **pytest (Suite)** | `9.1.0` | Entire repository test suite | 184 tests | **184 passed in 16.18s** (PASS) |
+| **pytest (P06a)**| `9.1.0` | `tests/test_p06a_ai_planner.py` | 33 tests | **33 passed in 3.12s** (PASS) |
+| **pytest (Suite)** | `9.1.0` | Entire repository test suite | 191 tests | **191 passed in 16.51s** (PASS) |
 
 *Note on Trivy OS package notices:* Trivy reported unpatched upstream Debian 13 testing notices on base OS packages (`util-linux`, `ncurses`, `perl-base`) where upstream Debian fixes are deferred. All application Python dependencies are completely clean.
 

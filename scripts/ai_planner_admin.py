@@ -116,7 +116,30 @@ async def set_rollout(admin_id: uuid.UUID, class_bands: list[str]) -> None:
 
 async def show_shadow_metrics() -> None:
     """Print aggregate metrics from AI Planner shadow-mode runs."""
+    from core.planner.models import AiPlannerShadowRun
+
     async with AsyncSessionLocal() as session:
+        stmt_sr = select(AiPlannerShadowRun).order_by(AiPlannerShadowRun.at.desc()).limit(100)
+        res_sr = await session.execute(stmt_sr)
+        shadow_runs = res_sr.scalars().all()
+
+        if shadow_runs:
+            total_runs = len(shadow_runs)
+            print("=" * 70)
+            print("THINKBUDDY AI PLANNER SHADOW-MODE METRICS (P06a Tail)")
+            print("=" * 70)
+            print(f"Total Shadow Runs:            {total_runs} (from ai_planner_shadow_runs)")
+            pass_count = sum(1 for sr in shadow_runs if sr.coverage_parity_met)
+            total_churn = sum(sr.churn_rate_pct for sr in shadow_runs)
+            total_delta = sum(sr.minutes_delta for sr in shadow_runs)
+            total_warns = sum(sr.ai_warnings_count for sr in shadow_runs)
+            print(f"Coverage Parity Pass Rate:    {round(pass_count / total_runs * 100.0, 1)}% ({pass_count}/{total_runs})")
+            print(f"Average Churn Rate:           {round(total_churn / total_runs, 1)}%")
+            print(f"Average Minute Delta:         {round(total_delta / total_runs, 1)}m")
+            print(f"Total AI Warnings:            {total_warns}")
+            print("=" * 70)
+            return
+
         stmt = (
             select(AuditLog)
             .where(AuditLog.action == "ai_planner.shadow_comparison")

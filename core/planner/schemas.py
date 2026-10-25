@@ -96,6 +96,8 @@ class StudentChangeRequestResponse(BaseModel):
     student_id: uuid.UUID
     requested_changes: dict[str, Any]
     status: str
+    setup_version: int | None = None
+    expires_at: datetime | None = None
     created_at: datetime
 
 
@@ -202,6 +204,12 @@ class CreateAdminPolicyRequest(BaseModel):
     min_daily_minutes: int = Field(default=0, ge=0, le=600)
     max_daily_minutes: int = Field(default=600, ge=0, le=600)
     recommended_daily_minutes: int = Field(default=90, ge=0, le=600)
+    school_day_default_minutes: int = Field(default=60, ge=0, le=600)
+    school_day_ceiling_minutes: int = Field(default=120, ge=0, le=600)
+    school_day_hard_limit_minutes: int = Field(default=180, ge=0, le=600)
+    holiday_default_minutes: int = Field(default=120, ge=0, le=600)
+    holiday_ceiling_minutes: int = Field(default=180, ge=0, le=600)
+    holiday_hard_limit_minutes: int = Field(default=240, ge=0, le=600)
     max_block_minutes: int = Field(default=90, ge=15, le=180)
     latest_end_time: str = Field(default="22:00", pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
     weekly_off_days: list[str] = Field(default_factory=lambda: ["fri", "sat"])
@@ -214,6 +222,12 @@ class UpdateAdminPolicyRequest(BaseModel):
     min_daily_minutes: int | None = Field(default=None, ge=0, le=600)
     max_daily_minutes: int | None = Field(default=None, ge=0, le=600)
     recommended_daily_minutes: int | None = Field(default=None, ge=0, le=600)
+    school_day_default_minutes: int | None = Field(default=None, ge=0, le=600)
+    school_day_ceiling_minutes: int | None = Field(default=None, ge=0, le=600)
+    school_day_hard_limit_minutes: int | None = Field(default=None, ge=0, le=600)
+    holiday_default_minutes: int | None = Field(default=None, ge=0, le=600)
+    holiday_ceiling_minutes: int | None = Field(default=None, ge=0, le=600)
+    holiday_hard_limit_minutes: int | None = Field(default=None, ge=0, le=600)
     max_block_minutes: int | None = Field(default=None, ge=15, le=180)
     latest_end_time: str | None = Field(default=None, pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
     weekly_off_days: list[str] | None = None
@@ -232,6 +246,12 @@ class AdminPolicyResponse(BaseModel):
     min_daily_minutes: int
     max_daily_minutes: int
     recommended_daily_minutes: int
+    school_day_default_minutes: int = 60
+    school_day_ceiling_minutes: int = 120
+    school_day_hard_limit_minutes: int = 180
+    holiday_default_minutes: int = 120
+    holiday_ceiling_minutes: int = 180
+    holiday_hard_limit_minutes: int = 240
     max_block_minutes: int
     latest_end_time: str
     weekly_off_days: list[str]
@@ -405,13 +425,19 @@ class AiSuggestionResponse(BaseModel):
 
     id: uuid.UUID
     student_id: uuid.UUID
-    subject: str
-    current_level: str
-    suggested_level: str
+    type: str = "ai_priority_suggestion"
+    subject: str | None = None
+    field: str | None = None
+    current_level: str | None = None
+    suggested_level: str | None = None
+    current_minutes: int | None = None
+    suggested_minutes: int | None = None
     evidence_codes: list[str] = Field(default_factory=list)
     rationale: str
+    rationale_bn: str | None = None
     status: str
     created_at: datetime
+    expires_at: datetime | None = None
 
 
 class ShadowMetricsResponse(BaseModel):

@@ -84,6 +84,7 @@ from core.devices.router import router as devices_router  # noqa: E402
 from core.entitlements.router import router as entitlements_router  # noqa: E402
 from core.families.router import router as families_router  # noqa: E402
 from core.notifications.router import router as notifications_router  # noqa: E402
+from core.parent.router import router as parent_router  # noqa: E402
 from core.planner.admin_router import router as planner_admin_router  # noqa: E402
 from core.planner.router import router as planner_router  # noqa: E402
 from core.progress.router import router as progress_router  # noqa: E402
@@ -107,6 +108,7 @@ internal_routers = [
     progress_router,
     revision_router,
     notifications_router,
+    parent_router,
     devices_router,
     entitlements_router,
     admin_router,

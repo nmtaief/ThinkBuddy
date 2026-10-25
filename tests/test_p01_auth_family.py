@@ -624,6 +624,10 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
             "0011_p04_tail",
             "0012_p05_chat_tables",
             "0013_p06_progress_mastery",
+            "0014_p06_tail_shadow_runs_and_overrides",
+            "0015_p07_parent_notifications",
+            "0016_p07_delivery_and_rollout",
+            "0017_p07_tail_enhancements",
         )
 
         # 3. Test policy directly against live Postgres DB rows

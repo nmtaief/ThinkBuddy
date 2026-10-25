@@ -260,6 +260,8 @@ class StudentChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    setup_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -333,6 +335,12 @@ class AdminPolicy(Base):
     min_daily_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_daily_minutes: Mapped[int] = mapped_column(Integer, default=600, nullable=False)
     recommended_daily_minutes: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    school_day_default_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    school_day_ceiling_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
+    school_day_hard_limit_minutes: Mapped[int] = mapped_column(Integer, default=180, nullable=False)
+    holiday_default_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
+    holiday_ceiling_minutes: Mapped[int] = mapped_column(Integer, default=180, nullable=False)
+    holiday_hard_limit_minutes: Mapped[int] = mapped_column(Integer, default=240, nullable=False)
     max_block_minutes: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
     latest_end_time: Mapped[str] = mapped_column(String(8), default="22:00", nullable=False)
     weekly_off_days: Mapped[list[str]] = mapped_column(
@@ -384,6 +392,7 @@ class StudentStudySettings(Base):
     )  # manual, suggest, auto_within_limits
     ai_adjustments: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     parent_locked_fields: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    ai_planner_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -395,3 +404,32 @@ class StudentStudySettings(Base):
     student: Mapped[User] = relationship("User")
 
     __table_args__ = (Index("ix_student_study_settings_student_id", "student_id"),)
+
+
+class AiPlannerShadowRun(Base):
+    """Shadow-mode evaluation runs comparing AI planner against deterministic baseline.
+
+    Strictly stores aggregated comparison metrics and recommendations.
+    NEVER stores prompts, snapshots, plan payloads, or student PII (Rule 15).
+    """
+
+    __tablename__ = "ai_planner_shadow_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    recommendation: Mapped[str] = mapped_column(String(32), nullable=False)
+    coverage_parity_met: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    churn_rate_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    minutes_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    ai_warnings_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    student: Mapped[User] = relationship("User")
+
+    __table_args__ = (
+        Index("ix_ai_planner_shadow_runs_student_at", "student_id", "at"),
+    )

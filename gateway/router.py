@@ -721,8 +721,16 @@ def _get_authenticated_user_id(request: Request) -> str | None:
     return None
 
 
-@router.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-@router.api_route("/v1/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@router.api_route(
+    "/internal/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
+@router.api_route(
+    "/v1/internal/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+)
 async def block_gateway_internal_routes(path: str) -> Response:
     """Public gateway strictly refuses to proxy internal routes."""
     return JSONResponse(
@@ -1091,4 +1099,182 @@ async def forward_admin_patch(path: str, request: Request) -> Response:
 @router.delete("/admin/{path:path}", tags=["Admin"], operation_id="gateway_admin_delete")
 async def forward_admin_delete(path: str, request: Request) -> Response:
     """Forward admin DELETE requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Parent Dashboard (docs/04_API_CONTRACT.md §8 / P07)
+# -------------------------------------------------------------------------
+@router.get(
+    "/parents/me/dashboard",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_parent_overview_dashboard_me",
+)
+async def gateway_parent_overview_dashboard_me(request: Request) -> Response:
+    """Forward parent overview dashboard GET requests for current user downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/me/students/{student_id}/dashboard",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_parent_student_dashboard_me",
+)
+async def gateway_parent_student_dashboard_me(
+    student_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward parent student dashboard GET requests for current user downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/me/students/{student_id}/change-requests/{request_id}/approve",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_approve_change_request_me",
+)
+async def gateway_approve_change_request_me(
+    student_id: uuid.UUID,
+    request_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward student change request approval downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/me/students/{student_id}/change-requests/{request_id}/decline",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_decline_change_request_me",
+)
+async def gateway_decline_change_request_me(
+    student_id: uuid.UUID,
+    request_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward student change request decline downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/{parent_id}/students/{student_id}/dashboard",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_parent_student_dashboard",
+)
+async def gateway_parent_student_dashboard(
+    parent_id: uuid.UUID,
+    student_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward parent student dashboard GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/{parent_id}/dashboard",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_parent_overview_dashboard",
+)
+async def gateway_parent_overview_dashboard(
+    parent_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward parent overview dashboard GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/{parent_id}/students/{student_id}/change-requests/{request_id}/approve",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_approve_change_request_explicit",
+)
+async def gateway_approve_change_request_explicit(
+    parent_id: uuid.UUID,
+    student_id: uuid.UUID,
+    request_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward student change request approval downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/{parent_id}/students/{student_id}/change-requests/{request_id}/decline",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_decline_change_request_explicit",
+)
+async def gateway_decline_change_request_explicit(
+    parent_id: uuid.UUID,
+    student_id: uuid.UUID,
+    request_id: uuid.UUID,
+    request: Request,
+) -> Response:
+    """Forward student change request decline downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/students/{student_id}/ai-adjustments/{adjustment_id}/undo",
+    tags=["Parent Dashboard"],
+    operation_id="gateway_undo_ai_adjustment",
+)
+async def gateway_undo_ai_adjustment(
+    student_id: uuid.UUID,
+    adjustment_id: str,
+    request: Request,
+) -> Response:
+    """Forward one-tap undo of automated AI adjustments downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+# -------------------------------------------------------------------------
+# Notifications (docs/04_API_CONTRACT.md §8 / P07)
+# -------------------------------------------------------------------------
+@router.get(
+    "/notifications",
+    tags=["Notifications"],
+    operation_id="gateway_notifications_list",
+)
+async def gateway_notifications_list(request: Request) -> Response:
+    """Forward notification listing GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/notifications/{notification_id}/read",
+    tags=["Notifications"],
+    operation_id="gateway_notification_mark_read",
+)
+async def gateway_notification_mark_read(notification_id: uuid.UUID, request: Request) -> Response:
+    """Forward single notification mark-read POST requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/notifications/read-all",
+    tags=["Notifications"],
+    operation_id="gateway_notifications_mark_all_read",
+)
+async def gateway_notifications_mark_all_read(request: Request) -> Response:
+    """Forward mark-all-read POST requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/notifications/preferences",
+    tags=["Notifications"],
+    operation_id="gateway_notification_preferences_get",
+)
+async def gateway_notification_preferences_get(request: Request) -> Response:
+    """Forward notification preferences GET requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.put(
+    "/notifications/preferences",
+    tags=["Notifications"],
+    operation_id="gateway_notification_preferences_put",
+)
+async def gateway_notification_preferences_put(request: Request) -> Response:
+    """Forward notification preferences PUT requests downstream to Core Service."""
     return await forward_to_core(request)

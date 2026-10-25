@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -43,22 +44,37 @@ logger = logging.getLogger(__name__)
 
 
 def sanitize_chunk_text(text: str) -> str:
-    """Escape or strip delimiter strings (including </context>, <context>) before prompt assembly."""
+    """Escape or strip delimiter strings (including </context>, <context>, </system>) before prompt assembly.
+
+    Security Defenses:
+    - Unicode NFKC normalization: resolves fullwidth homoglyphs (e.g. ＜ U+FF1C, ＞ U+FF1E, ／ U+FF0F).
+    - Spaced & case-insensitive matching: handles `<  /  context  >`, `< CONTEXT >`, etc.
+    - Mathematical / angle bracket lookalikes: handles ⟨, ⟩, ‹, ›.
+    """
     if not text:
         return ""
-    # Neutralize closing and opening context tags to prevent prompt injection breakouts
-    sanitized = re.sub(
-        r"<\s*/?\s*context\s*>",
-        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
-        text,
-        flags=re.IGNORECASE,
+
+    # 1. Unicode NFKC normalization maps fullwidth/homoglyph characters to standard ASCII
+    normalized = unicodedata.normalize("NFKC", text)
+
+    # 2. Neutralize context, system, instruction, and prompt tags (both ASCII and bracket lookalikes)
+    pattern = re.compile(
+        r"[<＜‹⟨]\s*[/／]?\s*(?:context|system|instruction|prompt)\s*[>＞›⟩]",
+        re.IGNORECASE,
     )
-    # Neutralize system tag variations
-    sanitized = re.sub(
-        r"<\s*/?\s*system\s*>",
-        lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"),
-        sanitized,
-        flags=re.IGNORECASE,
+    sanitized = pattern.sub(
+        lambda m: (
+            m.group(0)
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("＜", "&lt;")
+            .replace("＞", "&gt;")
+            .replace("‹", "&lt;")
+            .replace("›", "&gt;")
+            .replace("⟨", "&lt;")
+            .replace("⟩", "&gt;")
+        ),
+        normalized,
     )
     return sanitized
 
@@ -308,7 +324,7 @@ class ChatOrchestrator:
                 "content": (
                     "Context (Textbook Data - Reference Only):\n<context>\n"
                     + "\n---\n".join(sanitize_chunk_text(c.text) for c in chunks)
-                    + f"\n</context>\n\nQuestion: {payload.content}"
+                    + f"\n</context>\n\nQuestion: {sanitize_chunk_text(payload.content)}"
                 ),
             },
         ]

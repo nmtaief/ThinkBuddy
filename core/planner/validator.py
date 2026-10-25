@@ -53,6 +53,10 @@ logger = logging.getLogger("thinkbuddy.ai_planner.validator")
 EMAIL_REGEX = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
 PHONE_REGEX = re.compile(r"(?:\+?880|01)[3-9]\d{8}")
 PRIORITY_ORDER = {"normal": 0, "main": 1, "difficult": 2}
+HOSTILE_INJECTION_REGEX = re.compile(
+    r"(?:</?(?:context|system|prompt|instruction)>|ignore\s+(?:all\s+)?previous\s+instructions)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -185,6 +189,24 @@ class AiProposalValidator:
                 error_code="V01_MISSING_DAYS",
                 error_message="Response payload missing 'days' list",
             )
+
+        # V01: Oversized response check
+        total_tasks_count = sum(len(d.get("tasks", [])) for d in raw_days if isinstance(d, dict))
+        if len(raw_days) > 365 or total_tasks_count > 300:
+            return ValidationResult(
+                is_valid=False,
+                error_code="V01_OVERSIZED_RESPONSE",
+                error_message=f"Response payload exceeds maximum allowed size (days={len(raw_days)}, tasks={total_tasks_count})",
+            )
+
+        # V14: Hostile rationale check (Hard reject)
+        for sub, text in (payload.get("rationale") or {}).items():
+            if isinstance(text, str) and HOSTILE_INJECTION_REGEX.search(text):
+                return ValidationResult(
+                    is_valid=False,
+                    error_code="V14_HOSTILE_RATIONALE",
+                    error_message=f"Hostile injection attempt detected in rationale for {sub}",
+                )
 
         model_version = payload.get("model_info", {}).get("model_id", "ai-planner-v1.0")
         warnings: list[str] = list(payload.get("warnings", []))

@@ -112,7 +112,7 @@ async def readyz() -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 
 
-@app.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@app.api_route("/internal/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
 async def block_gateway_internal_direct(path: str) -> JSONResponse:
     """Public gateway strictly refuses to expose internal routes."""
     return JSONResponse(

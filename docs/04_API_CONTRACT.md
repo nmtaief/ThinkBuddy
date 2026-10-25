@@ -46,6 +46,10 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /students/{id}/ai-suggestions` – list pending AI planner priority suggestions for student.
 - `POST /students/{id}/ai-suggestions/{suggestion_id}/approve` – parent approves AI suggestion, updating settings and regenerating plan (enforces Rule V09 locked fields).
 - `POST /students/{id}/ai-suggestions/{suggestion_id}/reject` – parent rejects AI suggestion.
+- `POST /students/{id}/ai-adjustments/{adjustment_id}/undo` – parent one-tap undo to revert an auto-applied minute or priority adjustment and restore previous settings. Enforces optimistic concurrency via `expected_version` (409 on conflict), restricts undo execution strictly to linked parents, and clamps restored values to class band limits.
+- **Auto-Mode Numeric Caps & Safety Ceilings:**
+  - Total daily minutes are strictly bounded by parent limits and class band recommended ceilings (`6-8`: 120m, `9-10`: 180m, `11-12`: 240m; absolute minimum 15m). Auto mode can never exceed these ceilings.
+  - Rate of change limit: adjustments move at most 1 priority level step per cycle (`normal` ↔ `main` ↔ `difficult`) and at most ±20% daily study minutes per cycle.
 
 ### Admin Governance & Configuration (`/admin/*`, role: admin)
 - `GET /admin/policies` – list admin policies across class bands and groups.
@@ -64,6 +68,7 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /admin/ai-planner/circuit-breaker/reset` – force reset AI Planner circuit breaker to CLOSED.
 - `PUT /admin/ai-planner/config` – update AI Planner kill switch and rollout class bands.
 - `GET /admin/ai-planner/shadow-metrics` – get aggregate shadow-mode comparison metrics and latest run logs.
+- `DELETE /admin/ai-planner/shadow-metrics/retention?retention_days=30` – purge shadow run records older than retention threshold (default 30 days) from dedicated `ai_planner_shadow_runs` table. Scheduled daily background task ensures durable retention compliance.
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
@@ -102,6 +107,7 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
     - Active Assessed Quiz Lockout: Refused with 403 `QUIZ_IN_PROGRESS_CHAT_LOCKED` across all open attempt states (`created`, `active`, `warned`, `paused`); logs `chat_attempt` telemetry infraction.
     - Daily Quota: Enforced against family entitlement (free plan: 20 messages/day, premium: 100 messages/day). Returns 429 `DAILY_CHAT_QUOTA_EXCEEDED` when reached.
     - Rate Limits: 20 requests / min per authenticated student plus 60 requests / min per-IP ceiling.
+    - Delimiter Injection Defense: Prompt assembly applies NFKC Unicode normalization and neutralizes spaced, case-insensitive, fullwidth, and lookalike XML/bracket delimiters (`< / context >`, `‹system›`, `＜context＞`) in both user prompts and textbook chunks.
   - Grounded Citations (Rule 7 & 8): Every assistant answer carrying facts terminates with citations (`book_title`, `chapter_title`, `chapter_number`, `printed_page`, `chunk_id`). Authoritative printed page number is strictly rendered to users; internal PDF page index is kept separate.
   - Low Confidence Fallback: If retrieval confidence is below threshold (< 0.45), returns explicit "not found in your textbook" message without guessing or hallucinating citations.
 
@@ -115,9 +121,35 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /internal/jobs/daily-composition?student_id=` – internal worker endpoint triggering daily adaptive composition and planner regeneration under student advisory lock.
 - `POST /internal/jobs/three-day-review?student_id=` – internal worker endpoint triggering 3-day review cycle, assembling P04 review quiz, and regenerating planner.
 
-### Parent & Family
-- `GET /parents/me/students` – list of linked children.
-- `GET/PATCH /notifications/settings`.
+### Parent & Family (P07)
+- `GET /parents/me/students` – list linked children for authenticated parent.
+- `GET /parents/me/dashboard` – multi-student overview for the authenticated parent.
+- `GET /parents/me/students/{student_id}/dashboard` – consolidated parent view for a linked student (progress, mastery, revision, exams, AI suggestions, recent auto-adjustments, and topic-level AI chat summary; Rule 9 linkage enforced; strictly non-labeling and bilingual).
+- `GET /parents/{parent_id}/dashboard` & `GET /parents/{parent_id}/students/{student_id}/dashboard` – explicit parent ID paths. If `{parent_id}` is not `"me"` and does not match the authenticated parent ID, strictly rejected with HTTP 403 Forbidden.
+- `POST /parents/me/students/{student_id}/change-requests/{request_id}/approve` – linked parent approves student change request (with optional `comment`); applies changes to study settings/setup, regenerates unified schedule, invalidates cached dashboard, and dispatches in-app and push notifications to student.
+- `POST /parents/me/students/{student_id}/change-requests/{request_id}/decline` – linked parent declines student change request (with optional `comment`); records immutable audit log, invalidates cached dashboard, and notifies student.
+- `POST /parents/{parent_id}/students/{student_id}/change-requests/{request_id}/approve` & `decline` – explicit parent ID variants with strict ID mismatch checks (HTTP 403).
+- **Privacy & Non-Labeling Guarantees:**
+  - Topic-Level AI Chat Summary (Rule 15 & Deliverable 12): Parents never receive raw student chat messages or prompt transcripts. Dashboard returns `chat_topics` aggregating chapter/topic activity and query counts from curriculum citations.
+  - Approved Reason Templates: 15 approved localized templates map all planner reason codes into constructive growth-oriented language (Bangla & English). Fallback sanitizer ensures zero deficit labeling.
+  - Performance & Caching: Dashboard responses cached in Redis (`thinkbuddy:dashboard:{student_id}`, 60s TTL) with deterministic invalidation on changes, bounded query counts.
+
+### Notifications & Push Delivery (P07)
+- `GET /notifications?limit=50&offset=0&unread_only=false` – list paginated notifications for authenticated user with unread counts (Rule 9 ownership enforced).
+- `POST /notifications/{id}/read` – mark single notification as read (strictly checks `notification.user_id == current_user.id`; returns 403 Forbidden on ownership mismatch).
+- `POST /notifications/read-all` – mark all notifications for authenticated user as read.
+- `GET /notifications/preferences` – get authenticated user's notification channels and quiet hours configuration.
+- `PUT /notifications/preferences` – update authenticated user's notification channels and quiet hours.
+- `POST /devices` – register client device with FCM push token, platform, app version, and form factor.
+- `PATCH /devices/{id}` – update client device push token or active status.
+- **Delivery System Architecture:**
+  - Pluggable Sender (`NotificationSender`): Decoupled interface with production `FirebaseNotificationSender` and local `FakeNotificationSender`. Strict allowlist guards fake sender: raises `RuntimeError` if executed in `production`, `staging`, or `prod`.
+  - Generic Push Text: Push alerts carry generic, privacy-preserving messages (e.g. "Study reminder", "Quiz ready"), while sensitive academic details and rationales remain exclusively within the authenticated app.
+  - Asia/Dhaka Quiet Hours: Quiet hours evaluated in `Asia/Dhaka` timezone (default 22:00–07:00, handling overnight spans); push deliveries during quiet hours are suppressed with `suppressed_quiet_hours`.
+  - Coalescing: Push notifications with identical trigger types for the same user within 30 minutes are coalesced (`suppressed_coalesced`).
+  - Per-User Daily Caps: Maximum of 5 push notifications per user per calendar day in `Asia/Dhaka` (`suppressed_daily_cap`).
+  - Delivery Auditing: Every delivery attempt (in-app and push) is recorded in the `notification_deliveries` table with channel, status, provider message ID, and suppression reasons.
+  - System Triggers: `daily_reminder`, `task_missed`, `quiz_ready`, `plan_changed`, `integrity_flag`, and scheduled bilingual `weekly_parent_summary`.
 
 ### Teacher (flagged off in beta)
 - `GET /teacher/queue`, `POST /teacher/submissions/{id}/review`, `POST /teacher/topics/flag`.
