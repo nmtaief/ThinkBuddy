@@ -1,4 +1,4 @@
-// ThinkBuddy Service Worker - Shell & Today's Plan Cache
+// ThinkBuddy Service Worker - Shell Cache & Secure Network Isolation
 const CACHE_NAME = "tb-cache-v1";
 const STATIC_ASSETS = ["/", "/manifest.json", "/globals.css"];
 
@@ -26,40 +26,43 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Logout purge message listener (P08 deliverable: no authenticated data left in SW caches)
+// Purge cache on logout, session expiry, or 401 response
+function purgeAllCaches() {
+  return caches.keys().then((keys) => {
+    return Promise.all(keys.map((key) => caches.delete(key)));
+  }).then(() => {
+    return caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS));
+  });
+}
+
 self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "LOGOUT_PURGE") {
-    event.waitUntil(
-      caches.keys().then((keys) => {
-        return Promise.all(
-          keys.map((key) => caches.delete(key))
-        );
-      }).then(() => {
-        // Re-cache only anonymous static assets shell
-        return caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS));
-      })
-    );
+  if (
+    event.data &&
+    (event.data.type === "LOGOUT_PURGE" ||
+      event.data.type === "SESSION_EXPIRED" ||
+      event.data.type === "AUTH_401_PURGE")
+  ) {
+    event.waitUntil(purgeAllCaches());
   }
 });
 
 self.addEventListener("fetch", (event) => {
-  // Offline caching strategy for Today's plan
-  if (event.request.url.includes("/api/proxy/students/") && event.request.url.includes("/today")) {
+  const url = new URL(event.request.url);
+
+  // Network-only for /api/* with automatic cache purge on 401 (Item 5)
+  if (url.pathname.startsWith("/api/")) {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const resClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, resClone);
-          });
-          return response;
-        })
-        .catch(() => caches.match(event.request))
+      fetch(event.request).then((response) => {
+        if (response.status === 401) {
+          purgeAllCaches();
+        }
+        return response;
+      })
     );
     return;
   }
 
-  // Stale-while-revalidate for static navigation
+  // Stale-while-revalidate for static shell assets only
   event.respondWith(
     caches.match(event.request).then((cached) => {
       return cached || fetch(event.request);

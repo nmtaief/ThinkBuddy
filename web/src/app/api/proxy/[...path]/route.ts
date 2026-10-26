@@ -1,29 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, BACKEND_GATEWAY_URL, CSRF_HEADER_NAME } from "@/lib/session";
 
-// Permitted upstream endpoint patterns
-const ALLOWED_ENDPOINT_PATTERNS = [
-  /^client\/config$/,
-  /^quizzes\/[^/]+\/attempts$/,
-  /^attempts\/[^/]+\/items\/[^/]+\/answer$/,
-  /^attempts\/[^/]+\/submit$/,
-  /^attempts\/[^/]+\/review$/,
-  /^students\/[^/]+\/plan$/,
-  /^students\/[^/]+\/study-settings$/,
-  /^students\/[^/]+\/suggestions$/,
-  /^suggestions\/[^/]+\/approve$/,
-  /^suggestions\/[^/]+\/decline$/,
-  /^students\/[^/]+\/auto-adjustments$/,
-  /^auto-adjustments\/[^/]+\/undo$/,
-  /^students\/[^/]+\/change-requests$/,
-  /^parents\/me\/students$/,
-  /^parents\/me\/notifications\/preferences$/,
-  /^uploads\/sign$/,
-  /^tasks\/[^/]+$/,
+export interface EndpointRule {
+  name: string;
+  pattern: RegExp;
+  methods: string[];
+}
+
+// Permitted upstream endpoint patterns strictly anchored with explicit methods allowed
+export const ALLOWED_ENDPOINT_RULES: EndpointRule[] = [
+  { name: "client_config", pattern: /^client\/config$/, methods: ["GET"] },
+  { name: "quiz_attempts", pattern: /^quizzes\/[^/]+\/attempts$/, methods: ["POST"] },
+  { name: "attempt_answer", pattern: /^attempts\/[^/]+\/items\/[^/]+\/answer$/, methods: ["POST"] },
+  { name: "attempt_submit", pattern: /^attempts\/[^/]+\/submit$/, methods: ["POST"] },
+  { name: "attempt_review", pattern: /^attempts\/[^/]+\/review$/, methods: ["GET"] },
+  { name: "student_today", pattern: /^students\/[^/]+\/today$/, methods: ["GET"] },
+  { name: "task_detail", pattern: /^tasks\/[^/]+$/, methods: ["PATCH"] },
+  { name: "student_plan", pattern: /^students\/[^/]+\/plan$/, methods: ["GET"] },
+  { name: "study_settings", pattern: /^students\/[^/]+\/study-settings$/, methods: ["GET", "PUT"] },
+  { name: "student_study_settings_change_requests", pattern: /^students\/[^/]+\/study-settings\/change-requests$/, methods: ["POST"] },
+  { name: "student_ai_suggestions", pattern: /^students\/[^/]+\/ai-suggestions$/, methods: ["GET"] },
+  { name: "ai_suggestion_approve", pattern: /^students\/[^/]+\/ai-suggestions\/[^/]+\/approve$/, methods: ["POST"] },
+  { name: "ai_suggestion_reject", pattern: /^students\/[^/]+\/ai-suggestions\/[^/]+\/reject$/, methods: ["POST"] },
+  { name: "ai_adjustment_undo", pattern: /^students\/[^/]+\/ai-adjustments\/[^/]+\/undo$/, methods: ["POST"] },
+  { name: "parent_change_request_approve", pattern: /^parents\/me\/students\/[^/]+\/change-requests\/[^/]+\/approve$/, methods: ["POST"] },
+  { name: "parent_change_request_decline", pattern: /^parents\/me\/students\/[^/]+\/change-requests\/[^/]+\/decline$/, methods: ["POST"] },
+  { name: "parent_students", pattern: /^parents\/me\/students$/, methods: ["GET"] },
+  { name: "notification_preferences", pattern: /^notifications\/preferences$/, methods: ["GET", "PUT"] },
+  { name: "notifications", pattern: /^notifications$/, methods: ["GET"] },
+  { name: "families", pattern: /^families$/, methods: ["POST"] },
+  { name: "family_students", pattern: /^families\/[^/]+\/students$/, methods: ["POST"] },
+  { name: "link_redeem", pattern: /^links\/redeem$/, methods: ["POST"] },
+  { name: "link_revoke", pattern: /^links\/[^/]+\/revoke$/, methods: ["POST"] },
 ];
 
-function isPathAllowed(endpoint: string): boolean {
-  return ALLOWED_ENDPOINT_PATTERNS.some((pattern) => pattern.test(endpoint));
+export function matchEndpointRule(endpoint: string): EndpointRule | undefined {
+  return ALLOWED_ENDPOINT_RULES.find((rule) => rule.pattern.test(endpoint));
 }
 
 function hasPathTraversal(pathSegments: string[]): boolean {
@@ -81,11 +93,24 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     );
   }
 
-  // 3. Allow-list check
-  if (!isPathAllowed(endpoint)) {
+  // 3. Anchored allow-list check and method check
+  const rule = matchEndpointRule(endpoint);
+  if (!rule) {
     return NextResponse.json(
       { error: { code: "ENDPOINT_NOT_ALLOWED", message: `Endpoint '${endpoint}' is not permitted` } },
       { status: 403 }
+    );
+  }
+
+  if (!rule.methods.includes(req.method.toUpperCase())) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "METHOD_NOT_ALLOWED",
+          message: `Method ${req.method} is not permitted for endpoint '${endpoint}'. Allowed: ${rule.methods.join(", ")}`,
+        },
+      },
+      { status: 405 }
     );
   }
 
@@ -134,7 +159,14 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     }
   }
 
-  // 6. Overwrite client platform headers strictly from server
+  // 6. Real Client IP Extraction and Header Propagation
+  const rawXff = req.headers.get("x-forwarded-for");
+  const rawRealIp = req.headers.get("x-real-ip");
+  const clientIp = rawXff
+    ? rawXff.split(",")[0].trim()
+    : (rawRealIp || "127.0.0.1");
+
+  // Overwrite client platform headers strictly from server
   const clientFormFactorHeader = req.headers.get("x-client-form-factor");
   const formFactor = ["compact", "medium", "expanded"].includes(clientFormFactorHeader || "")
     ? (clientFormFactorHeader as string)
@@ -148,6 +180,8 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     "X-App-Version": "1.0.0",
     "X-Device-Id": session?.deviceId || "web_anon",
     "Accept-Language": acceptLang,
+    "X-Real-IP": clientIp,
+    "X-Forwarded-For": rawXff ? `${rawXff}, 127.0.0.1` : clientIp,
   };
 
   if (session?.accessToken) {

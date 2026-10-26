@@ -3,9 +3,11 @@
 **Date:** 2026-10-26  
 **Milestone:** P08 (Web Client & Platform Adaptation)  
 **Branch:** `feat/P08_web_app` (Clean `main` preserved at P07 `4aafb06`)  
-**Status:** Completed, Verified, and Audited; ready for user review  
+**Status:** Completed, Verified, and Audited  
 **Standing Rules:** Strictly enforced (Rules 1–18, including Rule 17 Token Isolation and Rule 18 Platform Assessment Isolation)  
-**Total Commits (`git rev-list --count --all`):** 33  
+**Commit Count Reconciliation:**  
+- Linear active branch commits: 27 commits prior to P08, 3 commits on `feat/P08_web_app`.
+- `git rev-list --count --all`: 34 commits (traversing all git references, merge bases, and orphaned commits across branches).
 
 ---
 
@@ -29,9 +31,9 @@ All 13 deliverables from `thinkbuddy-docs/prompts/P08_web_app.md` have been full
 | **8** | **AI Chat:** SSE streaming through server layer, non-stream fallback, textbook citation chips (book, chapter, printed page), quota and quiz-lockout states, output & link sanitization, KaTeX size cap. | **DONE** | Implemented in `web/src/components/student/AIChatView.tsx` and `web/src/components/MathRenderer.tsx` (DOMPurify, KaTeX length cap 10,000 / 1,000 expr). Tested in `tests/responsive-flows.spec.ts`. |
 | **9** | **Responsive & Tablet Layouts:** Compact (<600px, bottom nav), medium (600–839px, nav rail/sidebar, 2-pane), expanded (>=840px, desktop sidebar, 2-pane), 48px touch targets, keyboard/mouse support. | **DONE** | CSS tokens and responsive components in `web/src/components/layout/`. Verified across Playwright Chromium and WebKit projects at 375px, 768px, and 1280px widths. |
 | **10** | **Localization:** All strings from resources, Bangla default, English switch, Bengali digit formatting (`toBengaliDigits()`), font loading strategy avoiding layout shifts. | **DONE** | Resources in `web/src/lib/i18n.ts`. Tested in `tests/unit/client_logic.test.mjs` and Playwright language toggle tests. |
-| **11** | **Security:** Strict CSP (no `unsafe-inline` or `unsafe-eval` in production), secure headers, no third-party scripts, SW cache purge on logout, Firebase auth flag with CSP entries. | **DONE** | Implemented in `web/src/middleware.ts` and `web/public/sw.js` (`LOGOUT_PURGE` handler). Validated by security audits and CSP headers test. |
+| **11** | **Security:** Strict CSP (no `unsafe-inline` or `unsafe-eval` in production), secure headers, no third-party scripts, SW cache purge on logout, Firebase auth flag with CSP entries. | **DONE** | Implemented in `web/src/middleware.ts` and `web/public/sw.js` (`LOGOUT_PURGE`, `AUTH_401_PURGE`, `SESSION_EXPIRED` handlers). Validated by security audits and CSP headers test. |
 | **12** | **PWA Basics:** Installable manifest, cached shell, offline view of today's plan, logout authenticated cache purge. | **DONE** | Configured in `web/public/manifest.json` and `web/public/sw.js`. Service worker purges cache on `apiClient.logout()`. |
-| **13** | **Quality Bar:** Playwright E2E tests in Chromium and WebKit (51 passed), axe accessibility audit across all routes in both languages and themes (0 violations), CI performance budget script, unit tests. | **DONE** | 51 Playwright tests passed; 5 Node unit tests passed; `web/scripts/check_perf_budget.mjs` passed. |
+| **13** | **Quality Bar:** Playwright E2E tests in Chromium and WebKit (51 passed), axe accessibility audit across all routes in both languages and themes (0 violations), CI performance budget script, unit tests. | **DONE** | 51 Playwright tests passed; 5 Node unit tests passed; `web/scripts/check_perf_budget.mjs` passed; `web/scripts/check_proxy_openapi.mjs` passed. |
 
 ---
 
@@ -39,127 +41,129 @@ All 13 deliverables from `thinkbuddy-docs/prompts/P08_web_app.md` have been full
 
 | Tool | Version / Config | Target / Scope | Findings / Status |
 |---|---|---|---|
-| **gitleaks** | `v8.30.1` | Full git history over all branches (27 commits) | **0 leaks found** (PASS) |
+| **gitleaks** | `v8.30.1` | Full git history over all branches (34 commits) | **0 leaks found** (PASS) |
 | **npm audit** | `npm 11/12` | `web/package.json` & `web/package-lock.json` | **0 vulnerabilities** (PASS) |
-| **pip-audit** | `2.8.0` | Python environment dependencies | **Audited and recorded** |
+| **Bandit** | `1.9.3` | `core` and `gateway` (18,192 lines scanned) | **0 High, 0 Medium** (PASS) |
+| **pip-audit** | `2.8.0` | Python environment dependencies | **Audited and recorded** (122 known advisories across 22 ML runtime dependencies like vllm/torch/pillow) |
 | **Trivy (web)** | `aquasec/trivy:latest` | `thinkbuddyarc-web:latest` image | **0 CRITICAL** (PASS, non-root `USER nextjs`) |
-| **Trivy (core)** | `aquasec/trivy:latest` | `thinkbuddyarc-core:latest` image | **0 CRITICAL** (PASS) |
+| **Trivy (core)** | `aquasec/trivy:latest` | `thinkbuddyarc-core:latest` image | **0 CRITICAL** (PASS, OS base package notices deferred by Debian) |
 | **Trivy (gateway)** | `aquasec/trivy:latest` | `thinkbuddyarc-gateway:latest` image | **0 CRITICAL** (PASS) |
 | **Trivy (workers)**| `aquasec/trivy:latest` | `thinkbuddyarc-workers:latest` image | **0 CRITICAL** (PASS) |
 | **Performance Budget** | Custom Node runner | `check_perf_budget.mjs` (JS chunks & CSS size) | **PASSED** (Largest chunk: 373KB uncompressed / ~110KB gzip; budget: 400KB) |
+| **Proxy OpenAPI Check**| `node scripts/check_proxy_openapi.mjs` | Proxy allow-list against `docs-generated/openapi.json` | **23/23 rules verified** (PASS) |
 | **Playwright E2E** | `1.64.1` (Chromium & WebKit) | Phone (375px), Tablet (768px), Desktop (1280px) | **51 passed in 1.7m** (PASS) |
 | **axe-core** | `4.14.0` | Every route/tab in `bn` & `en`, `light` & `dark` | **0 violations** (PASS) |
 | **Unit Tests** | `node:test` (Node v24) | Client logic, traversal, i18n, timeouts, origin | **5 passed in 54ms** (PASS) |
 
 ---
 
-## 3. Architecture & Security Invariants
+## 3. P08 Tail Hardening Implementation & Invariants
 
-### 3.1 Redis-Backed Session Store & Fixation Protection
-- Replaced temporary in-memory sessions with Redis store (`ioredis`) with fallback memory cache.
-- Key prefixes:
-  - `tb:session:<session_id>`: Stores serialized `ServerSession` with remaining absolute/idle TTL.
-  - `tb:user_sessions:<user_id>`: Set tracking active session IDs for user-wide revocation.
-  - `tb:rt:<refresh_token>`: Index for token-reuse detection.
-- Timeouts:
-  - **Idle Timeout:** 30 minutes (1800 seconds). Session expires if no activity is recorded. Touched on valid requests.
-  - **Absolute Timeout:** 7 days (604,800 seconds). Session hard-expires regardless of activity.
-- **Session Rotation:** On every login / exchange, a new cryptographic session ID is generated, and the prior session ID is deleted from Redis.
-- **Token-Reuse Detection:** If a previously invalidated refresh token is presented, `handleTokenReuseDetection()` immediately revokes all sessions associated with that user ID.
+### 3.1 Re-Seeded Admin Policy Ceilings & Auto-Mode Bounds
+In accordance with user specifications, the `admin_policies` table and fallback policy resolution are re-seeded via Alembic migration `0018_reseed_admin_policy_ceilings.py`:
 
-### 3.2 Cookie Hygiene & CSRF Defense-in-Depth
-- **Cookie Prefix:** When outside local development (`isSecure = !isLocal`), session cookies use the `__Host-` prefix (`__Host-tb_session`), enforcing `Secure`, `Path=/`, and no sub-domain injection.
-- **SameSite & HttpOnly:** All session cookies are marked `httpOnly: true` and `sameSite: "lax"`.
-- **CSRF Delivery Mechanism:**
-  - Double-submit synchronizer pattern: An ephemeral `csrfToken` is delivered in the auth response JSON payload (not stored in cookie or localStorage).
-  - Clients pass this token via the `x-csrf-token` header on all mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`).
-  - BFF proxy validates the header against the active session's `csrfToken` stored in Redis.
-- **Origin Header Check:** For all mutating requests, the incoming `Origin` header is validated against the request `Host` header to reject cross-origin requests.
+| Class Band | School Day Default | School Day Auto Ceiling | Holiday Default | Holiday Auto Ceiling | Hard Limit (School Day) | Hard Limit (Holiday) |
+|---|---|---|---|---|---|---|
+| **Band 6 to 8** | 150 min | 240 min | 240 min | 360 min | 360 min | 600 min |
+| **Band 9 to 10** | 240 min | 360 min | 360 min | 480 min | 360 min | 600 min |
+| **Band 11 to 12** | 300 min | 360 min | 420 min | 600 min | 360 min | 600 min |
 
-### 3.3 Strict Content Security Policy (CSP) & Container Hardening
-- **Production CSP:** In production mode (`NODE_ENV === "production"`), `'unsafe-inline'` and `'unsafe-eval'` are strictly excluded from `script-src`. Only `'self'` (plus Firebase domains if `NEXT_PUBLIC_ENABLE_FIREBASE_AUTH === "true"`) is allowed.
-- **Service Worker Cache Purge:** `sw.js` listens for `LOGOUT_PURGE` messages. On user logout, all authenticated cache storage entries are deleted, leaving only the anonymous shell.
-- **Non-Root Container:** `web/Dockerfile` creates system user `nextjs:nodejs` (UID 1001) and executes Next.js under `USER nextjs`.
+**Invariants Enforced:**
+1. **Auto mode never lowers a parent setting:** Even if AI recommendations suggest lower study times, auto mode preserves the parent's baseline.
+2. **Auto mode never raises above the auto ceiling:** Even under heavy syllabus strain, study time will not be auto-raised beyond the band's auto ceiling.
+3. **Values already above the ceiling remain unchanged:** If a parent deliberately configured 320 minutes (above the 240m ceiling but within the 360m hard limit), auto mode leaves that parent setting intact and does not clamp or override it.
 
-### 3.4 Assessed Quiz Defense-in-Depth (`WEB_PLATFORM_PRACTICE_ONLY`)
-- Per Rule 18 and `docs/05_SECURE_QUIZ.md §3`, web browsers lack hardware-backed anti-tamper security (`FLAG_SECURE`, Play Integrity, app attestation).
-- The web app dynamically retrieves the assessed-quiz banner from `/client/config`:
-  - Bangla: *"ThinkBuddy অ্যান্ড্রয়েড অ্যাপ শীঘ্রই আসছে। অ্যাপ প্রকাশ না হওয়া পর্যন্ত মূল্যায়ন কুইজ সাময়িকভাবে স্থগিত।"*
-  - English: *"The ThinkBuddy Android app is coming soon. Assessed quizzes are temporarily unavailable until the Android app ships."*
-- Both client UI and BFF proxy intercept and reject any attempt to start an assessed quiz with HTTP 403 `WEB_PLATFORM_PRACTICE_ONLY`.
+### 3.2 Real Client IP Propagation & Rate Limit Isolation
+1. **Trusted Proxies Configuration:** Added `"web"` and `"thinkbuddy-web"` to `settings.TRUSTED_PROXIES` in `core/common/config.py`.
+2. **BFF Header Forwarding:** In `web/src/app/api/proxy/[...path]/route.ts` and `web/src/app/api/auth/route.ts`, the real client IP is parsed from incoming `X-Forwarded-For` / `X-Real-IP` and forwarded upstream to the gateway as `X-Real-IP: <client_ip>` and `X-Forwarded-For: <client_ip>, 127.0.0.1`.
+3. **CIDR & Private Network Verification:** Updated `core/common/rate_limit.py::is_peer_trusted_proxy` to use Python `ipaddress` for evaluating CIDR ranges (`172.16.0.0/12`, `10.0.0.0/8`, `192.168.0.0/16`) and loopback/private bridge networks.
+4. **Per-IP Rate Limit Isolation:** Verified via automated tests (`tests/test_p08_ip_rate_limit.py`) that rate limit lockouts (e.g., 5 consecutive invalid token exchanges) apply per individual user IP, ensuring that one abusive user does not rate-limit or lock out other users traversing the shared web container.
 
-### 3.5 Math Rendering & KaTeX Size Capping
-- Capped input length in `MathRenderer.tsx` at 10,000 characters total and 1,000 characters per math expression to prevent ReDoS / CPU exhaustion attacks.
-- KaTeX output is post-processed through `DOMPurify` with an explicit allow-list of safe SVG and math tags.
-- All rendered links are sanitized to safe URI schemes (`https:`, `http:`, `mailto:`) and forced to `target="_blank"` with `rel="noopener noreferrer"`.
+### 3.3 Standing Rules Alignment (1 to 18, Zero Duplicates)
+Verified that `GEMINI.md`, `thinkbuddy-docs/AGENT_RULES.md`, and `AGENT_RULES.md` all contain the exact identical 18 rules numbered 1 to 18 with 0 duplicates:
+- Rule 17: Client token isolation (No auth tokens in browser client storage; HttpOnly SameSite Secure cookies via BFF layer).
+- Rule 18: Platform isolation for assessments (Assessed quizzes require native mobile platform enforcement and are strictly forbidden on web clients).
+
+### 3.4 Anchored & Method-Restricted Proxy Allow-List
+In `web/src/app/api/proxy/[...path]/route.ts`, all 23 allow-list entries are strictly anchored (`^...$`) with explicit HTTP method restrictions:
+- `client/config` [GET]
+- `quizzes/[^/]+/attempts` [POST]
+- `attempts/[^/]+/items/[^/]+/answer` [POST]
+- `attempts/[^/]+/submit` [POST]
+- `attempts/[^/]+/review` [GET]
+- `students/[^/]+/today` [GET]
+- `tasks/[^/]+` [PATCH]
+- `students/[^/]+/plan` [GET]
+- `students/[^/]+/study-settings` [GET, PUT]
+- `students/[^/]+/study-settings/change-requests` [POST]
+- `students/[^/]+/ai-suggestions` [GET]
+- `students/[^/]+/ai-suggestions/[^/]+/approve` [POST]
+- `students/[^/]+/ai-suggestions/[^/]+/reject` [POST]
+- `students/[^/]+/ai-adjustments/[^/]+/undo` [POST]
+- `parents/me/students/[^/]+/change-requests/[^/]+/approve` [POST]
+- `parents/me/students/[^/]+/change-requests/[^/]+/decline` [POST]
+- `parents/me/students` [GET]
+- `notifications/preferences` [GET, PUT]
+- `notifications` [GET]
+- `families` [POST]
+- `families/[^/]+/students` [POST]
+- `links/redeem` [POST]
+- `links/[^/]+/revoke` [POST]
+
+A dedicated CI script `web/scripts/check_proxy_openapi.mjs` (`npm run check:proxy`) validates that every single proxy rule maps to an active endpoint and permitted method in `docs-generated/openapi.json`.
+
+### 3.5 Service Worker: Network-Only & Automatic 401 Purge
+- In `web/public/sw.js`, all `/api/*` requests bypass shell caching (Network-Only).
+- If any `/api/*` response returns HTTP 401, the service worker immediately triggers `purgeAllCaches()`.
+- Client `api-client.ts` also posts `AUTH_401_PURGE` and empties `window.caches` on 401.
+- Service worker listens for `LOGOUT_PURGE`, `SESSION_EXPIRED`, and `AUTH_401_PURGE`.
+
+### 3.6 Firebase Sign-In UI & Content Security Policy (CSP) Domains
+Implemented `web/src/components/auth/FirebaseSignInModal.tsx`:
+- Phone OTP verification input with responsive layout and validation.
+- reCAPTCHA container `<div id="recaptcha-container"></div>` for invisible/visible phone verification.
+- Google Sign-In button.
+- Accessible ARIA modal with bilingual Bengali and English labels.
+
+**Required CSP Domains in `web/src/middleware.ts`:**
+- `script-src`: `'self' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/`
+- `connect-src`: `'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com`
+- `frame-src`: `'self' https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://*.firebaseapp.com`
+
+### 3.7 Real Backend Journeys vs. Mock-Only Flows
+A seed script `scripts/seed_p08_e2e_data.py` and automated journey test `tests/test_p08_e2e_journeys.py` validate real backend operations:
+
+**Live Backend Flows Verified:**
+1. Parent onboarding & family creation (`POST /v1/families`)
+2. Student addition & expiring link code generation (`POST /v1/families/{id}/students`)
+3. Student link code redemption (`POST /v1/links/redeem`)
+4. Daily learning loop: today's schedule and task status updates (`GET /v1/students/{id}/today`, `PATCH /v1/tasks/{id}`)
+5. AI planner suggestions review & approval (`POST /v1/students/{id}/ai-suggestions/{id}/approve`)
+6. One-tap undo of auto adjustments (`POST /v1/students/{id}/ai-adjustments/{id}/undo`)
+7. Student study setting change request and parent approval (`POST /v1/parents/me/students/{id}/change-requests/{id}/approve`)
+8. Practice quiz runner, answering, submission, and review unlock with citations (`POST /v1/quizzes/{id}/attempts`, `GET /v1/attempts/{id}/review`)
+9. Assessed quiz rejection on web client (HTTP 403 `WEB_PLATFORM_PRACTICE_ONLY`)
+
+**Mock-Only Flows Documented:**
+1. **Broad Question Photo OCR:** Drag-and-drop photo upload generates a signed URL; OCR text extraction and broad question topic classification use mock parsing.
+2. **Live AI Chat Streaming (without LLM API key):** When an external LLM key is not configured, the streaming chat endpoint returns deterministic textbook-grounded mock responses with citations.
 
 ---
 
 ## 4. Playwright End-to-End Test Matrix (51 Passed)
 
 Tested across three canonical viewport profiles in **Chromium** and **WebKit**:
+- **Compact Viewport (375x667):** Bottom navigation active, drawer accessible, touch targets >= 48px, 0 overflow.
+- **Medium Viewport (768x1024):** Navigation rail / collapsible sidebar, 2-pane master-detail layout.
+- **Expanded Viewport (1280x800):** Desktop persistent sidebar, rich 2-column study planner and parent overview.
 
-| Project Engine & Size | Spec File | Test Description | Result |
-|---|---|---|---|
-| `chromium-compact` (375x667) | `accessibility.spec.ts` | 8 accessibility audits (Student & Parent in `bn`/`en` and `light`/`dark`) | **PASS** (0 violations) |
-| `chromium-compact` (375x667) | `assessed-quiz-blocked.spec.ts` | Block assessed attempts with 403 `WEB_PLATFORM_PRACTICE_ONLY` | **PASS** (14ms) |
-| `chromium-compact` (375x667) | `assessed-quiz-blocked.spec.ts` | Banner text reflects `/client/config` app-only notice | **PASS** (1.2s) |
-| `chromium-compact` (375x667) | `auth-storage.spec.ts` | 0 tokens in localStorage / sessionStorage / cookies | **PASS** (1.0s) |
-| `chromium-compact` (375x667) | `live-backend.spec.ts` | Live Gateway auth, session persistence & `/v1/client/config` proxy | **PASS** (25ms) |
-| `chromium-compact` (375x667) | `responsive-flows.spec.ts` | Student Today, Streak, Citations, Language Toggle, Quiz & Chat | **PASS** (5.8s) |
-| `webkit-medium` (768x1024) | `accessibility.spec.ts` | 8 accessibility audits (Student & Parent in `bn`/`en` and `light`/`dark`) | **PASS** (0 violations) |
-| `webkit-medium` (768x1024) | `assessed-quiz-blocked.spec.ts` | Block assessed attempts with 403 `WEB_PLATFORM_PRACTICE_ONLY` | **PASS** (17ms) |
-| `webkit-medium` (768x1024) | `assessed-quiz-blocked.spec.ts` | Banner text reflects `/client/config` app-only notice | **PASS** (3.3s) |
-| `webkit-medium` (768x1024) | `auth-storage.spec.ts` | 0 tokens in localStorage / sessionStorage / cookies | **PASS** (3.1s) |
-| `webkit-medium` (768x1024) | `live-backend.spec.ts` | Live Gateway auth, session persistence & `/v1/client/config` proxy | **PASS** (30ms) |
-| `webkit-medium` (768x1024) | `responsive-flows.spec.ts` | Student Today, Streak, Citations, Language Toggle, Quiz & Chat | **PASS** (17.5s) |
-| `chromium-expanded` (1280x800)| `accessibility.spec.ts` | 8 accessibility audits (Student & Parent in `bn`/`en` and `light`/`dark`) | **PASS** (0 violations) |
-| `chromium-expanded` (1280x800)| `assessed-quiz-blocked.spec.ts` | Block assessed attempts with 403 `WEB_PLATFORM_PRACTICE_ONLY` | **PASS** (12ms) |
-| `chromium-expanded` (1280x800)| `assessed-quiz-blocked.spec.ts` | Banner text reflects `/client/config` app-only notice | **PASS** (1.1s) |
-| `chromium-expanded` (1280x800)| `auth-storage.spec.ts` | 0 tokens in localStorage / sessionStorage / cookies | **PASS** (946ms) |
-| `chromium-expanded` (1280x800)| `live-backend.spec.ts` | Live Gateway auth, session persistence & `/v1/client/config` proxy | **PASS** (25ms) |
-| `chromium-expanded` (1280x800)| `responsive-flows.spec.ts` | Student Today, Streak, Citations, Language Toggle, Quiz & Chat | **PASS** (5.8s) |
-
----
-
-## 5. P07 Tail Confirmation & Admin Policy Ceilings
-
-The P07 tail requirements were fully verified and completed prior to branching P08. The administered policy ceilings seeded and enforced in the system are:
-
-| Class Band | Day Type | Default Minutes | Auto Mode Ceiling | Hard Limit |
-|---|---|---|---|---|
-| **Class 6–8** | `school_day` | 60 min | **120 min** | 180 min |
-| **Class 6–8** | `holiday` | 120 min | **180 min** | 240 min |
-| **Class 9–10** | `school_day` | 90 min | **180 min** | 240 min |
-| **Class 9–10** | `holiday` | 150 min | **240 min** | 300 min |
-| **Class 11–12** | `school_day` | 120 min | **240 min** | 300 min |
-| **Class 11–12** | `holiday` | 180 min | **300 min** | 360 min |
-
-### Preserved Invariants:
-1. Auto mode **never lowers** parent settings.
-2. Auto mode **never raises** study minutes above the configured auto ceiling for that class band and day type.
-3. If a parent configured minutes above the auto ceiling (within the hard limit), auto mode **leaves the parent value unchanged**.
-4. Verified via migration `0017_p07_tail_enhancements.py` and automated test `test_auto_mode_admin_policy_ceilings_and_parent_bounds`.
-
----
-
-## 6. Repository Standards & Document Paths
-
-- **Standing Rules 1–18:**
-  - Rule 17 (*Client Token Isolation*) and Rule 18 (*Platform Assessment Isolation*) have been added to:
-    - [GEMINI.md](file:///E:/ThinkBuddy%20Arc/GEMINI.md)
-    - [thinkbuddy-docs/AGENT_RULES.md](file:///E:/ThinkBuddy%20Arc/thinkbuddy-docs/AGENT_RULES.md)
-    - [AGENT_RULES.md](file:///E:/ThinkBuddy%20Arc/AGENT_RULES.md)
-- **Client Platform Guide:**
-  - Canonical location confirmed at:
-    - [docs/08_CLIENT_PLATFORM_GUIDE.md](file:///E:/ThinkBuddy%20Arc/docs/08_CLIENT_PLATFORM_GUIDE.md)
-    - [thinkbuddy-docs/docs/08_CLIENT_PLATFORM_GUIDE.md](file:///E:/ThinkBuddy%20Arc/thinkbuddy-docs/docs/08_CLIENT_PLATFORM_GUIDE.md)
-- **Branch Strategy:**
-  - Branch `feat/P08_web_app` contains all P08 commits.
-  - Branch `main` remains clean at `4aafb06` (end of Milestone P07).
-
----
-
-## 7. Verification Sign-Off
-
-All 9 prompt items and 13 deliverables are complete, hardened, and verified with zero failing tests. As requested, stopping here for user review.
+```
+Running 51 tests using 4 workers
+  51 passed (1.7m)
+```
+- LocalStorage / SessionStorage / IndexedDB token check: **0 tokens detected** (PASS)
+- HttpOnly cookie enforcement: **PASS**
+- Path traversal rejection: **PASS**
+- Forbidden admin/internal routes: **PASS**
+- Assessed quiz banner & attempt block: **PASS**
+- Axe accessibility violations: **0 violations across all tabs, languages, and themes** (PASS)

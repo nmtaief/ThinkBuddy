@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { Language, translations } from "@/lib/i18n";
 import { UserPlus, QrCode, CheckCircle2, Copy } from "lucide-react";
 
+import { apiClient } from "@/lib/api-client";
+
 interface ParentOnboardingViewProps {
   lang: Language;
 }
@@ -20,10 +22,21 @@ export const ParentOnboardingView: React.FC<ParentOnboardingViewProps> = ({ lang
   const [generatedLinkCode, setGeneratedLinkCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = `TB-${Math.floor(1000 + Math.random() * 9000)}-C${classLevel}`;
-    setGeneratedLinkCode(code);
+    try {
+      const fam = await apiClient.createFamily(familyName);
+      const child = await apiClient.addChildToFamily(fam.id, {
+        display_name: childName,
+        class_level: classLevel,
+        medium: medium === "bangla" ? "bn" : "en",
+        group: group,
+      });
+      setGeneratedLinkCode(child.link_code);
+    } catch {
+      const code = `TB-${Math.floor(1000 + Math.random() * 9000)}-C${classLevel}`;
+      setGeneratedLinkCode(code);
+    }
   };
 
   const copyToClipboard = () => {

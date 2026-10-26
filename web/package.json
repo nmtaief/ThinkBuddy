@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "check-budget": "node scripts/check_perf_budget.mjs",
+    "check:proxy": "node scripts/check_proxy_openapi.mjs",
     "test": "npm run test:unit && npx playwright test"
   },
   "dependencies": {

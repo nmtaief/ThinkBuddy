@@ -9,10 +9,10 @@ export function middleware(request: NextRequest) {
   // In production: strictly NO 'unsafe-inline' or 'unsafe-eval' for scripts
   const scriptSrc = isProduction
     ? enableFirebase
-      ? "'self' https://apis.google.com https://www.gstatic.com"
+      ? "'self' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/"
       : "'self'"
     : enableFirebase
-      ? "'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com"
+      ? "'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/"
       : "'self' 'unsafe-inline' 'unsafe-eval'";
 
   const connectSrc = isProduction
@@ -23,6 +23,10 @@ export function middleware(request: NextRequest) {
       ? "'self' http://127.0.0.1:* http://localhost:* https://identitytoolkit.googleapis.com https://securetoken.googleapis.com"
       : "'self' http://127.0.0.1:* http://localhost:*";
 
+  const frameSrc = enableFirebase
+    ? "'self' https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://*.firebaseapp.com"
+    : "'none'";
+
   const cspHeader = `
     default-src 'self';
     script-src ${scriptSrc};
@@ -30,6 +34,7 @@ export function middleware(request: NextRequest) {
     font-src 'self' https://fonts.gstatic.com data:;
     img-src 'self' data: blob: https:;
     connect-src ${connectSrc};
+    frame-src ${frameSrc};
     frame-ancestors 'none';
     form-action 'self';
     base-uri 'self';

@@ -9,6 +9,7 @@ Enforces:
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def is_peer_trusted_proxy(peer_ip: str) -> bool:
+    """Check if peer is among configured trusted proxy hosts, CIDR ranges, or private docker bridges."""
+    if peer_ip in settings.TRUSTED_PROXIES:
+        return True
+    try:
+        ip = ipaddress.ip_address(peer_ip)
+        for proxy_entry in settings.TRUSTED_PROXIES:
+            if "/" in proxy_entry:
+                try:
+                    if ip in ipaddress.ip_network(proxy_entry):
+                        return True
+                except ValueError:
+                    continue
+        if ip.is_loopback or ip.is_private:
+            return True
+    except ValueError:
+        pass
+    return False
+
+
 def get_trusted_client_ip(request: Request) -> str:
     """Extract client IP, verifying reverse proxy trust before reading forwarded headers.
 
@@ -30,9 +51,7 @@ def get_trusted_client_ip(request: Request) -> str:
     peer_ip = request.client.host if request.client else "127.0.0.1"
 
     # Check if peer is among trusted proxy list
-    is_trusted_proxy = peer_ip in settings.TRUSTED_PROXIES or any(
-        peer_ip.startswith(prefix) for prefix in ("127.", "10.", "172.16.", "192.168.")
-    )
+    is_trusted_proxy = is_peer_trusted_proxy(peer_ip)
 
     if is_trusted_proxy:
         forwarded_for = request.headers.get("x-forwarded-for")

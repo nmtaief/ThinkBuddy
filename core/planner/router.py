@@ -504,9 +504,9 @@ async def execute_student_plan_regeneration(
                         pol_rec = res_pol.scalars().first()
 
                         if fld == "holiday_minutes":
-                            ceiling = pol_rec.holiday_ceiling_minutes if pol_rec else (180 if band == "6-8" else (240 if band == "9-10" else 300))
+                            ceiling = pol_rec.holiday_ceiling_minutes if pol_rec else (360 if band == "6-8" else (480 if band == "9-10" else 600))
                         else:
-                            ceiling = pol_rec.school_day_ceiling_minutes if pol_rec else (120 if band == "6-8" else (180 if band == "9-10" else 240))
+                            ceiling = pol_rec.school_day_ceiling_minutes if pol_rec else (240 if band == "6-8" else (360 if band == "9-10" else 360))
 
                         # Invariant 1: Leaves a parent value that is already above the ceiling unchanged
                         if cur_mins >= ceiling:

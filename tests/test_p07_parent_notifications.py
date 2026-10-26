@@ -1424,43 +1424,43 @@ async def test_auto_mode_admin_policy_ceilings_and_parent_bounds() -> None:
                 group="general",
                 version=1,
                 status="published",
-                school_day_default_minutes=90,
-                school_day_ceiling_minutes=180,
-                school_day_hard_limit_minutes=240,
-                holiday_default_minutes=150,
-                holiday_ceiling_minutes=240,
-                holiday_hard_limit_minutes=300,
+                school_day_default_minutes=240,
+                school_day_ceiling_minutes=360,
+                school_day_hard_limit_minutes=360,
+                holiday_default_minutes=360,
+                holiday_ceiling_minutes=480,
+                holiday_hard_limit_minutes=600,
             )
             session.add(pol)
         else:
-            pol.school_day_default_minutes = 90
-            pol.school_day_ceiling_minutes = 180
-            pol.school_day_hard_limit_minutes = 240
-            pol.holiday_default_minutes = 150
-            pol.holiday_ceiling_minutes = 240
-            pol.holiday_hard_limit_minutes = 300
+            pol.school_day_default_minutes = 240
+            pol.school_day_ceiling_minutes = 360
+            pol.school_day_hard_limit_minutes = 360
+            pol.holiday_default_minutes = 360
+            pol.holiday_ceiling_minutes = 480
+            pol.holiday_hard_limit_minutes = 600
         await session.commit()
 
         # Invariant 1: Auto mode never lowers a parent's own setting
-        # Parent configured school_day_minutes = 120. AI recommends 80 (< parent setting).
-        # Expected: clamp to at least 120 (never lower parent setting).
-        cur_mins = 120
-        raw_mins = 80
-        ceiling = 180
+        # Parent configured school_day_minutes = 200. AI recommends 150 (< parent setting).
+        # Expected: clamp to at least 200 (never lower parent setting).
+        cur_mins = 200
+        raw_mins = 150
+        ceiling = 360
         max_delta = max(5, int(cur_mins * 0.20))
         clamped_mins = max(raw_mins, cur_mins - max_delta)
         if cur_mins >= ceiling:
             final_mins = cur_mins
         else:
             final_mins = max(cur_mins, min(clamped_mins, ceiling))
-        assert final_mins == 120
+        assert final_mins == 200
 
         # Invariant 2: Auto mode never raises above the ceiling
-        # Parent configured school_day_minutes = 170. AI recommends 250 (> ceiling 180).
-        # Expected: clamp strictly to <= 180 (never raise above ceiling).
-        cur_mins = 170
-        raw_mins = 250
-        ceiling = 180
+        # Parent configured school_day_minutes = 340. AI recommends 400 (> ceiling 360).
+        # Expected: clamp strictly to <= 360 (never raise above ceiling).
+        cur_mins = 340
+        raw_mins = 400
+        ceiling = 360
         max_delta = max(5, int(cur_mins * 0.20))
         clamped_mins = min(raw_mins, cur_mins + max_delta)
         if cur_mins >= ceiling:
@@ -1468,30 +1468,30 @@ async def test_auto_mode_admin_policy_ceilings_and_parent_bounds() -> None:
         else:
             final_mins = max(cur_mins, min(clamped_mins, ceiling))
         assert final_mins <= ceiling
-        assert final_mins == 180
+        assert final_mins == 360
 
-        # Invariant 3: Leaves a parent value that is already above the ceiling unchanged
-        # Parent configured school_day_minutes = 200 (> ceiling 180, within hard limit 240).
-        # AI recommends 150 (or 220).
-        # Expected: remain 200 (leaves parent value already above ceiling unchanged).
-        cur_mins = 200
-        raw_mins = 150
-        ceiling = 180
+        # Invariant 3: Leaves a parent value that is already at/above the ceiling unchanged
+        # Parent configured school_day_minutes = 360 (at ceiling 360, within hard limit 360).
+        # AI recommends 300.
+        # Expected: remain 360 (leaves parent value already above/at ceiling unchanged).
+        cur_mins = 360
+        raw_mins = 300
+        ceiling = 360
         if cur_mins >= ceiling:
             final_mins = cur_mins
         else:
             final_mins = max(cur_mins, min(clamped_mins, ceiling))
-        assert final_mins == 200
+        assert final_mins == 360
 
-        # Invariant 4: Holiday day type ceiling (240m ceiling, 300m hard limit)
-        # Parent configured 260m (> ceiling 240m).
-        cur_mins = 260
-        ceiling = 240
+        # Invariant 4: Holiday day type ceiling (480m ceiling, 600m hard limit)
+        # Parent configured 500m (> ceiling 480m).
+        cur_mins = 500
+        ceiling = 480
         if cur_mins >= ceiling:
             final_mins = cur_mins
         else:
             final_mins = max(cur_mins, min(clamped_mins, ceiling))
-        assert final_mins == 260
+        assert final_mins == 500
 
 
 # ============================================================================

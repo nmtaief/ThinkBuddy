@@ -35,31 +35,31 @@ export const ParentSuggestionsView: React.FC<ParentSuggestionsViewProps> = ({ st
   }, [studentId]);
 
   const handleApproveSuggestion = async (id: string) => {
-    await apiClient.approveAISuggestion(id);
+    await apiClient.approveAISuggestion(studentId, id);
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
     setNotice("এআই পরামর্শ অনুমোদিত হয়েছে এবং ভবিষ্যৎ রুটিন আপডেট করা হয়েছে।");
   };
 
   const handleDeclineSuggestion = async (id: string) => {
-    await apiClient.declineAISuggestion(id);
+    await apiClient.declineAISuggestion(studentId, id);
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
     setNotice("এআই পরামর্শ বাতিল করা হয়েছে।");
   };
 
   const handleUndoAdjustment = async (id: string) => {
-    await apiClient.undoAutoAdjustment(id);
+    await apiClient.undoAutoAdjustment(studentId, id);
     setAdjustments((prev) => prev.filter((a) => a.id !== id));
     setNotice(t.parent.undoSuccess);
   };
 
   const handleApproveRequest = async (id: string) => {
-    await apiClient.approveChangeRequest(id);
+    await apiClient.approveChangeRequest(studentId, id);
     setChangeRequests((prev) => prev.filter((r) => r.id !== id));
     setNotice("শিক্ষার্থীর অনুরোধ অনুমোদিত হয়েছে।");
   };
 
   const handleDeclineRequest = async (id: string) => {
-    await apiClient.declineChangeRequest(id);
+    await apiClient.declineChangeRequest(studentId, id);
     setChangeRequests((prev) => prev.filter((r) => r.id !== id));
     setNotice("শিক্ষার্থীর অনুরোধ প্রত্যাখ্যাত হয়েছে।");
   };

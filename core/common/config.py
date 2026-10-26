@@ -33,6 +33,8 @@ class CoreSettings(BaseSettings):
             "::1",
             "core",
             "gateway",
+            "web",
+            "thinkbuddy-web",
             "10.0.0.0/8",
             "172.16.0.0/12",
             "192.168.0.0/16",
@@ -137,6 +139,10 @@ class CoreSettings(BaseSettings):
     FEATURE_SPACED_REVISION_ENABLED: bool = Field(
         default=False,
         description="Global feature flag for Spaced Revision Scheduler (P06). Disabled by default.",
+    )
+    FEATURE_WEB_APP: bool = Field(
+        default=True,
+        description="Global feature flag for Web Application & BFF Proxy (P08).",
     )
 
     # AI Planner Integration (P06a)

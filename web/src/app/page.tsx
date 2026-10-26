@@ -15,6 +15,7 @@ import { ParentSuggestionsView } from "@/components/parent/ParentSuggestionsView
 import { ParentOnboardingView } from "@/components/parent/ParentOnboardingView";
 import { NotificationPreferencesView } from "@/components/parent/NotificationPreferencesView";
 import { BroadAnswerView } from "@/components/student/BroadAnswerView";
+import { FirebaseSignInModal } from "@/components/auth/FirebaseSignInModal";
 import { Language, translations } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { SessionUser, ClientConfig, TodayPayload, ChildSummary } from "@/lib/types";
@@ -23,6 +24,7 @@ export default function Home() {
   const [lang, setLang] = useState<Language>("bn");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [isFirebaseModalOpen, setFirebaseModalOpen] = useState(false);
   const [config, setConfig] = useState<ClientConfig>({
     min_supported_version: "1.0.0",
     quiz_security_mode: "assessed_app_only",
@@ -173,6 +175,13 @@ export default function Home() {
           >
             অভিভাবক (Parent)
           </button>
+          <button
+            onClick={() => setFirebaseModalOpen(true)}
+            className="btn-outline touch-target"
+            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
+          >
+            Firebase Auth
+          </button>
         </div>
         <span style={{ color: "var(--color-text-muted)" }}>ThinkBuddy Web Client v1.0</span>
       </nav>
@@ -265,6 +274,20 @@ export default function Home() {
           lang={lang}
         />
       )}
+
+      <FirebaseSignInModal
+        isOpen={isFirebaseModalOpen}
+        onClose={() => setFirebaseModalOpen(false)}
+        onSuccess={(newUser) => {
+          setUser(newUser);
+          if (newUser.role === "parent") {
+            setCurrentTab("dashboard");
+          } else {
+            setCurrentTab("today");
+          }
+        }}
+        lang={lang}
+      />
     </div>
   );
 }
