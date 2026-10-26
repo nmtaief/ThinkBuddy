@@ -1,10 +1,9 @@
-"use client";
-
 import React, { useState } from "react";
 import { TodayPayload, StudyTask } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { MathRenderer } from "@/components/MathRenderer";
-import { CheckCircle2, Circle, Flame, Calendar, Clock, BookOpen } from "lucide-react";
+import { CheckCircle2, Circle, Flame, Calendar, Clock, BookOpen, Play, Sparkles } from "lucide-react";
+import { StudySessionRoomView } from "@/components/student/StudySessionRoomView";
 
 interface TodayViewProps {
   todayData: TodayPayload;
@@ -15,6 +14,7 @@ interface TodayViewProps {
 export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleTask }) => {
   const t = translations[lang];
   const [tasks, setTasks] = useState<StudyTask[]>(todayData.tasks);
+  const [selectedStudyTask, setSelectedStudyTask] = useState<StudyTask | null>(null);
 
   const handleToggle = (task: StudyTask) => {
     const nextStatus = task.status === "completed" ? "pending" : "completed";
@@ -24,12 +24,85 @@ export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleT
     onToggleTask(task.id, nextStatus);
   };
 
+  const handleStudySessionComplete = (
+    taskId: string,
+    timeSpentSeconds: number,
+    note: string,
+    quizScore: number
+  ) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, status: "completed" } : t))
+    );
+    onToggleTask(taskId, "completed");
+    setSelectedStudyTask(null);
+  };
+
+  if (selectedStudyTask) {
+    return (
+      <StudySessionRoomView
+        task={selectedStudyTask}
+        lang={lang}
+        onBack={() => setSelectedStudyTask(null)}
+        onComplete={handleStudySessionComplete}
+      />
+    );
+  }
+
   const streakDisplay = lang === "bn" ? toBengaliDigits(todayData.streak_days) : todayData.streak_days;
   const remainingMinutesDisplay =
     lang === "bn" ? toBengaliDigits(todayData.remaining_minutes) : todayData.remaining_minutes;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+      {/* Warm BD / Muslim Greeting Card */}
+      <div
+        className="card"
+        style={{
+          background: "linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(16, 185, 129, 0.08) 100%)",
+          border: "1px solid var(--color-border)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "var(--space-3)",
+          padding: "var(--space-4) var(--space-6)",
+        }}
+      >
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
+            <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
+              {lang === "bn" ? "আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ" : "Assalamu Alaikum wa Rahmatullah"}
+            </span>
+          </div>
+          <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 2 }}>
+            {lang === "bn" ? "আজকের দিনটি বরকতময় ও শিক্ষণীয় হোক!" : "Have a blessed and productive learning day!"}
+          </div>
+          <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", margin: 0 }}>
+            {lang === "bn"
+              ? "৭ দিনের নিরবচ্ছিন্ন অধ্যয়ন নীতি — প্রতিদিন অল্প অল্প শিখে অটল ধারাবাহিকতা ধরে রাখো।"
+              : "7-day continuous learning habit — steady daily effort without weekly off-days."}
+          </p>
+        </div>
+
+        <div
+          style={{
+            backgroundColor: "var(--color-surface)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--space-2) var(--space-4)",
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600 }}>
+            {lang === "bn" ? "সাপ্তাহিক রুটিন" : "Weekly Schedule"}
+          </div>
+          <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--color-success)" }}>
+            {lang === "bn" ? "৭ দিনই সক্রিয় (কোনো অফ-ডে নেই)" : "Active All 7 Days"}
+          </div>
+        </div>
+      </div>
+
       {/* Top Banner: Streak and Exam Countdown */}
       <div
         style={{
@@ -216,6 +289,52 @@ export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleT
                     <MathRenderer content={task.guidelines} />
                   </div>
                 )}
+
+                {/* Launch Study Session Room Button */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: "var(--space-2)",
+                    paddingTop: "var(--space-3)",
+                    borderTop: "1px solid var(--color-border)",
+                    flexWrap: "wrap",
+                    gap: "var(--space-2)",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudyTask(task)}
+                    className="btn-primary touch-target"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "var(--space-2)",
+                      fontSize: "var(--text-xs)",
+                      padding: "8px 16px",
+                      borderRadius: "var(--radius-md)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <Play size={14} />
+                    <span>
+                      {lang === "bn"
+                        ? isCompleted
+                          ? "পুনরায় স্টাডি সেশন দেখুন"
+                          : "বিসমিল্লাহ বলে পড়া শুরু করুন"
+                        : isCompleted
+                        ? "Review Study Session"
+                        : "Start Study Session (Bismillah)"}
+                    </span>
+                  </button>
+
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                    {isCompleted
+                      ? (lang === "bn" ? "আলহামদুলিল্লাহ, পড়া সম্পন্ন হয়েছে!" : "Alhamdulillah, Completed!")
+                      : (lang === "bn" ? "স্টপওয়াচ, লক্ষ্য ট্র্যাকিং ও কুইজ অন্তর্ভুক্ত" : "Includes stopwatch, split-targets & quiz")}
+                  </span>
+                </div>
               </div>
             );
           })

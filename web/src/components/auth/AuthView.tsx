@@ -146,15 +146,15 @@ export const AuthView: React.FC<AuthViewProps> = ({
               }}
             >
               <Shield size={14} />
-              {lang === "bn" ? "নিরাপদ সাইন ইন পোর্টাল" : "Secure Sign-in Portal"}
+              {lang === "bn" ? "আসসালামু আলাইকুম • স্বাগতম" : "Assalamu Alaikum • Welcome"}
             </span>
             <h1 style={{ fontSize: "var(--text-2xl)", fontWeight: 800, marginTop: "var(--space-2)" }}>
-              {lang === "bn" ? "আপনার অ্যাকাউন্টে প্রবেশ করুন" : "Sign in to your account"}
+              {lang === "bn" ? "ThinkBuddy স্মার্ট শিখন পোর্টাল" : "ThinkBuddy Smart Learning Portal"}
             </h1>
             <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)", marginTop: "var(--space-1)" }}>
               {lang === "bn"
-                ? "শিক্ষার্থী বা অভিভাবক হিসেবে আপনার নির্ধারিত পোর্টালে লগইন করুন"
-                : "Choose your role to access your dedicated student or parent portal"}
+                ? "বিসমিল্লাহ বলে শুরু করুন — শিক্ষার্থী অথবা অভিভাবক হিসেবে প্রবেশ করুন"
+                : "Begin with Bismillah — Enter as a Student or Parent"}
             </p>
           </div>
 
