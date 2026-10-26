@@ -104,6 +104,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               {user.name}
             </span>
             <button
+              id="btn-logout"
+              data-testid="btn-logout"
               onClick={onLogout}
               className="btn-secondary touch-target"
               style={{ width: 48, height: 48, padding: 0, color: "var(--color-danger)" }}

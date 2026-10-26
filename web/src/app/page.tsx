@@ -16,6 +16,7 @@ import { ParentOnboardingView } from "@/components/parent/ParentOnboardingView";
 import { NotificationPreferencesView } from "@/components/parent/NotificationPreferencesView";
 import { BroadAnswerView } from "@/components/student/BroadAnswerView";
 import { FirebaseSignInModal } from "@/components/auth/FirebaseSignInModal";
+import { AuthView } from "@/components/auth/AuthView";
 import { Language, translations } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
 import { SessionUser, ClientConfig, TodayPayload, ChildSummary } from "@/lib/types";
@@ -71,10 +72,7 @@ export default function Home() {
           setCurrentTab("today");
         }
       } else {
-        // Default local dev student session
-        const loginRes = await apiClient.login("student", "তাহমিদ আলিম");
-        setUser(loginRes.user);
-        setCurrentTab("today");
+        setUser(null);
       }
     }
     init();
@@ -110,20 +108,21 @@ export default function Home() {
     });
   };
 
-  const handleSwitchRole = async (newRole: "student" | "parent") => {
-    const res = await apiClient.login(
-      newRole,
-      newRole === "student" ? "তাহমিদ আলিম (শিক্ষার্থী)" : "রফিকুল ইসলাম (অভিভাবক)"
-    );
+  const handleLogin = async (role: "student" | "parent", displayName: string) => {
+    const res = await apiClient.login(role, displayName);
     setUser(res.user);
-    if (newRole === "parent") {
+    if (role === "parent") {
       const kids = await apiClient.getChildren();
       setChildrenList(kids);
       if (kids.length > 0) {
         setActiveChildId(kids[0].student_id);
       }
+      setCurrentTab("dashboard");
+    } else {
+      const td = await apiClient.getToday(res.user.student_id || "stu_101");
+      setTodayData(td);
+      setCurrentTab("today");
     }
-    setCurrentTab(newRole === "student" ? "today" : "dashboard");
   };
 
   const handleLogout = async () => {
@@ -135,6 +134,35 @@ export default function Home() {
     await apiClient.updateTaskStatus(taskId, newStatus);
   };
 
+  // If unauthenticated, show secure login portal (Parent / Student login)
+  if (!user) {
+    return (
+      <>
+        <AuthView
+          lang={lang}
+          theme={theme}
+          onToggleLang={toggleLang}
+          onToggleTheme={toggleTheme}
+          onLogin={handleLogin}
+          onOpenFirebaseModal={() => setFirebaseModalOpen(true)}
+        />
+        <FirebaseSignInModal
+          isOpen={isFirebaseModalOpen}
+          onClose={() => setFirebaseModalOpen(false)}
+          onSuccess={(newUser) => {
+            setUser(newUser);
+            if (newUser.role === "parent") {
+              setCurrentTab("dashboard");
+            } else {
+              setCurrentTab("today");
+            }
+          }}
+          lang={lang}
+        />
+      </>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <Navbar
@@ -145,46 +173,6 @@ export default function Home() {
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
       />
-
-      {/* Dev role switcher banner */}
-      <nav
-        aria-label="Role selector"
-        style={{
-          backgroundColor: "var(--color-surface)",
-          borderBottom: "1px solid var(--color-border)",
-          padding: "var(--space-2) var(--space-6)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: "var(--text-xs)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>রোল নির্বাচন:</span>
-          <button
-            onClick={() => handleSwitchRole("student")}
-            className={user?.role === "student" ? "btn-primary touch-target" : "btn-secondary touch-target"}
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            শিক্ষার্থী (Student)
-          </button>
-          <button
-            onClick={() => handleSwitchRole("parent")}
-            className={user?.role === "parent" ? "btn-primary touch-target" : "btn-secondary touch-target"}
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            অভিভাবক (Parent)
-          </button>
-          <button
-            onClick={() => setFirebaseModalOpen(true)}
-            className="btn-outline touch-target"
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            Firebase Auth
-          </button>
-        </div>
-        <span style={{ color: "var(--color-text-muted)" }}>ThinkBuddy Web Client v1.0</span>
-      </nav>
 
       <div className="app-container">
         {user && (
