@@ -26,7 +26,7 @@ class CoreSettings(BaseSettings):
     CORE_HOST: str = Field(default="127.0.0.1", description="Core host address")
     CORE_PORT: int = Field(default=8001, description="Core port")
 
-    # Reverse proxy security
+    # Reverse proxy security (restricted to specific web/gateway addresses, no whole private ranges)
     TRUSTED_PROXIES: list[str] = Field(
         default=[
             "127.0.0.1",
@@ -35,11 +35,8 @@ class CoreSettings(BaseSettings):
             "gateway",
             "web",
             "thinkbuddy-web",
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16",
         ],
-        description="Trusted reverse proxy IP ranges or hostnames",
+        description="Trusted reverse proxy IP addresses or container hostnames",
     )
 
     # Internal service authentication

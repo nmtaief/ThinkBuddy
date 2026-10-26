@@ -65,10 +65,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Missing Firebase id_token" }, { status: 400 });
       }
 
-      // Extract client IP and forward to gateway
+      // Extract client IP and forward to gateway (parsed from the right)
       const rawXff = req.headers.get("x-forwarded-for");
       const rawRealIp = req.headers.get("x-real-ip");
-      const clientIp = rawXff ? rawXff.split(",")[0].trim() : (rawRealIp || "127.0.0.1");
+      const xffHops = rawXff ? rawXff.split(",").map((s) => s.trim()).filter(Boolean) : [];
+      const clientIp = xffHops.length > 0
+        ? xffHops[xffHops.length - 1]
+        : (rawRealIp || "127.0.0.1");
 
       // Forward to backend gateway exchange
       const backendRes = await fetch(`${BACKEND_GATEWAY_URL}/v1/auth/exchange`, {

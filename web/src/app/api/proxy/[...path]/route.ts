@@ -159,11 +159,12 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     }
   }
 
-  // 6. Real Client IP Extraction and Header Propagation
+  // 6. Real Client IP Extraction and Header Propagation (parsed from the right)
   const rawXff = req.headers.get("x-forwarded-for");
   const rawRealIp = req.headers.get("x-real-ip");
-  const clientIp = rawXff
-    ? rawXff.split(",")[0].trim()
+  const xffHops = rawXff ? rawXff.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const clientIp = xffHops.length > 0
+    ? xffHops[xffHops.length - 1]
     : (rawRealIp || "127.0.0.1");
 
   // Overwrite client platform headers strictly from server
