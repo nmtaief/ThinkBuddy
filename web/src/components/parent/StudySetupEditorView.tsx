@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { StudySetup, ClientConfig } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { apiClient } from "@/lib/api-client";
-import { Sliders, Save, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react";
 
 interface StudySetupEditorViewProps {
   studentId: string;
@@ -24,7 +24,7 @@ export const StudySetupEditorView: React.FC<StudySetupEditorViewProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const fetchSetup = async () => {
+  const fetchSetup = useCallback(async () => {
     setLoading(true);
     setConflictError(null);
     try {
@@ -33,11 +33,11 @@ export const StudySetupEditorView: React.FC<StudySetupEditorViewProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [studentId]);
 
   useEffect(() => {
-    fetchSetup();
-  }, [studentId]);
+    void fetchSetup();
+  }, [fetchSetup]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

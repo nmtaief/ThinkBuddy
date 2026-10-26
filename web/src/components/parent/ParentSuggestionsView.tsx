@@ -19,19 +19,25 @@ export const ParentSuggestionsView: React.FC<ParentSuggestionsViewProps> = ({ st
   const [changeRequests, setChangeRequests] = useState<StudentChangeRequest[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const loadData = async () => {
-    const [sugs, adjs, reqs] = await Promise.all([
-      apiClient.getAISuggestions(studentId),
-      apiClient.getAutoAdjustments(studentId),
-      apiClient.getChangeRequests(studentId),
-    ]);
-    setSuggestions(sugs);
-    setAdjustments(adjs);
-    setChangeRequests(reqs);
-  };
 
   useEffect(() => {
-    loadData();
+    let ignore = false;
+    const run = async () => {
+      const [sugs, adjs, reqs] = await Promise.all([
+        apiClient.getAISuggestions(studentId),
+        apiClient.getAutoAdjustments(studentId),
+        apiClient.getChangeRequests(studentId),
+      ]);
+      if (!ignore) {
+        setSuggestions(sugs);
+        setAdjustments(adjs);
+        setChangeRequests(reqs);
+      }
+    };
+    run();
+    return () => {
+      ignore = true;
+    };
   }, [studentId]);
 
   const handleApproveSuggestion = async (id: string) => {

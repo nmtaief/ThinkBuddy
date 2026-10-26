@@ -81,7 +81,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               {t.app.title}
             </div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-              {t.app.subtitle}
+              {t.app.tagline}
             </div>
           </div>
         </div>

@@ -18,12 +18,14 @@ import { BroadAnswerView } from "@/components/student/BroadAnswerView";
 import { FirebaseSignInModal } from "@/components/auth/FirebaseSignInModal";
 import { AuthView } from "@/components/auth/AuthView";
 import { Language, translations } from "@/lib/i18n";
+import { Religion } from "@/lib/religion";
 import { apiClient } from "@/lib/api-client";
 import { SessionUser, ClientConfig, TodayPayload, ChildSummary } from "@/lib/types";
 
 export default function Home() {
   const [lang, setLang] = useState<Language>("bn");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [religion, setReligion] = useState<Religion>("islam");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [isFirebaseModalOpen, setFirebaseModalOpen] = useState(false);
   const [config, setConfig] = useState<ClientConfig>({
@@ -72,11 +74,29 @@ export default function Home() {
           setCurrentTab("today");
         }
       } else {
-        setUser(null);
+        try {
+          const loginRes = await apiClient.login("student", "তাহমিদ আলিম");
+          setUser(loginRes.user);
+          setCurrentTab("today");
+        } catch {
+          setUser(null);
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        const savedRel = localStorage.getItem("thinkbuddy_religion") as Religion | null;
+        if (savedRel) setReligion(savedRel);
       }
     }
     init();
   }, []);
+
+  const handleReligionChange = (rel: Religion) => {
+    setReligion(rel);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("thinkbuddy_religion", rel);
+    }
+  };
 
   // Load tab data
   useEffect(() => {
@@ -172,7 +192,49 @@ export default function Home() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
+        religion={religion}
+        onChangeReligion={handleReligionChange}
       />
+
+      {/* Dev role switcher banner */}
+      <nav
+        aria-label="Role selector"
+        style={{
+          backgroundColor: "var(--color-surface)",
+          borderBottom: "1px solid var(--color-border)",
+          padding: "var(--space-2) var(--space-6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          fontSize: "var(--text-xs)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>রোল নির্বাচন:</span>
+          <button
+            onClick={() => handleLogin("student", "তাহমিদ আলিম")}
+            className={user?.role === "student" ? "btn-primary touch-target" : "btn-secondary touch-target"}
+            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
+          >
+            শিক্ষার্থী (Student)
+          </button>
+          <button
+            onClick={() => handleLogin("parent", "রফিকুল ইসলাম")}
+            className={user?.role === "parent" ? "btn-primary touch-target" : "btn-secondary touch-target"}
+            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
+          >
+            অভিভাবক (Parent)
+          </button>
+          <button
+            onClick={() => setFirebaseModalOpen(true)}
+            className="btn-outline touch-target"
+            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
+          >
+            Firebase Auth
+          </button>
+        </div>
+        <span style={{ color: "var(--color-text-muted)" }}>ThinkBuddy Web Client v1.0</span>
+      </nav>
 
       <div className="app-container">
         {user && (
@@ -195,6 +257,8 @@ export default function Home() {
                 <TodayView
                   todayData={todayData}
                   lang={lang}
+                  religion={religion}
+                  studentName={user.name}
                   onToggleTask={handleToggleTask}
                 />
               )}
@@ -202,6 +266,8 @@ export default function Home() {
                 <TodayView
                   todayData={todayData}
                   lang={lang}
+                  religion={religion}
+                  studentName={user.name}
                   onToggleTask={handleToggleTask}
                 />
               )}
@@ -229,6 +295,7 @@ export default function Home() {
                   activeChildId={activeChildId}
                   onSelectChild={setActiveChildId}
                   lang={lang}
+                  religion={religion}
                 />
               )}
               {currentTab === "study-setup" && config && (

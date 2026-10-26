@@ -5,14 +5,25 @@ import { MathRenderer } from "@/components/MathRenderer";
 import { CheckCircle2, Circle, Flame, Calendar, Clock, BookOpen, Play, Sparkles } from "lucide-react";
 import { StudySessionRoomView } from "@/components/student/StudySessionRoomView";
 
+import { Religion, getReligionConfig } from "@/lib/religion";
+
 interface TodayViewProps {
   todayData: TodayPayload;
   lang: Language;
+  religion?: Religion;
+  studentName?: string;
   onToggleTask: (taskId: string, newStatus: "completed" | "pending") => void;
 }
 
-export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleTask }) => {
+export const TodayView: React.FC<TodayViewProps> = ({
+  todayData,
+  lang,
+  religion = "islam",
+  studentName = "তাহমিদ আলিম",
+  onToggleTask,
+}) => {
   const t = translations[lang];
+  const relConfig = getReligionConfig(religion);
   const [tasks, setTasks] = useState<StudyTask[]>(todayData.tasks);
   const [selectedStudyTask, setSelectedStudyTask] = useState<StudyTask | null>(null);
 
@@ -42,6 +53,8 @@ export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleT
       <StudySessionRoomView
         task={selectedStudyTask}
         lang={lang}
+        religion={religion}
+        studentName={studentName}
         onBack={() => setSelectedStudyTask(null)}
         onComplete={handleStudySessionComplete}
       />
@@ -54,7 +67,7 @@ export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleT
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-      {/* Warm BD / Muslim Greeting Card */}
+      {/* Warm Religious Greeting Card */}
       <div
         className="card"
         style={{
@@ -72,16 +85,14 @@ export const TodayView: React.FC<TodayViewProps> = ({ todayData, lang, onToggleT
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
             <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
-              {lang === "bn" ? "আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ" : "Assalamu Alaikum wa Rahmatullah"}
+              {relConfig.icon} {relConfig.greetings.greetingHeader}
             </span>
           </div>
           <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 2 }}>
-            {lang === "bn" ? "আজকের দিনটি বরকতময় ও শিক্ষণীয় হোক!" : "Have a blessed and productive learning day!"}
+            {relConfig.greetings.openingBlessing}
           </div>
           <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", margin: 0 }}>
-            {lang === "bn"
-              ? "৭ দিনের নিরবচ্ছিন্ন অধ্যয়ন নীতি — প্রতিদিন অল্প অল্প শিখে অটল ধারাবাহিকতা ধরে রাখো।"
-              : "7-day continuous learning habit — steady daily effort without weekly off-days."}
+            {relConfig.greetings.subBlessing}
           </p>
         </div>
 

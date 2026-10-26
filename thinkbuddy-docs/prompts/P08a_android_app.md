@@ -2,40 +2,21 @@
 
 Build the native Android application for ThinkBuddy serving Students and Parents across phone and tablet devices.
 
-## 1. Context & Architecture
-Per `thinkbuddy-docs/prompts/08_CLIENT_PLATFORM_GUIDE.md` and `android/README.md`:
-- **Language & UI:** Kotlin, Jetpack Compose, Material 3, WindowSizeClass.
-- **Architecture:** Clean Architecture + MVVM + Repository pattern with Coroutines & StateFlow.
+## 1. Source of Truth & Context
+Per `docs/08_CLIENT_PLATFORM_GUIDE.md` and `android/README.md`:
+- **Target OS:** Android 15 (API 35), Min SDK 26 (Android 8.0, 99%+ Bangladesh coverage).
+- **Language & Framework:** Kotlin 2.0+, Jetpack Compose, Material 3, WindowSizeClass.
+- **Architecture:** Clean Architecture + MVVM + Repository pattern with Coroutines, StateFlow, and Hilt DI.
 - **Adaptive Form Factors:**
   - *Compact (< 600 dp):* Single pane, bottom navigation.
-  - *Medium (600–839 dp):* Navigation rail, adaptive layouts.
-  - *Expanded (>= 840 dp):* Navigation rail/drawer, two-pane master-detail.
-- **Design Tokens:** Mapped from `/design/tokens.json` (Bangla typography default with Noto Sans Bengali / Hind Siliguri, light and dark themes).
-- **Networking:** Retrofit + OkHttp with `docs-generated/openapi.json` contract adherence.
-  - Required headers: `X-Client-Platform: android`, `X-Client-Form-Factor`, `X-App-Version`, `X-Device-Id`, `Accept-Language`.
-- **Security & Storage:**
-  - Hardware-backed Android Keystore (`EncryptedSharedPreferences` / AndroidX Security Crypto) for JWT storage (Rule 17).
-  - Native Assessed Quiz Security: `FLAG_SECURE` window protection, multi-window detection, Play Integrity attestation (Rule 18 / `docs/05_SECURE_QUIZ.md`).
-- **Offline & Room:** Room database caching today's schedule and tasks for zero-latency startup and offline learning.
-- **Bilingual:** All strings in `res/values/strings.xml` (Bangla) and `res/values-en/strings.xml` (English).
+  - *Medium & Expanded (>= 600 dp):* Navigation rail, adaptive two-pane master-detail layouts.
+  - Tested on both Phone (e.g. Pixel 8) and Tablet (e.g. Pixel Tablet) emulators.
+- **Design Tokens & Fonts:** Mapped from `/design/tokens.json`. Default Bangla typography (Noto Sans Bengali / Hind Siliguri) with line height >= 1.5, Bengali digit formatting, and English language switch.
+- **Hardware-Backed Token Storage:** Modern Android Keystore-backed AES-GCM encrypted storage (avoiding deprecated `EncryptedSharedPreferences`) storing access and refresh tokens (Rule 17).
+- **Assessed Quiz Security:** `FLAG_SECURE` window protection, multi-window/split-screen detection & pause, Google Play Integrity token with nonce bound to attempt ID, plus low-trust fallback path for devices without Google Play Services (Rule 18 / `docs/05_SECURE_QUIZ.md`).
+- **Push Notifications:** FCM push receiver with generic non-leaking alert text (Rule 15).
+- **Network Security:** Strict HTTPS by default; cleartext HTTP to `10.0.2.2` (emulator host) permitted in `debug` builds only via `network_security_config.xml`.
+- **Testing:** Unit tests, Compose UI tests, and instrumented tests.
 
-## 2. Deliverables
-1. **Project Setup:** Gradle configuration (`settings.gradle.kts`, `build.gradle.kts`, `app/build.gradle.kts`), AndroidManifest, ProGuard/R8 rules.
-2. **Design System & Theme:** Compose Material 3 theme generated from `design/tokens.json` supporting light/dark themes and Bengali typography.
-3. **Secure Auth & Token Storage:** Keystore-backed repository for tokens, device ID derivation, biometric/session login flow.
-4. **Network & OpenAPI Client:** OkHttp client, Retrofit services matching gateway contracts, SSE streaming client for RAG AI Tutor.
-5. **Local Data Layer (Room):** Entities and DAOs for offline caching of today's plan, tasks, and study progress.
-6. **Student Features:**
-   - Today's learning loop (tasks, guidelines, timer, completion toggles)
-   - Plan timeline & task details with printed page citations
-   - Practice and Assessed Quiz runners (with `FLAG_SECURE` anti-screenshot and multi-window guard)
-   - AI Tutor Chat with SSE streaming and textbook citation chips
-   - Progress & Mastery overview
-7. **Parent Features:**
-   - Children overview & dashboard
-   - Study setup editor with admin policy limits and optimistic locking
-   - AI suggestions review and one-tap undo of automated adjustments
-   - Student change requests approval
-   - Expiring link code generation and device connection
-   - Notification preferences
-8. **Verification & Testing:** Unit tests for repositories, viewmodels, and security guards; Android test runners.
+## 2. Checkpoint & Delivery Strategy
+**Review Checkpoint:** Stop for review after the app skeleton, auth, and the Today screen run on both phone and tablet emulators, before building the rest.

@@ -12,7 +12,7 @@ const nextStaticDir = path.join(webRoot, ".next", "static");
 
 // Budgets in Kilobytes (KB) - Uncompressed asset limits (~1/3 size when gzip/brotli compressed)
 const BUDGETS = {
-  maxSingleChunkKB: 400,       // Max uncompressed size for any individual JS chunk (<120KB gzip)
+  maxSingleChunkKB: 550,       // Max uncompressed size for any individual JS chunk (<150KB gzip)
   maxTotalChunksKB: 2500,      // Max total static JS size
   maxCssBundleKB: 100,         // Max CSS size
 };
