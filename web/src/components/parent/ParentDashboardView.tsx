@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { ChildSummary, UploadedStudyNote } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
-import { Religion, getReligionConfig } from "@/lib/religion";
 import { apiClient } from "@/lib/api-client";
 import {
   Users,
@@ -26,7 +25,6 @@ interface ParentDashboardViewProps {
   activeChildId: string;
   onSelectChild: (id: string) => void;
   lang: Language;
-  religion?: Religion;
 }
 
 export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({
@@ -34,10 +32,8 @@ export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({
   activeChildId,
   onSelectChild,
   lang,
-  religion = "islam",
 }) => {
   const t = translations[lang];
-  const relConfig = getReligionConfig(religion);
 
   const activeChild = childrenList.find((c) => c.student_id === activeChildId) || childrenList[0];
 
@@ -109,14 +105,12 @@ export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
             <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
             <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
-              {relConfig.greetings.greetingHeader}
             </span>
           </div>
           <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 800, margin: "2px 0 6px 0" }}>
             {lang === "bn" ? `${activeChild.name}-এর অধ্যয়ন ড্যাশবোর্ড` : `${activeChild.name}'s Learning Dashboard`}
           </h2>
           <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", margin: 0, maxWidth: 650, lineHeight: 1.6 }}>
-            {relConfig.greetings.parentNoteBlessing}
           </p>
         </div>
 
@@ -133,8 +127,6 @@ export const ParentDashboardView: React.FC<ParentDashboardViewProps> = ({
               fontWeight: 700,
             }}
           >
-            <span>{relConfig.icon}</span>
-            <span>{relConfig.name_bn}</span>
           </span>
 
           <span

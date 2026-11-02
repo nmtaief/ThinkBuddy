@@ -3,7 +3,6 @@
 import React from "react";
 import { Language, translations } from "@/lib/i18n";
 import { SessionUser } from "@/lib/types";
-import { Religion, RELIGION_CONFIGS } from "@/lib/religion";
 import { BookOpen, Globe, Moon, Sun, LogOut } from "lucide-react";
 
 interface NavbarProps {
@@ -13,8 +12,6 @@ interface NavbarProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onLogout: () => void;
-  religion?: Religion;
-  onChangeReligion?: (rel: Religion) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -24,8 +21,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   theme,
   onToggleTheme,
   onLogout,
-  religion = "islam",
-  onChangeReligion,
 }) => {
   const t = translations[lang];
 
@@ -79,33 +74,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
-        {/* Dynamic Faith / Tradition Selector */}
-        {onChangeReligion && (
-          <select
-            value={religion}
-            onChange={(e) => onChangeReligion(e.target.value as Religion)}
-            className="touch-target"
-            style={{
-              padding: "6px 10px",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--color-border)",
-              backgroundColor: "var(--color-surface)",
-              color: "var(--color-text)",
-              fontSize: "var(--text-xs)",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-            aria-label="Select Faith Tradition"
-            title={lang === "bn" ? "ধর্মীয় ও সামাজিক দৃষ্টিভঙ্গি নির্বাচন" : "Select Faith Tradition"}
-          >
-            {Object.values(RELIGION_CONFIGS).map((rel) => (
-              <option key={rel.id} value={rel.id}>
-                {rel.icon} {lang === "bn" ? rel.name_bn : rel.name_en}
-              </option>
-            ))}
-          </select>
-        )}
-
         {/* Language switch */}
         <button
           onClick={onToggleLang}

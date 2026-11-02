@@ -5,12 +5,10 @@ import { MathRenderer } from "@/components/MathRenderer";
 import { CheckCircle2, Circle, Flame, Calendar, Clock, BookOpen, Play, Sparkles } from "lucide-react";
 import { StudySessionRoomView } from "@/components/student/StudySessionRoomView";
 
-import { Religion, getReligionConfig } from "@/lib/religion";
 
 interface TodayViewProps {
   todayData: TodayPayload;
   lang: Language;
-  religion?: Religion;
   studentName?: string;
   onToggleTask: (taskId: string, newStatus: "completed" | "pending") => void;
 }
@@ -18,12 +16,10 @@ interface TodayViewProps {
 export const TodayView: React.FC<TodayViewProps> = ({
   todayData,
   lang,
-  religion = "islam",
   studentName = "তাহমিদ আলিম",
   onToggleTask,
 }) => {
   const t = translations[lang];
-  const relConfig = getReligionConfig(religion);
   const [tasks, setTasks] = useState<StudyTask[]>(todayData.tasks);
   const [selectedStudyTask, setSelectedStudyTask] = useState<StudyTask | null>(null);
 
@@ -53,7 +49,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
       <StudySessionRoomView
         task={selectedStudyTask}
         lang={lang}
-        religion={religion}
         studentName={studentName}
         onBack={() => setSelectedStudyTask(null)}
         onComplete={handleStudySessionComplete}
@@ -85,14 +80,11 @@ export const TodayView: React.FC<TodayViewProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
             <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
-              {relConfig.icon} {relConfig.greetings.greetingHeader}
             </span>
           </div>
           <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 2 }}>
-            {relConfig.greetings.openingBlessing}
           </div>
           <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", margin: 0 }}>
-            {relConfig.greetings.subBlessing}
           </p>
         </div>
 
@@ -333,10 +325,10 @@ export const TodayView: React.FC<TodayViewProps> = ({
                       {lang === "bn"
                         ? isCompleted
                           ? "পুনরায় স্টাডি সেশন দেখুন"
-                          : "বিসমিল্লাহ বলে পড়া শুরু করুন"
+                          : "পড়া শুরু করুন"
                         : isCompleted
                         ? "Review Study Session"
-                        : "Start Study Session (Bismillah)"}
+                        : "Start Study Session"}
                     </span>
                   </button>
 

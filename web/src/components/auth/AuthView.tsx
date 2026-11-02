@@ -146,15 +146,15 @@ export const AuthView: React.FC<AuthViewProps> = ({
               }}
             >
               <Shield size={14} />
-              {lang === "bn" ? "আসসালামু আলাইকুম • স্বাগতম" : "Assalamu Alaikum • Welcome"}
+              {lang === "bn" ? "স্বাগতম" : "Welcome"}
             </span>
             <h1 style={{ fontSize: "var(--text-2xl)", fontWeight: 800, marginTop: "var(--space-2)" }}>
               {lang === "bn" ? "ThinkBuddy স্মার্ট শিখন পোর্টাল" : "ThinkBuddy Smart Learning Portal"}
             </h1>
             <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)", marginTop: "var(--space-1)" }}>
               {lang === "bn"
-                ? "বিসমিল্লাহ বলে শুরু করুন — শিক্ষার্থী অথবা অভিভাবক হিসেবে প্রবেশ করুন"
-                : "Begin with Bismillah — Enter as a Student or Parent"}
+                ? "শিক্ষার্থী অথবা অভিভাবক হিসেবে প্রবেশ করুন"
+                : "Enter as a Student or Parent"}
             </p>
           </div>
 

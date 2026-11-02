@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { StudyTask, PageStudyBreakdown, HomeworkTask, UploadedStudyNote } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
-import { Religion, getReligionConfig } from "@/lib/religion";
 import { apiClient } from "@/lib/api-client";
 import {
   Clock,
@@ -34,7 +33,6 @@ import {
 interface StudySessionRoomViewProps {
   task: StudyTask;
   lang: Language;
-  religion?: Religion;
   studentName?: string;
   onBack: () => void;
   onComplete: (taskId: string, timeSpentSeconds: number, note: string, quizScore: number) => void;
@@ -49,13 +47,11 @@ interface PageStudyState {
 export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
   task,
   lang,
-  religion = "islam",
   studentName = "তাহমিদ আলিম",
   onBack,
   onComplete,
 }) => {
   const t = translations[lang];
-  const relConfig = getReligionConfig(religion);
 
   // Stopwatch state
   const [secondsElapsed, setSecondsElapsed] = useState(0);
@@ -357,8 +353,6 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
               fontWeight: 700,
             }}
           >
-            <span>{relConfig.icon}</span>
-            <span>{relConfig.name_bn}</span>
           </span>
 
           <span
@@ -394,14 +388,11 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-1)" }}>
           <Sparkles size={18} style={{ color: "var(--color-primary)" }} />
           <span style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--color-primary)" }}>
-            {relConfig.greetings.greetingHeader}
           </span>
         </div>
         <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 800, margin: "var(--space-1) 0" }}>
-          {relConfig.greetings.openingBlessing}
         </h2>
         <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
-          {relConfig.greetings.subBlessing}
         </p>
       </div>
 
@@ -803,7 +794,6 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
 
         {/* Dynamic Religious Note Prompt */}
         <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", marginBottom: "var(--space-3)" }}>
-          {relConfig.greetings.notesPrompt}
         </p>
 
         {/* Text Note Area */}
@@ -912,7 +902,6 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
 
           {uploadSuccessMsg && (
             <span style={{ fontSize: "var(--text-xs)", color: "var(--color-success)", fontWeight: 700 }}>
-              {relConfig.greetings.parentNoteBlessing}
             </span>
           )}
         </div>
@@ -1110,7 +1099,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
               );
             })}
 
-            {/* Quiz Submit Button & Dynamic Religion Feedback */}
+            {/* Quiz Submit Button & Feedback */}
             {!quizSubmitted ? (
               <button
                 onClick={handleSubmitQuiz}
@@ -1142,7 +1131,6 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
                   <Award size={32} style={{ color: "var(--color-success)" }} />
                   <div>
                     <h3 style={{ fontSize: "var(--text-lg)", fontWeight: 800, margin: 0 }}>
-                      {relConfig.greetings.quizCelebrateHeader}
                     </h3>
                     <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
                       {lang === "bn" ? "তোমার অর্জিত স্কোর: " : "Your Score: "}
@@ -1157,10 +1145,10 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
 
                 <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text)", margin: 0, lineHeight: 1.6 }}>
                   {quizScore === scienceQuestions.length
-                    ? relConfig.greetings.quizFeedbackExcellent
+                    ? (lang === "bn" ? "অসাধারণ দক্ষতা! সবগুলো প্রশ্নের সঠিক উত্তর দিয়েছো।" : "Outstanding! You got every question right.")
                     : quizScore >= 2
-                    ? relConfig.greetings.quizFeedbackGood
-                    : relConfig.greetings.quizFeedbackPractice}
+                    ? (lang === "bn" ? "চমৎকার প্রচেষ্টা! নিয়মিত চর্চায় তোমার দক্ষতা আরও বৃদ্ধি পাবে।" : "Great effort! Continuous practice will strengthen your mastery.")
+                    : (lang === "bn" ? "ভালো চেষ্টা করেছো! পাঠ্যবইয়ের অধ্যায়টি পুনরায় পড়ে আবার চেষ্টা করো।" : "Good try! Review the chapter in your textbook and try again.")}
                 </p>
               </div>
             )}
@@ -1183,7 +1171,6 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
       >
         <div>
           <div style={{ fontSize: "var(--text-sm)", fontWeight: 700 }}>
-            {relConfig.greetings.completedBlessing}
           </div>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             {lang === "bn"

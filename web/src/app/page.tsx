@@ -18,14 +18,12 @@ import { BroadAnswerView } from "@/components/student/BroadAnswerView";
 import { FirebaseSignInModal } from "@/components/auth/FirebaseSignInModal";
 import { AuthView } from "@/components/auth/AuthView";
 import { Language, translations } from "@/lib/i18n";
-import { Religion } from "@/lib/religion";
 import { apiClient } from "@/lib/api-client";
 import { SessionUser, ClientConfig, TodayPayload, ChildSummary } from "@/lib/types";
 
 export default function Home() {
   const [lang, setLang] = useState<Language>("bn");
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [religion, setReligion] = useState<Religion>("islam");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [isFirebaseModalOpen, setFirebaseModalOpen] = useState(false);
   const [config, setConfig] = useState<ClientConfig>({
@@ -83,20 +81,10 @@ export default function Home() {
         }
       }
 
-      if (typeof window !== "undefined") {
-        const savedRel = localStorage.getItem("thinkbuddy_religion") as Religion | null;
-        if (savedRel) setReligion(savedRel);
-      }
     }
     init();
   }, []);
 
-  const handleReligionChange = (rel: Religion) => {
-    setReligion(rel);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("thinkbuddy_religion", rel);
-    }
-  };
 
   // Load tab data
   useEffect(() => {
@@ -192,8 +180,6 @@ export default function Home() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={handleLogout}
-        religion={religion}
-        onChangeReligion={handleReligionChange}
       />
 
       {/* Dev role switcher banner */}
@@ -257,8 +243,7 @@ export default function Home() {
                 <TodayView
                   todayData={todayData}
                   lang={lang}
-                  religion={religion}
-                  studentName={user.name}
+                            studentName={user.name}
                   onToggleTask={handleToggleTask}
                 />
               )}
@@ -266,8 +251,7 @@ export default function Home() {
                 <TodayView
                   todayData={todayData}
                   lang={lang}
-                  religion={religion}
-                  studentName={user.name}
+                            studentName={user.name}
                   onToggleTask={handleToggleTask}
                 />
               )}
@@ -295,8 +279,7 @@ export default function Home() {
                   activeChildId={activeChildId}
                   onSelectChild={setActiveChildId}
                   lang={lang}
-                  religion={religion}
-                />
+                          />
               )}
               {currentTab === "study-setup" && config && (
                 <StudySetupEditorView
