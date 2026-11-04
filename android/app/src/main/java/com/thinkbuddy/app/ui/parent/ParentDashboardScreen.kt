@@ -745,9 +745,18 @@ fun StudentDashboardDetailView(
                         Icon(Icons.Default.Security, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("ডেটা সুরক্ষা ও অভিভাবক নিয়ন্ত্রণ", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                        Spacer(modifier = Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AmberGold.copy(alpha = 0.2f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("আসন্ন ব্যাকএন্ড ফিচার", color = AmberGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                     Text(
-                        "শিক্ষার্থীর অগ্রগতির ডেটা ডাউনলোড অথবা হিসাব স্থায়ীভাবে মুছে ফেলার নিয়ন্ত্রণ",
+                        "শিক্ষার্থীর অগ্রগতির ডেটা ডাউনলোড অথবা হিসাব স্থায়ীভাবে মুছে ফেলার নিয়ন্ত্রণ (বর্তমানে ব্যাকএন্ডে বাস্তবায়নাধীন)",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -759,26 +768,26 @@ fun StudentDashboardDetailView(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                android.widget.Toast.makeText(context, "শিক্ষার্থীর ডেটা এক্সপোর্ট তৈরি হচ্ছে (JSON)...", android.widget.Toast.LENGTH_SHORT).show()
+                                android.widget.Toast.makeText(context, "অনুপলব্ধ: ডেটা এক্সপোর্ট ব্যাকএন্ড এন্ডপয়েন্ট শীঘ্রই উন্মুক্ত করা হবে।", android.widget.Toast.LENGTH_LONG).show()
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, TealPrimary)
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("ডেটা এক্সপোর্ট", color = TealPrimary, fontSize = 12.sp)
+                            Text("ডেটা এক্সপোর্ট (অনুপলব্ধ)", color = Color.Gray, fontSize = 11.sp)
                         }
 
                         Button(
                             onClick = { showDeleteConfirmDialog = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive.copy(alpha = 0.85f))
+                            colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive.copy(alpha = 0.6f))
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("ডেটা মুছে ফেলুন", color = Color.White, fontSize = 12.sp)
+                            Text("ডেটা মুছে ফেলুন (অনুপলব্ধ)", color = Color.White, fontSize = 11.sp)
                         }
                     }
 
@@ -787,22 +796,22 @@ fun StudentDashboardDetailView(
                             onDismissRequest = { showDeleteConfirmDialog = false },
                             title = { Text("স্থায়ীভাবে ডেটা মুছে ফেলার নিশ্চয়তা", fontWeight = FontWeight.Bold) },
                             text = {
-                                Text("আপনি কি নিশ্চিত যে আপনি ${dashboard.student.name}-এর সকল পড়াশোনা, কুইজ ও অগ্রগতি রেকর্ড স্থায়ীভাবে মুছে ফেলতে চান? এই সিদ্ধান্ত অপরিবর্তনীয়।")
+                                Text("এই ফিচারটি বর্তমানে অনুপলব্ধ। স্থায়ী অ্যাকাউন্ট ডিলিটেশন ব্যাকএন্ড এন্ডপয়েন্ট (DELETE /v1/users/me) চূড়ান্ত হলে এটি কার্যকর হবে।")
                             },
                             confirmButton = {
                                 Button(
                                     onClick = {
                                         showDeleteConfirmDialog = false
-                                        android.widget.Toast.makeText(context, "শিক্ষার্থীর সকল রেকর্ড মুছে ফেলা হয়েছে", android.widget.Toast.LENGTH_LONG).show()
+                                        android.widget.Toast.makeText(context, "অনুপলব্ধ: ব্যাকএন্ড ডিলিটেশন সার্ভিস বাস্তবায়নাধীন", android.widget.Toast.LENGTH_LONG).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive)
                                 ) {
-                                    Text("মুছে ফেলুন")
+                                    Text("বোঝা গেছে")
                                 }
                             },
                             dismissButton = {
                                 OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
-                                    Text("বাতিল")
+                                    Text("বন্ধ করুন")
                                 }
                             }
                         )

@@ -1,6 +1,8 @@
 package com.thinkbuddy.app.core.network
 
+import com.thinkbuddy.app.ThinkBuddyApp
 import com.thinkbuddy.app.core.security.KeystoreTokenStorage
+import com.thinkbuddy.app.core.storage.OfflinePlanCache
 import okhttp3.Interceptor
 import okhttp3.Response
 
@@ -24,9 +26,12 @@ class AuthInterceptor(
 
         val response = chain.proceed(request)
 
-        // If 401 Unauthorized, clear stale session tokens to force re-auth
+        // If 401 Unauthorized, clear stale session tokens to force re-auth and purge offline cache (Item 5)
         if (response.code == 401) {
             tokenStorage.clear()
+            try {
+                OfflinePlanCache.clearCache(ThinkBuddyApp.instance)
+            } catch (_: Exception) {}
         }
 
         return response

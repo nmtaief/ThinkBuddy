@@ -166,10 +166,12 @@ fun TodayScreen(
                 tasks = mapped
                 selectedTask = mapped.firstOrNull()
 
-                // Save to offline cache
+                // Save to encrypted offline cache (Rule 17)
                 OfflinePlanCache.saveTodayPlan(
                     context,
+                    targetId,
                     CachedTodayPlan(
+                        studentId = targetId,
                         streakDays = streakDays,
                         dailyTargetMinutes = dailyTargetMinutes,
                         dailyCompletedMinutes = dailyCompletedMinutes,
@@ -184,7 +186,7 @@ fun TodayScreen(
                     assessedQuizId = data.quizTasks.firstOrNull()?.id ?: "quiz_assessed_1"
                 }
             } else {
-                val cached = OfflinePlanCache.getCachedTodayPlan(context)
+                val cached = OfflinePlanCache.getCachedTodayPlan(context, targetId)
                 if (cached != null) {
                     streakDays = cached.streakDays
                     dailyTargetMinutes = cached.dailyTargetMinutes
@@ -198,7 +200,7 @@ fun TodayScreen(
                 }
             }
         } catch (_: Exception) {
-            val cached = OfflinePlanCache.getCachedTodayPlan(context)
+            val cached = OfflinePlanCache.getCachedTodayPlan(context, studentId ?: "std-demo-1")
             if (cached != null) {
                 streakDays = cached.streakDays
                 dailyTargetMinutes = cached.dailyTargetMinutes

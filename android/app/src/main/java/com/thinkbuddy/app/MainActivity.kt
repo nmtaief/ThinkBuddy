@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.thinkbuddy.app.core.network.PlannerTaskResponse
+import com.thinkbuddy.app.core.storage.OfflinePlanCache
 import com.thinkbuddy.app.ui.auth.AuthScreen
 import com.thinkbuddy.app.ui.chat.ChatScreen
 import com.thinkbuddy.app.ui.home.TodayScreen
@@ -331,7 +332,11 @@ fun MainAppNavHost(
                         userRole = newRole
                         currentTab = if (newRole == "parent") ScreenTab.PARENT_DASHBOARD else ScreenTab.TODAY
                     },
-                    onLogout = { isAuthenticated = false }
+                    onLogout = {
+                        OfflinePlanCache.clearCache(ThinkBuddyApp.instance)
+                        ThinkBuddyApp.instance.tokenStorage.clear()
+                        isAuthenticated = false
+                    }
                 )
             }
         }
@@ -501,7 +506,11 @@ fun MainAppNavHost(
                         userRole = newRole
                         currentTab = if (newRole == "parent") ScreenTab.PARENT_DASHBOARD else ScreenTab.TODAY
                     },
-                    onLogout = { isAuthenticated = false }
+                    onLogout = {
+                        OfflinePlanCache.clearCache(ThinkBuddyApp.instance)
+                        ThinkBuddyApp.instance.tokenStorage.clear()
+                        isAuthenticated = false
+                    }
                 )
             }
         }
