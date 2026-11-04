@@ -137,12 +137,12 @@ class CoreSettings(BaseSettings):
         description="Global feature flag for Spaced Revision Scheduler (P06). Disabled by default.",
     )
     FEATURE_WEB_APP: bool = Field(
-        default=True,
-        description="Global feature flag for Web Application & BFF Proxy (P08).",
+        default=False,
+        description="Global feature flag for Web Application & BFF Proxy (P08). Disabled by default; enabled via environment.",
     )
     FEATURE_ANDROID_APP: bool = Field(
-        default=True,
-        description="Global feature flag for Native Android Application (P08a).",
+        default=False,
+        description="Global feature flag for Native Android Application (P08a). Disabled by default; enabled via environment.",
     )
 
     # AI Planner Integration (P06a)

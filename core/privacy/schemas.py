@@ -12,11 +12,13 @@ from pydantic import BaseModel, Field
 class ParentalConsentRequest(BaseModel):
     version: str = Field(default="1.0", description="Terms and Privacy Policy consent version (e.g. '1.0')")
     consented: bool = Field(default=True, description="Explicit affirmative parental consent granted")
+    terms_hash: str | None = Field(default=None, description="SHA-256 fingerprint of the presented consent terms")
 
 
 class ParentalConsentResponse(BaseModel):
-    status: str = Field(default="granted", description="Consent status ('granted' or 'revoked')")
+    status: str = Field(default="granted", description="Consent status ('granted' or 'withdrawn')")
     version: str = Field(..., description="Active consent version")
+    terms_hash: str = Field(..., description="SHA-256 digest of consented legal text")
     consented_at: datetime = Field(..., description="Timestamp when consent was recorded")
     parent_id: uuid.UUID = Field(..., description="Unique identifier of consenting parent")
 
@@ -24,7 +26,22 @@ class ParentalConsentResponse(BaseModel):
 class ParentalConsentStatusResponse(BaseModel):
     has_consent: bool = Field(..., description="Whether valid parental consent is currently recorded")
     version: str | None = Field(default=None, description="Current recorded consent version")
+    terms_hash: str | None = Field(default=None, description="Recorded consent terms hash")
+    current_terms_hash: str = Field(..., description="Active system consent terms hash")
+    reconsent_required: bool = Field(default=False, description="True if legal text updated and re-consent needed")
     consented_at: datetime | None = Field(default=None, description="Timestamp of recorded consent")
+    withdrawn_at: datetime | None = Field(default=None, description="Timestamp of consent withdrawal if applicable")
+
+
+class WithdrawConsentRequest(BaseModel):
+    reason: str | None = Field(default=None, description="Optional explanation for withdrawing consent")
+
+
+class WithdrawConsentResponse(BaseModel):
+    status: str = Field(default="withdrawn", description="Consent status updated to withdrawn")
+    parent_id: uuid.UUID
+    withdrawn_at: datetime
+    message: str = Field(..., description="Confirmation notice in Bangla and English")
 
 
 class ChatTopicSummaryItem(BaseModel):
@@ -70,6 +87,8 @@ class FamilyDataExportPayload(BaseModel):
 class FamilyDataExportResponse(BaseModel):
     export_id: uuid.UUID
     family_id: uuid.UUID
+    download_url: str = Field(..., description="Short-lived signed download URL (15 minutes TTL)")
+    expires_at: datetime = Field(..., description="Export availability expiration timestamp (7 days)")
     exported_at: datetime
     data: FamilyDataExportPayload
 
@@ -107,5 +126,10 @@ class PurgeJobReport(BaseModel):
     revoked_sessions: int = 0
     revoked_push_tokens: int = 0
     cleared_cache_keys: int = 0
+    deleted_s3_objects: int = 0
+    deleted_notifications: int = 0
+    deleted_learning_signals: int = 0
+    deleted_shadow_runs: int = 0
     anonymized_audit_records: int = 0
+    failed_user_ids: list[str] = Field(default_factory=list)
     executed_at: datetime

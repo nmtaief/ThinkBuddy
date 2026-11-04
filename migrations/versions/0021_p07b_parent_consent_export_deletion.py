@@ -28,6 +28,10 @@ def upgrade() -> None:
         "users",
         sa.Column("consent_version", sa.String(length=20), nullable=True),
     )
+    op.add_column(
+        "users",
+        sa.Column("consent_terms_hash", sa.String(length=64), nullable=True),
+    )
 
     # 2. Create parental_consents table
     op.create_table(
@@ -35,8 +39,10 @@ def upgrade() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("parent_id", sa.UUID(), nullable=False),
         sa.Column("consent_version", sa.String(length=20), nullable=False),
+        sa.Column("terms_hash", sa.String(length=64), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False, server_default="granted"),
         sa.Column("consented_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("withdrawn_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ip_address", sa.String(length=64), nullable=True),
         sa.Column("user_agent", sa.Text(), nullable=True),
         sa.Column("meta", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
@@ -55,6 +61,8 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=20), nullable=False, server_default="completed"),
         sa.Column("format", sa.String(length=10), nullable=False, server_default="json"),
         sa.Column("data_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("download_token_hash", sa.String(length=64), nullable=True),
+        sa.Column("download_url", sa.Text(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["family_id"], ["families.id"], ondelete="CASCADE"),
@@ -93,5 +101,7 @@ def downgrade() -> None:
     op.drop_table("account_deletions")
     op.drop_table("data_exports")
     op.drop_table("parental_consents")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS consent_terms_hash")
     op.drop_column("users", "consent_version")
     op.drop_column("users", "has_parental_consent")
+

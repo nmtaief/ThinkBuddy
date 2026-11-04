@@ -105,6 +105,15 @@ async def execute_student_plan_regeneration(
     async with get_student_async_lock(student_id):
         await acquire_student_advisory_lock(db, student_id)
 
+        # Check if student account is pending deletion
+        stmt_u = select(User).where(User.id == student_id)
+        student_user = (await db.execute(stmt_u)).scalar_one_or_none()
+        if student_user and student_user.status == "pending_deletion":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Study plan updates are suspended."},
+            )
+
         # 1. Fetch student profile
         stmt_prof = select(StudentProfile).where(StudentProfile.user_id == student_id)
         res_prof = await db.execute(stmt_prof)

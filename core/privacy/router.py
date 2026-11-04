@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit.models import AuditLog
 from core.auth.dependencies import get_current_user, require_role
 from core.auth.models import User
 from core.auth.tokens import decode_access_jwt
@@ -22,6 +24,8 @@ from core.privacy.schemas import (
     ParentalConsentStatusResponse,
     PurgeJobReport,
     RequestAccountDeletionBody,
+    WithdrawConsentRequest,
+    WithdrawConsentResponse,
 )
 from core.privacy.service import PrivacyService
 
@@ -77,8 +81,31 @@ async def get_parental_consent_status(
     current_user: Annotated[User, Depends(require_role("parent", "admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ParentalConsentStatusResponse:
-    """Fetch current recorded parental consent status."""
+    """Fetch current recorded parental consent status and check for terms updates."""
     return await PrivacyService.get_parent_consent_status(db, current_user)
+
+
+@router.post(
+    "/parents/consent/withdraw",
+    response_model=WithdrawConsentResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def withdraw_parental_consent(
+    payload: WithdrawConsentRequest,
+    current_user: Annotated[User, Depends(require_role("parent", "admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_reauth_token: Annotated[str | None, Header(alias="X-Reauth-Token")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> WithdrawConsentResponse:
+    """Withdraw parental consent. Requires fresh re-authentication."""
+    iat = extract_token_iat(authorization)
+    return await PrivacyService.withdraw_parent_consent(
+        db=db,
+        parent=current_user,
+        payload=payload,
+        reauth_token=x_reauth_token,
+        auth_iat=iat,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -94,9 +121,17 @@ async def get_parental_consent_status(
 async def export_family_data_get(
     current_user: Annotated[User, Depends(require_role("parent", "admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_reauth_token: Annotated[str | None, Header(alias="X-Reauth-Token")] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> FamilyDataExportResponse:
     """Retrieve complete JSON family data export with topic-level chat summaries only (Rule 15)."""
-    return await PrivacyService.export_family_data(db, current_user)
+    iat = extract_token_iat(authorization)
+    return await PrivacyService.export_family_data(
+        db=db,
+        caller=current_user,
+        reauth_token=x_reauth_token,
+        auth_iat=iat,
+    )
 
 
 @router.post(
@@ -107,9 +142,45 @@ async def export_family_data_get(
 async def export_family_data_post(
     current_user: Annotated[User, Depends(require_role("parent", "admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_reauth_token: Annotated[str | None, Header(alias="X-Reauth-Token")] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> FamilyDataExportResponse:
     """Trigger and retrieve family data export (POST variant)."""
-    return await PrivacyService.export_family_data(db, current_user)
+    iat = extract_token_iat(authorization)
+    return await PrivacyService.export_family_data(
+        db=db,
+        caller=current_user,
+        reauth_token=x_reauth_token,
+        auth_iat=iat,
+    )
+
+
+@router.get(
+    "/parents/me/export/{export_id}/download",
+    status_code=status.HTTP_200_OK,
+)
+async def download_family_export(
+    export_id: uuid.UUID,
+    token: Annotated[str, Query(..., description="Short-lived download security token")],
+    current_user: Annotated[User, Depends(require_role("parent", "admin"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> Response:
+    """Download encrypted family data export archive. Enforces Rule 9 parent isolation."""
+    data = await PrivacyService.download_family_export(
+        db=db,
+        export_id=export_id,
+        token=token,
+        caller=current_user,
+    )
+    content = json.dumps(data, indent=2, default=str)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="thinkbuddy_family_export_{export_id}.json"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+        },
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -126,6 +197,7 @@ async def request_user_deletion(
     payload: RequestAccountDeletionBody,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_reauth_token: Annotated[str | None, Header(alias="X-Reauth-Token")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> AccountDeletionResponse:
     """Schedule user account deletion. Requires recent re-authentication and grants 14-day grace period."""
@@ -134,6 +206,7 @@ async def request_user_deletion(
         db=db,
         caller=current_user,
         payload=payload,
+        reauth_token=x_reauth_token,
         auth_iat=iat,
     )
 
@@ -161,15 +234,17 @@ async def request_family_deletion(
     payload: RequestAccountDeletionBody,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    x_reauth_token: Annotated[str | None, Header(alias="X-Reauth-Token")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> AccountDeletionResponse:
-    """Schedule family deletion. Students are strictly forbidden (HTTP 403 STUDENT_CANNOT_DELETE_FAMILY)."""
+    """Schedule family deletion. Students are strictly forbidden; only family owner can initiate."""
     iat = extract_token_iat(authorization)
     return await PrivacyService.request_family_deletion(
         db=db,
         family_id=family_id,
         caller=current_user,
         payload=payload,
+        reauth_token=x_reauth_token,
         auth_iat=iat,
     )
 
@@ -184,7 +259,7 @@ async def cancel_family_deletion(
     current_user: Annotated[User, Depends(require_role("parent", "admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> CancelDeletionResponse:
-    """Cancel pending family deletion during the 14-day grace period."""
+    """Cancel pending family deletion during the 14-day grace period. Any parent can cancel."""
     return await PrivacyService.cancel_family_deletion(db, family_id, current_user)
 
 
@@ -203,4 +278,25 @@ async def trigger_privacy_purge_job(
     db: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> PurgeJobReport:
     """Admin endpoint to execute permanent data purge for records past their 14-day grace period."""
-    return await execute_data_purge(db)
+    report = await execute_data_purge(db)
+
+    # Audited admin trigger
+    db.add(
+        AuditLog(
+            id=uuid.uuid4(),
+            actor_id=current_user.id,
+            action="privacy.purge_triggered",
+            target_type="system",
+            target_id="privacy_purge",
+            meta={
+                "purged_accounts": report.purged_accounts,
+                "purged_families": report.purged_families,
+                "revoked_sessions": report.revoked_sessions,
+                "revoked_push_tokens": report.revoked_push_tokens,
+                "anonymized_audit_records": report.anonymized_audit_records,
+                "executed_at": report.executed_at.isoformat(),
+            },
+        )
+    )
+    await db.commit()
+    return report

@@ -78,12 +78,12 @@ async def get_current_user(
             detail={"code": "USER_NOT_FOUND", "message": "User account no longer exists."},
         )
 
-    if user.status != "active":
+    if user.status not in ("active", "pending_deletion"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "ACCOUNT_INACTIVE",
-                "message": "User account is suspended or inactive.",
+                "message": "User account is suspended or purged.",
             },
         )
 

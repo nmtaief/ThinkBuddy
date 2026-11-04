@@ -73,7 +73,10 @@ from core.privacy.schemas import (
     ParentalConsentStatusResponse,
     PurgeJobReport,
     RequestAccountDeletionBody,
+    WithdrawConsentRequest,
+    WithdrawConsentResponse,
 )
+from core.auth.router import ReauthenticateRequest, ReauthenticateResponse
 from gateway.client import core_client
 
 router = APIRouter(prefix="/v1")
@@ -269,6 +272,11 @@ async def get_client_config(
 # -------------------------------------------------------------------------
 # Auth & Identity
 # -------------------------------------------------------------------------
+@router.post("/auth/reauthenticate", response_model=ReauthenticateResponse, tags=["Auth"])
+async def reauthenticate_auth_token(payload: ReauthenticateRequest, request: Request) -> Response:
+    """Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time."""
+    return await forward_to_core(request)
+
 @router.post("/auth/exchange", response_model=TokenResponse, tags=["Auth"])
 async def exchange_auth_token(payload: AuthExchangeRequest, request: Request) -> Response:
     """Exchange third-party provider credential for ThinkBuddy session tokens.
@@ -1328,6 +1336,17 @@ async def gateway_get_parental_consent_status(request: Request) -> Response:
     """Forward parental consent status GET request downstream to Core Service."""
     return await forward_to_core(request)
 
+@router.post(
+    "/parents/consent/withdraw",
+    response_model=WithdrawConsentResponse,
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_withdraw_parental_consent",
+)
+async def gateway_withdraw_parental_consent(request: Request) -> Response:
+    """Forward parental consent withdrawal downstream to Core Service."""
+    return await forward_to_core(request)
+
+
 
 @router.get(
     "/parents/me/export",
@@ -1347,6 +1366,16 @@ async def gateway_export_family_data_get(request: Request) -> Response:
 async def gateway_export_family_data_post(request: Request) -> Response:
     """Forward family data export POST request downstream to Core Service."""
     return await forward_to_core(request)
+
+@router.get(
+    "/parents/me/export/{export_id}/download",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_download_family_export",
+)
+async def gateway_download_family_export(export_id: uuid.UUID, request: Request) -> Response:
+    """Forward family data export download GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
 
 
 @router.post(

@@ -39,6 +39,7 @@ class User(Base):
     has_valid_attestation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     has_parental_consent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     consent_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    consent_terms_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

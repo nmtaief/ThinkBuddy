@@ -118,6 +118,48 @@
         }
       }
     },
+    "/v1/auth/reauthenticate": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reauthenticate Auth Token",
+        "description": "Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.",
+        "operationId": "reauthenticate_auth_token_v1_auth_reauthenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthenticateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReauthenticateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/exchange": {
       "post": {
         "tags": [
@@ -2985,6 +3027,28 @@
         }
       }
     },
+    "/v1/parents/consent/withdraw": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Withdraw Parental Consent",
+        "description": "Forward parental consent withdrawal downstream to Core Service.",
+        "operationId": "gateway_withdraw_parental_consent",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawConsentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/parents/me/export": {
       "get": {
         "tags": [
@@ -3017,6 +3081,48 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/me/export/{export_id}/download": {
+      "get": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Download Family Export",
+        "description": "Forward family data export download GET request downstream to Core Service.",
+        "operationId": "gateway_download_family_export",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -4923,6 +5029,43 @@
         "title": "QuestionPublic",
         "description": "Question representation served to students during active quizzes.\n\nZero answer keys, rubrics, or explanations are present."
       },
+      "ReauthenticateRequest": {
+        "properties": {
+          "provider_token": {
+            "type": "string",
+            "title": "Provider Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_token"
+        ],
+        "title": "ReauthenticateRequest"
+      },
+      "ReauthenticateResponse": {
+        "properties": {
+          "reauth_token": {
+            "type": "string",
+            "title": "Reauth Token"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "default": 600
+          },
+          "reauthenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reauthenticated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reauth_token",
+          "reauthenticated_at"
+        ],
+        "title": "ReauthenticateResponse"
+      },
       "RecurringUnavailableBlock": {
         "properties": {
           "day_of_week": {
@@ -6284,6 +6427,38 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WithdrawConsentResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Consent status updated to withdrawn",
+            "default": "withdrawn"
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Parent Id"
+          },
+          "withdrawn_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Withdrawn At"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Confirmation notice in Bangla and English"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_id",
+          "withdrawn_at",
+          "message"
+        ],
+        "title": "WithdrawConsentResponse"
       }
     }
   }

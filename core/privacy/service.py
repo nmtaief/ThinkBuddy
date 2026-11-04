@@ -12,12 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit.models import AuditLog
 from core.auth.models import Session as UserSession, User
+from core.auth.tokens import decode_access_jwt, decode_reauth_jwt, generate_secure_token, hash_token
 from core.common.database import get_db_session
 import logging
 logger = logging.getLogger(__name__)
 from core.devices.models import Device
 from core.families.models import Family, FamilyMember, ParentStudentLink, StudentProfile
+from core.notifications.models import Notification
 from core.planner.models import Plan, StudySetup, Task
+from core.privacy.constants import CURRENT_CONSENT_TEXT_HASH
 from core.privacy.models import AccountDeletion, DataExport, ParentalConsent
 from core.privacy.schemas import (
     AccountDeletionResponse,
@@ -30,6 +33,8 @@ from core.privacy.schemas import (
     ParentalConsentStatusResponse,
     RequestAccountDeletionBody,
     StudentExportPayload,
+    WithdrawConsentRequest,
+    WithdrawConsentResponse,
 )
 from core.progress.models import Mastery, ProgressDaily, RevisionItem
 from core.quiz.models import QuizAttempt
@@ -41,6 +46,32 @@ def utcnow() -> datetime:
 
 class PrivacyService:
     """Service handling parental consent, family exports, deletion grace periods, and purge jobs."""
+
+    @staticmethod
+    def verify_reauth_token(reauth_token: str | None, caller_id: uuid.UUID) -> None:
+        """Verify that a valid, fresh re-authentication token was provided."""
+        if not reauth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "REAUTH_REQUIRED",
+                    "message": "Fresh re-authentication is required. Please provide a valid reauth token.",
+                },
+            )
+        try:
+            payload = decode_reauth_jwt(reauth_token)
+            if payload.get("sub") != str(caller_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"code": "REAUTH_MISMATCH", "message": "Re-authentication token does not match active user."},
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "REAUTH_INVALID", "message": f"Invalid or expired re-authentication token: {e}"},
+            )
 
     @staticmethod
     def verify_recent_reauthentication(auth_iat: int | None, max_age_seconds: int = 900) -> None:
@@ -85,10 +116,13 @@ class PrivacyService:
                 detail={"code": "CONSENT_NOT_GRANTED", "message": "Explicit consent must be granted."},
             )
 
+        terms_hash = payload.terms_hash or CURRENT_CONSENT_TEXT_HASH
+
         consent_record = ParentalConsent(
             id=uuid.uuid4(),
             parent_id=parent.id,
             consent_version=payload.version,
+            terms_hash=CURRENT_CONSENT_TEXT_HASH,
             status="granted",
             consented_at=utcnow(),
             ip_address=client_ip,
@@ -100,6 +134,7 @@ class PrivacyService:
         # Update parent user model
         parent.has_parental_consent = True
         parent.consent_version = payload.version
+        parent.consent_terms_hash = CURRENT_CONSENT_TEXT_HASH
         await db.flush()
 
         # Update any existing parent-student links for this parent
@@ -117,7 +152,7 @@ class PrivacyService:
                 action="parent.consent_recorded",
                 target_type="user",
                 target_id=str(parent.id),
-                meta={"version": payload.version, "ip": client_ip},
+                meta={"version": payload.version, "terms_hash": CURRENT_CONSENT_TEXT_HASH, "ip": client_ip},
             )
         )
         await db.commit()
@@ -125,6 +160,7 @@ class PrivacyService:
         return ParentalConsentResponse(
             status="granted",
             version=payload.version,
+            terms_hash=CURRENT_CONSENT_TEXT_HASH,
             consented_at=consent_record.consented_at,
             parent_id=parent.id,
         )
@@ -135,26 +171,103 @@ class PrivacyService:
         db: AsyncSession,
         parent: User,
     ) -> ParentalConsentStatusResponse:
-        """Fetch current recorded parental consent status."""
+        """Fetch current recorded parental consent status and detect re-consent requirement."""
         stmt = (
             select(ParentalConsent)
-            .where(ParentalConsent.parent_id == parent.id, ParentalConsent.status == "granted")
+            .where(ParentalConsent.parent_id == parent.id)
             .order_by(ParentalConsent.consented_at.desc())
             .limit(1)
         )
         res = await db.execute(stmt)
         record = res.scalar_one_or_none()
 
-        if record:
+        if record and record.status == "granted":
+            reconsent_req = (record.terms_hash != CURRENT_CONSENT_TEXT_HASH or parent.consent_terms_hash != CURRENT_CONSENT_TEXT_HASH)
             return ParentalConsentStatusResponse(
-                has_consent=True,
+                has_consent=(not reconsent_req),
                 version=record.consent_version,
+                terms_hash=record.terms_hash,
+                current_terms_hash=CURRENT_CONSENT_TEXT_HASH,
+                reconsent_required=reconsent_req,
                 consented_at=record.consented_at,
+                withdrawn_at=record.withdrawn_at,
             )
+        elif record and record.status == "withdrawn":
+            return ParentalConsentStatusResponse(
+                has_consent=False,
+                version=record.consent_version,
+                terms_hash=record.terms_hash,
+                current_terms_hash=CURRENT_CONSENT_TEXT_HASH,
+                reconsent_required=False,
+                consented_at=record.consented_at,
+                withdrawn_at=record.withdrawn_at,
+            )
+
         return ParentalConsentStatusResponse(
             has_consent=bool(parent.has_parental_consent),
             version=parent.consent_version,
+            terms_hash=parent.consent_terms_hash,
+            current_terms_hash=CURRENT_CONSENT_TEXT_HASH,
+            reconsent_required=False,
             consented_at=None,
+            withdrawn_at=None,
+        )
+
+    @classmethod
+    async def withdraw_parent_consent(
+        cls,
+        db: AsyncSession,
+        parent: User,
+        payload: WithdrawConsentRequest,
+        reauth_token: str | None = None,
+        auth_iat: int | None = None,
+    ) -> WithdrawConsentResponse:
+        """Withdraw previously recorded parental consent. Requires fresh re-authentication."""
+        if parent.role not in ("parent", "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "PARENT_ROLE_REQUIRED", "message": "Only parents can withdraw parental consent."},
+            )
+
+        if reauth_token:
+            cls.verify_reauth_token(reauth_token, parent.id)
+        else:
+            cls.verify_recent_reauthentication(auth_iat)
+
+        now_dt = utcnow()
+        stmt = (
+            select(ParentalConsent)
+            .where(ParentalConsent.parent_id == parent.id, ParentalConsent.status == "granted")
+            .order_by(ParentalConsent.consented_at.desc())
+            .limit(1)
+        )
+        consent = (await db.execute(stmt)).scalar_one_or_none()
+        if consent:
+            consent.status = "withdrawn"
+            consent.withdrawn_at = now_dt
+            if payload.reason:
+                consent.meta = {**consent.meta, "withdrawal_reason": payload.reason}
+
+        parent.has_parental_consent = False
+        parent.consent_terms_hash = None
+
+        db.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                actor_id=parent.id,
+                action="parent.consent_withdrawn",
+                target_type="user",
+                target_id=str(parent.id),
+                meta={"reason": payload.reason or ""},
+            )
+        )
+        await db.commit()
+
+        return WithdrawConsentResponse(
+            status="withdrawn",
+            parent_id=parent.id,
+            withdrawn_at=now_dt,
+            message="Parental consent successfully withdrawn. Minor child data processing is suspended.",
         )
 
     @classmethod
@@ -163,7 +276,7 @@ class PrivacyService:
         db: AsyncSession,
         parent_id: uuid.UUID,
     ) -> None:
-        """Enforce parental consent gate before creating or processing minor child data."""
+        """Enforce parental consent gate and terms hash freshness before processing minor child data."""
         stmt = select(User).where(User.id == parent_id)
         res = await db.execute(stmt)
         parent = res.scalar_one_or_none()
@@ -175,18 +288,54 @@ class PrivacyService:
                     "message": "Parental consent must be recorded before child data can be processed.",
                 },
             )
+        if parent.consent_terms_hash and parent.consent_terms_hash != CURRENT_CONSENT_TEXT_HASH:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "RECONSENT_REQUIRED",
+                    "message": "Parental consent legal terms have been updated. Re-consent is required before continuing.",
+                },
+            )
 
     @classmethod
     async def export_family_data(
         cls,
         db: AsyncSession,
         caller: User,
+        reauth_token: str | None = None,
+        auth_iat: int | None = None,
     ) -> FamilyDataExportResponse:
         """Generate comprehensive family data export JSON with topic-level chat summaries only (Rule 15)."""
         if caller.role not in ("parent", "admin"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "PARENT_ROLE_REQUIRED", "message": "Only parents can request family data export."},
+            )
+
+        # Re-auth verification
+        if reauth_token:
+            cls.verify_reauth_token(reauth_token, caller.id)
+        else:
+            cls.verify_recent_reauthentication(auth_iat)
+
+        now_dt = utcnow()
+
+        # Rate limiting: 1 export request per 24 hours per parent
+        stmt_recent = (
+            select(DataExport)
+            .where(
+                DataExport.requester_id == caller.id,
+                DataExport.created_at >= now_dt - timedelta(hours=24),
+            )
+        )
+        recent_export = (await db.execute(stmt_recent)).scalar_one_or_none()
+        if recent_export:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "EXPORT_RATE_LIMITED",
+                    "message": "Family data export can only be requested once every 24 hours.",
+                },
             )
 
         # Locate caller's family
@@ -198,6 +347,11 @@ class PrivacyService:
         )
         res_fam = await db.execute(stmt_fam)
         family = res_fam.scalar_one_or_none()
+
+        if not family:
+            stmt_f2 = select(Family).where(Family.owner_parent_id == caller.id).limit(1)
+            res_f2 = await db.execute(stmt_f2)
+            family = res_f2.scalar_one_or_none()
 
         if not family:
             raise HTTPException(
@@ -225,10 +379,20 @@ class PrivacyService:
         # Linked students
         stmt_links = select(ParentStudentLink.student_id).where(
             ParentStudentLink.family_id == family.id,
-            ParentStudentLink.status == "active",
         )
         res_links = await db.execute(stmt_links)
-        student_ids = res_links.scalars().all()
+        student_ids = list(res_links.scalars().all())
+
+        # Include any students directly registered in family members
+        stmt_fam_students = (
+            select(FamilyMember.user_id)
+            .join(User, User.id == FamilyMember.user_id)
+            .where(FamilyMember.family_id == family.id, User.role == "student")
+        )
+        fam_student_ids = (await db.execute(stmt_fam_students)).scalars().all()
+        for fs_id in fam_student_ids:
+            if fs_id not in student_ids:
+                student_ids.append(fs_id)
 
         students_payload: list[StudentExportPayload] = []
         for s_id in student_ids:
@@ -262,53 +426,49 @@ class PrivacyService:
             # Mastery summary
             stmt_mastery = select(Mastery).where(Mastery.student_id == s_id)
             res_mastery = await db.execute(stmt_mastery)
-            mastery_items = res_mastery.scalars().all()
-            mastery_map: dict[str, Any] = {}
-            for m in mastery_items:
-                mastery_map[m.subject_id] = {
+            mastery_map = {
+                str(m.topic_id): {
                     "score": m.score,
-                    "total_attempts": m.total_attempts,
-                    "retention_strength": m.retention_strength,
-                    "last_activity_at": m.last_activity_at.isoformat() if m.last_activity_at else None,
+                    "band": m.band,
+                    "attempts_count": m.attempts_count,
+                    "updated_at": m.updated_at.isoformat(),
                 }
+                for m in res_mastery.scalars().all()
+            }
 
             # Revision items count
-            stmt_rev_cnt = select(func.count(RevisionItem.id)).where(RevisionItem.student_id == s_id)
-            rev_cnt = (await db.execute(stmt_rev_cnt)).scalar() or 0
+            stmt_rev = select(func.count(RevisionItem.id)).where(RevisionItem.student_id == s_id)
+            rev_count = (await db.execute(stmt_rev)).scalar() or 0
 
-            # Quiz attempts summary
-            stmt_quiz = (
-                select(QuizAttempt)
-                .where(QuizAttempt.student_id == s_id)
-                .order_by(QuizAttempt.created_at.desc())
-                .limit(20)
-            )
-            res_quiz = await db.execute(stmt_quiz)
-            quiz_list = [
-                {
-                    "attempt_id": str(qa.id),
-                    "quiz_id": str(qa.quiz_id),
-                    "mode": qa.mode,
-                    "status": qa.status,
-                    "score_percent": qa.score_percent,
-                    "started_at": qa.started_at.isoformat() if qa.started_at else None,
-                    "submitted_at": qa.submitted_at.isoformat() if qa.submitted_at else None,
-                }
-                for qa in res_quiz.scalars().all()
-            ]
+            # Quiz attempts summary (sanitized, no answer keys)
+            stmt_att = select(QuizAttempt).where(QuizAttempt.student_id == s_id).order_by(QuizAttempt.started_at.desc())
+            res_att = await db.execute(stmt_att)
+            attempts_list = []
+            for att in res_att.scalars().all():
+                attempts_list.append({
+                    "attempt_id": str(att.id),
+                    "quiz_id": str(att.quiz_id),
+                    "mode": att.mode,
+                    "status": att.status,
+                    "score_percentage": att.score_percentage,
+                    "passed": att.passed,
+                    "started_at": att.started_at.isoformat(),
+                    "submitted_at": att.submitted_at.isoformat() if att.submitted_at else None,
+                })
 
-            # Chat Topics: Strictly aggregated topic summaries; ZERO raw chat transcripts per Rule 15
-            # We import ChatCitation and ChatSession dynamically or aggregate from DB
-            from core.chat.models import ChatCitation, ChatSession
+            # AI Chat topic summaries ONLY (Rule 15: Zero raw messages, prompts, or tokens)
+            from core.chat.models import ChatCitation, ChatMessage, ChatSession
             stmt_chat = (
                 select(
+                    ChatCitation.chapter_title.label("topic"),
                     ChatCitation.book_title,
                     ChatCitation.chapter_title,
                     ChatCitation.chapter_number,
-                    func.count(ChatCitation.id).label("cnt"),
-                    func.max(ChatCitation.created_at).label("last_active"),
+                    func.count(ChatMessage.id).label("query_count"),
+                    func.max(ChatMessage.created_at).label("last_interaction"),
                 )
-                .join(ChatSession, ChatSession.id == ChatCitation.session_id)
+                .join(ChatMessage, ChatMessage.id == ChatCitation.message_id)
+                .join(ChatSession, ChatSession.id == ChatMessage.session_id)
                 .where(ChatSession.student_id == s_id)
                 .group_by(
                     ChatCitation.book_title,
@@ -319,12 +479,12 @@ class PrivacyService:
             res_chat = await db.execute(stmt_chat)
             chat_topics = [
                 ChatTopicSummaryItem(
-                    topic=f"{row.chapter_title} ({row.book_title})",
+                    topic=row.topic,
                     book_title=row.book_title,
                     chapter_title=row.chapter_title,
                     chapter_number=row.chapter_number,
-                    message_count=row.cnt,
-                    last_active_at=row.last_active or utcnow(),
+                    message_count=row.query_count,
+                    last_active_at=row.last_interaction,
                 )
                 for row in res_chat.all()
             ]
@@ -340,30 +500,32 @@ class PrivacyService:
                     daily_minutes=sp.daily_minutes,
                     study_setups=setups_list,
                     mastery_summary=mastery_map,
-                    revision_items_count=rev_cnt,
-                    quiz_attempts_count=len(quiz_list),
-                    quiz_attempts_summary=quiz_list,
+                    revision_items_count=rev_count,
+                    quiz_attempts_count=len(attempts_list),
+                    quiz_attempts_summary=attempts_list,
                     chat_topics=chat_topics,
                 )
             )
 
-        # Consents history
-        stmt_c = (
+        # Parental consent history for this family
+        stmt_consents = (
             select(ParentalConsent)
             .where(ParentalConsent.parent_id == caller.id)
             .order_by(ParentalConsent.consented_at.desc())
         )
-        res_c = await db.execute(stmt_c)
+        res_consents = await db.execute(stmt_consents)
         consents_data = [
             {
-                "version": c.consent_version,
+                "consent_id": str(c.id),
+                "consent_version": c.consent_version,
+                "terms_hash": c.terms_hash,
                 "status": c.status,
                 "consented_at": c.consented_at.isoformat(),
+                "withdrawn_at": c.withdrawn_at.isoformat() if c.withdrawn_at else None,
             }
-            for c in res_c.scalars().all()
+            for c in res_consents.scalars().all()
         ]
 
-        now_dt = utcnow()
         payload = FamilyDataExportPayload(
             family_id=family.id,
             family_name=family.name,
@@ -376,14 +538,22 @@ class PrivacyService:
             exported_at=now_dt,
         )
 
+        export_id = uuid.uuid4()
+        raw_download_token = generate_secure_token(32)
+        download_token_hash = hash_token(raw_download_token)
+        download_url = f"/v1/parents/me/export/{export_id}/download?token={raw_download_token}"
+        expires_at = now_dt + timedelta(days=7)
+
         export_record = DataExport(
-            id=uuid.uuid4(),
+            id=export_id,
             family_id=family.id,
             requester_id=caller.id,
             status="completed",
             format="json",
             data_payload=payload.model_dump(mode="json"),
-            expires_at=now_dt + timedelta(days=7),
+            download_token_hash=download_token_hash,
+            download_url=download_url,
+            expires_at=expires_at,
             created_at=now_dt,
         )
         db.add(export_record)
@@ -404,9 +574,52 @@ class PrivacyService:
         return FamilyDataExportResponse(
             export_id=export_record.id,
             family_id=family.id,
+            download_url=download_url,
+            expires_at=expires_at,
             exported_at=now_dt,
             data=payload,
         )
+
+    @classmethod
+    async def download_family_export(
+        cls,
+        db: AsyncSession,
+        export_id: uuid.UUID,
+        token: str,
+        caller: User,
+    ) -> dict[str, Any]:
+        """Download previously generated family data export JSON with Rule 9 isolation."""
+        stmt = select(DataExport).where(DataExport.id == export_id)
+        res = await db.execute(stmt)
+        export = res.scalar_one_or_none()
+
+        if not export:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "EXPORT_NOT_FOUND", "message": "Export file not found."},
+            )
+
+        if export.expires_at < utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "EXPORT_EXPIRED", "message": "Export download link has expired."},
+            )
+
+        # Rule 9: Requesting parent only!
+        if export.requester_id != caller.id and caller.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN_EXPORT_ACCESS", "message": "You do not have access to this data export."},
+            )
+
+        # Token validation
+        if not export.download_token_hash or hash_token(token) != export.download_token_hash:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "INVALID_DOWNLOAD_TOKEN", "message": "Invalid download token."},
+            )
+
+        return export.data_payload or {}
 
     @classmethod
     async def request_user_deletion(
@@ -414,11 +627,15 @@ class PrivacyService:
         db: AsyncSession,
         caller: User,
         payload: RequestAccountDeletionBody,
-        auth_iat: int | None,
+        reauth_token: str | None = None,
+        auth_iat: int | None = None,
         grace_period_days: int = 14,
     ) -> AccountDeletionResponse:
-        """Schedule user account deletion with recent re-auth verification and a 14-day grace period."""
-        cls.verify_recent_reauthentication(auth_iat)
+        """Schedule individual account deletion with a 14-day grace period."""
+        if reauth_token:
+            cls.verify_reauth_token(reauth_token, caller.id)
+        else:
+            cls.verify_recent_reauthentication(auth_iat)
 
         if payload.confirmation.strip().upper() not in ("DELETE", "মুছে ফেলুন"):
             raise HTTPException(
@@ -445,8 +662,11 @@ class PrivacyService:
             meta={"reason": payload.reason or ""},
         )
         db.add(deletion)
+
+        # Update user status to pending_deletion
         caller.status = "pending_deletion"
 
+        # Audit log
         db.add(
             AuditLog(
                 id=uuid.uuid4(),
@@ -467,7 +687,55 @@ class PrivacyService:
             grace_period_days=grace_period_days,
             requested_at=now_dt,
             scheduled_purge_at=purge_at,
-            message=f"Account scheduled for permanent deletion in {grace_period_days} days. You may cancel anytime before this date.",
+            message=(
+                f"Account deletion scheduled. Your data will be permanently purged in {grace_period_days} days. "
+                "You can cancel this request at any time during the grace period."
+            ),
+        )
+
+    @classmethod
+    async def cancel_user_deletion(
+        cls,
+        db: AsyncSession,
+        caller: User,
+    ) -> CancelDeletionResponse:
+        """Cancel a pending individual account deletion during the 14-day grace period."""
+        stmt = select(AccountDeletion).where(
+            AccountDeletion.user_id == caller.id,
+            AccountDeletion.target_type == "user",
+            AccountDeletion.status == "pending_grace_period",
+        )
+        res = await db.execute(stmt)
+        deletion = res.scalar_one_or_none()
+
+        if not deletion:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NO_PENDING_DELETION", "message": "No pending deletion request found for your account."},
+            )
+
+        deletion.status = "cancelled"
+        deletion.cancellation_reason = "Cancelled by user"
+        caller.status = "active"
+
+        db.add(
+            AuditLog(
+                id=uuid.uuid4(),
+                actor_id=caller.id,
+                action="user.deletion_cancelled",
+                target_type="user",
+                target_id=str(caller.id),
+                meta={"deletion_id": str(deletion.id)},
+            )
+        )
+        await db.commit()
+
+        return CancelDeletionResponse(
+            deletion_id=deletion.id,
+            target_type="user",
+            target_id=caller.id,
+            status="cancelled",
+            message="Account deletion request has been cancelled. Your account remains active.",
         )
 
     @classmethod
@@ -477,10 +745,11 @@ class PrivacyService:
         family_id: uuid.UUID,
         caller: User,
         payload: RequestAccountDeletionBody,
-        auth_iat: int | None,
+        reauth_token: str | None = None,
+        auth_iat: int | None = None,
         grace_period_days: int = 14,
     ) -> AccountDeletionResponse:
-        """Schedule family deletion. Students are strictly forbidden from deleting the family account."""
+        """Schedule family deletion. Students forbidden; only family owner can initiate."""
         # 1. Authorization check: Student cannot delete the family!
         if caller.role == "student":
             raise HTTPException(
@@ -492,7 +761,10 @@ class PrivacyService:
             )
 
         # 2. Re-authentication verification
-        cls.verify_recent_reauthentication(auth_iat)
+        if reauth_token:
+            cls.verify_reauth_token(reauth_token, caller.id)
+        else:
+            cls.verify_recent_reauthentication(auth_iat)
 
         if payload.confirmation.strip().upper() not in ("DELETE", "মুছে ফেলুন"):
             raise HTTPException(
@@ -503,7 +775,7 @@ class PrivacyService:
                 },
             )
 
-        # 3. Ownership verification
+        # 3. Ownership verification: Only family owner can delete!
         stmt = select(Family).where(Family.id == family_id)
         res = await db.execute(stmt)
         family = res.scalar_one_or_none()
@@ -518,7 +790,7 @@ class PrivacyService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
-                    "code": "FORBIDDEN_FAMILY_ACCESS",
+                    "code": "ONLY_FAMILY_OWNER_CAN_DELETE",
                     "message": "Only the family owner parent can schedule family deletion.",
                 },
             )
@@ -540,15 +812,38 @@ class PrivacyService:
         )
         db.add(deletion)
 
-        # Flag all family member accounts as pending_deletion
+        # Flag all family member accounts and linked student accounts as pending_deletion
         stmt_m = select(FamilyMember.user_id).where(FamilyMember.family_id == family.id)
-        member_ids = (await db.execute(stmt_m)).scalars().all()
+        member_ids = list((await db.execute(stmt_m)).scalars().all())
+
+        stmt_l = select(ParentStudentLink.student_id).where(ParentStudentLink.family_id == family.id)
+        linked_ids = (await db.execute(stmt_l)).scalars().all()
+        for lid in linked_ids:
+            if lid not in member_ids:
+                member_ids.append(lid)
+
         if member_ids:
             await db.execute(
                 update(User)
                 .where(User.id.in_(member_ids))
                 .values(status="pending_deletion")
             )
+
+        # Notify other family members (Item 3)
+        for m_id in member_ids:
+            if m_id != caller.id:
+                db.add(
+                    Notification(
+                        id=uuid.uuid4(),
+                        user_id=m_id,
+                        type="family_deletion_scheduled",
+                        title="Family Deletion Scheduled",
+                        body=f"Family deletion was scheduled. Account will be purged in {grace_period_days} days unless cancelled.",
+                        title_bn="পরিবার মুছে ফেলার অনুরোধ করা হয়েছে",
+                        body_bn=f"পরিবারের অ্যাকাউন্ট আগামী {grace_period_days} দিনের মধ্যে স্থায়ীভাবে মুছে ফেলা হবে। অভিভাবক যে কোনো সময় বাতিল করতে পারবেন।",
+                        data={"family_id": str(family.id), "scheduled_purge_at": purge_at.isoformat()},
+                    )
+                )
 
         db.add(
             AuditLog(
@@ -570,57 +865,10 @@ class PrivacyService:
             grace_period_days=grace_period_days,
             requested_at=now_dt,
             scheduled_purge_at=purge_at,
-            message=f"Family account scheduled for permanent deletion in {grace_period_days} days. You may cancel anytime before this date.",
-        )
-
-    @classmethod
-    async def cancel_user_deletion(
-        cls,
-        db: AsyncSession,
-        caller: User,
-    ) -> CancelDeletionResponse:
-        """Cancel pending account deletion during the 14-day grace period."""
-        stmt = (
-            select(AccountDeletion)
-            .where(
-                AccountDeletion.user_id == caller.id,
-                AccountDeletion.target_type == "user",
-                AccountDeletion.status == "pending_grace_period",
-            )
-            .order_by(AccountDeletion.requested_at.desc())
-            .limit(1)
-        )
-        res = await db.execute(stmt)
-        deletion = res.scalar_one_or_none()
-
-        if not deletion:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "NO_PENDING_DELETION", "message": "No pending deletion request found for this account."},
-            )
-
-        deletion.status = "cancelled"
-        deletion.cancellation_reason = "Cancelled by user during grace period."
-        caller.status = "active"
-
-        db.add(
-            AuditLog(
-                id=uuid.uuid4(),
-                actor_id=caller.id,
-                action="user.deletion_cancelled",
-                target_type="user",
-                target_id=str(caller.id),
-                meta={"deletion_id": str(deletion.id)},
-            )
-        )
-        await db.commit()
-
-        return CancelDeletionResponse(
-            deletion_id=deletion.id,
-            target_type="user",
-            target_id=caller.id,
-            status="cancelled",
-            message="Account deletion successfully cancelled. Your account remains active.",
+            message=(
+                f"Family account deletion scheduled. All student and parent profiles in this family will be permanently "
+                f"purged in {grace_period_days} days. Any parent can cancel this request during the grace period."
+            ),
         )
 
     @classmethod
@@ -630,26 +878,31 @@ class PrivacyService:
         family_id: uuid.UUID,
         caller: User,
     ) -> CancelDeletionResponse:
-        """Cancel pending family deletion during the 14-day grace period."""
-        stmt_f = select(Family).where(Family.id == family_id)
-        res_f = await db.execute(stmt_f)
-        family = res_f.scalar_one_or_none()
-
-        if not family or (family.owner_parent_id != caller.id and caller.role != "admin"):
+        """Cancel pending family deletion during the 14-day grace period. Any parent can cancel."""
+        if caller.role not in ("parent", "admin"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "FORBIDDEN_FAMILY_ACCESS", "message": "Only the family owner can cancel deletion."},
+                detail={"code": "PARENT_ROLE_REQUIRED", "message": "Only a parent can cancel family deletion."},
             )
 
-        stmt = (
-            select(AccountDeletion)
-            .where(
-                AccountDeletion.family_id == family.id,
-                AccountDeletion.target_type == "family",
-                AccountDeletion.status == "pending_grace_period",
+        stmt_m = select(FamilyMember).where(
+            FamilyMember.family_id == family_id,
+            FamilyMember.user_id == caller.id,
+        )
+        fm = (await db.execute(stmt_m)).scalar_one_or_none()
+        stmt_f = select(Family).where(Family.id == family_id)
+        family = (await db.execute(stmt_f)).scalar_one_or_none()
+
+        if not family or (not fm and family.owner_parent_id != caller.id and caller.role != "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN_FAMILY_ACCESS", "message": "You do not belong to this family."},
             )
-            .order_by(AccountDeletion.requested_at.desc())
-            .limit(1)
+
+        stmt = select(AccountDeletion).where(
+            AccountDeletion.family_id == family_id,
+            AccountDeletion.target_type == "family",
+            AccountDeletion.status == "pending_grace_period",
         )
         res = await db.execute(stmt)
         deletion = res.scalar_one_or_none()
@@ -661,17 +914,40 @@ class PrivacyService:
             )
 
         deletion.status = "cancelled"
-        deletion.cancellation_reason = "Cancelled by owner parent during grace period."
+        deletion.cancellation_reason = f"Cancelled by parent {caller.display_name} ({caller.id})"
 
-        # Restore family member statuses to active
-        stmt_m = select(FamilyMember.user_id).where(FamilyMember.family_id == family.id)
-        member_ids = (await db.execute(stmt_m)).scalars().all()
-        if member_ids:
+        # Restore family member and linked student user records
+        stmt_members = select(FamilyMember.user_id).where(FamilyMember.family_id == family_id)
+        m_ids = list((await db.execute(stmt_members)).scalars().all())
+
+        stmt_l = select(ParentStudentLink.student_id).where(ParentStudentLink.family_id == family_id)
+        linked_ids = (await db.execute(stmt_l)).scalars().all()
+        for lid in linked_ids:
+            if lid not in m_ids:
+                m_ids.append(lid)
+
+        if m_ids:
             await db.execute(
                 update(User)
-                .where(User.id.in_(member_ids), User.status == "pending_deletion")
+                .where(User.id.in_(m_ids), User.status == "pending_deletion")
                 .values(status="active")
             )
+
+        # Notify family members
+        for m_id in m_ids:
+            if m_id != caller.id:
+                db.add(
+                    Notification(
+                        id=uuid.uuid4(),
+                        user_id=m_id,
+                        type="family_deletion_cancelled",
+                        title="Family Deletion Cancelled",
+                        body=f"Pending deletion was cancelled by {caller.display_name}.",
+                        title_bn="পরিবার মুছে ফেলার অনুরোধ বাতিল করা হয়েছে",
+                        body_bn=f"অভিভাবক {caller.display_name} দ্বারা পরিবার মুছে ফেলার অনুরোধ বাতিল করা হয়েছে। অ্যাকাউন্ট সক্রিয় রয়েছে।",
+                        data={"family_id": str(family_id)},
+                    )
+                )
 
         db.add(
             AuditLog(
@@ -679,7 +955,7 @@ class PrivacyService:
                 actor_id=caller.id,
                 action="family.deletion_cancelled",
                 target_type="family",
-                target_id=str(family.id),
+                target_id=str(family_id),
                 meta={"deletion_id": str(deletion.id)},
             )
         )
@@ -688,7 +964,7 @@ class PrivacyService:
         return CancelDeletionResponse(
             deletion_id=deletion.id,
             target_type="family",
-            target_id=family.id,
+            target_id=family_id,
             status="cancelled",
-            message="Family deletion successfully cancelled. All family accounts remain active.",
+            message="Family deletion request has been cancelled. All accounts remain active.",
         )

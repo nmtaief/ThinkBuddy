@@ -27,10 +27,12 @@ class ParentalConsent(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     consent_version: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="granted", nullable=False)  # granted, revoked
+    terms_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="granted", nullable=False)  # granted, withdrawn
     consented_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False, index=True
     )
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
@@ -51,6 +53,8 @@ class DataExport(Base):
     status: Mapped[str] = mapped_column(String(20), default="completed", nullable=False)
     format: Mapped[str] = mapped_column(String(10), default="json", nullable=False)
     data_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    download_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    download_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -92,3 +96,4 @@ class AccountDeletion(Base):
 
 
 Index("ix_account_deletions_purge_queue", AccountDeletion.status, AccountDeletion.scheduled_purge_at)
+
