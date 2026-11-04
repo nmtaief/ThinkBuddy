@@ -47,6 +47,7 @@ import com.thinkbuddy.app.ui.theme.BorderDark
 import com.thinkbuddy.app.ui.theme.IndigoAccent
 import com.thinkbuddy.app.ui.theme.TealPrimary
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Authentication screen supporting Sign-In and Registration.
@@ -290,7 +291,8 @@ fun AuthScreen(
                                 }
                                 val studentDefaultName = "তাহমিদ আলিম (Tahmid)"
                                 val parentDefaultName = "রফিকুল ইসলাম (Rafiq)"
-                                val resp = api.exchangeToken(
+                                val resp = withTimeoutOrNull(2500L) {
+                                    api.exchangeToken(
                                     AuthExchangeRequest(
                                         providerToken = token,
                                         role = if (isRegistering) selectedRole else "student",
@@ -298,7 +300,8 @@ fun AuthScreen(
                                         displayName = if (selectedRole == "student") studentDefaultName else parentDefaultName
                                     )
                                 )
-                                if (resp.isSuccessful && resp.body() != null) {
+                                }
+                                if (resp != null && resp.isSuccessful && resp.body() != null) {
                                     val data = resp.body()!!
                                     ThinkBuddyApp.instance.tokenStorage.saveTokens(
                                         accessToken = data.accessToken,

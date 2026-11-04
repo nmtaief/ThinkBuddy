@@ -109,33 +109,34 @@ import kotlinx.coroutines.launch
 fun StudySetupEditorScreen(
     studentId: String,
     repository: ParentRepository? = null,
+    initialSettings: StudentStudySettingsDto? = null,
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val repo = remember { repository ?: ParentRepository(context) }
     val scope = rememberCoroutineScope()
 
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(initialSettings == null) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var conflictMessage by remember { mutableStateOf<String?>(null) }
     var successNotice by remember { mutableStateOf<String?>(null) }
 
-    var currentVersion by remember { mutableIntStateOf(1) }
-    var classBand by remember { mutableStateOf("6-8") }
-    var schoolDayMinutes by remember { mutableFloatStateOf(90f) }
-    var holidayMinutes by remember { mutableFloatStateOf(150f) }
-    var studyWindowStart by remember { mutableStateOf("17:00") }
-    var studyWindowEnd by remember { mutableStateOf("21:30") }
-    var restWeekday by remember { mutableIntStateOf(4) } // 4 = Friday in BD
-    var isSchoolDayMinutesLocked by remember { mutableStateOf(false) }
-    var isSubjectPrioritiesLocked by remember { mutableStateOf(false) }
+    var currentVersion by remember { mutableIntStateOf(initialSettings?.version ?: 1) }
+    var classBand by remember { mutableStateOf(initialSettings?.classBand ?: "6-8") }
+    var schoolDayMinutes by remember { mutableFloatStateOf(initialSettings?.schoolDayMinutes?.toFloat() ?: 90f) }
+    var holidayMinutes by remember { mutableFloatStateOf(initialSettings?.holidayMinutes?.toFloat() ?: 150f) }
+    var studyWindowStart by remember { mutableStateOf(initialSettings?.studyWindowStart ?: "17:00") }
+    var studyWindowEnd by remember { mutableStateOf(initialSettings?.studyWindowEnd ?: "21:30") }
+    var restWeekday by remember { mutableIntStateOf(initialSettings?.restWeekday ?: 4) } // 4 = Friday in BD
+    var isSchoolDayMinutesLocked by remember { mutableStateOf(initialSettings?.parentLockedFields?.contains("school_day_minutes") ?: false) }
+    var isSubjectPrioritiesLocked by remember { mutableStateOf(initialSettings?.parentLockedFields?.contains("subject_priorities") ?: false) }
 
     // Section Controls from §3
     val calendar = remember { Calendar.getInstance() }
-    var examName by remember { mutableStateOf("অর্ধবার্ষিক মূল্যায়ন ২০২৬") }
-    var examDate by remember { mutableStateOf("2026-12-15") }
-    var adaptiveMode by remember { mutableStateOf("suggest") } // suggest, auto_within_limits, manual
+    var examName by remember { mutableStateOf(initialSettings?.examName ?: "অর্ধবার্ষিক মূল্যায়ন ২০২৬") }
+    var examDate by remember { mutableStateOf(initialSettings?.examDate ?: "2026-12-15") }
+    var adaptiveMode by remember { mutableStateOf(initialSettings?.adaptiveMode ?: "suggest") } // suggest, auto_within_limits, manual
 
     val datePickerDialog = remember(context) {
         android.app.DatePickerDialog(
@@ -247,7 +248,9 @@ fun StudySetupEditorScreen(
     }
 
     LaunchedEffect(studentId) {
-        loadSettings()
+        if (initialSettings == null) {
+            loadSettings()
+        }
     }
 
     val saveSettings = {

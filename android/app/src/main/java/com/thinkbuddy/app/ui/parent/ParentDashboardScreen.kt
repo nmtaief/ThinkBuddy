@@ -101,6 +101,7 @@ import kotlinx.coroutines.launch
 fun ParentDashboardScreen(
     isTablet: Boolean = false,
     repository: ParentRepository? = null,
+    initialOverview: ParentOverviewResponse? = null,
     onNavigateToSetup: (studentId: String) -> Unit = {},
     onNavigateToAiControls: (studentId: String) -> Unit = {},
     onNavigateToLinkChild: () -> Unit = {},
@@ -111,10 +112,10 @@ fun ParentDashboardScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val repo = remember { repository ?: ParentRepository(context) }
 
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(initialOverview == null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var overview by remember { mutableStateOf<ParentOverviewResponse?>(null) }
-    var selectedStudentId by remember { mutableStateOf<String?>(null) }
+    var overview by remember { mutableStateOf<ParentOverviewResponse?>(initialOverview) }
+    var selectedStudentId by remember { mutableStateOf<String?>(initialOverview?.students?.firstOrNull()?.student?.studentId) }
 
     fun loadData() {
         isLoading = true
@@ -140,7 +141,9 @@ fun ParentDashboardScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadData()
+        if (initialOverview == null) {
+            loadData()
+        }
     }
 
     Surface(
@@ -963,7 +966,7 @@ fun EmptyParentState(onLinkChild: () -> Unit) {
     }
 }
 
-private fun createSampleParentOverview(): ParentOverviewResponse {
+fun createSampleParentOverview(): ParentOverviewResponse {
     return ParentOverviewResponse(
         parentId = "par-demo-1",
         students = listOf(

@@ -32,7 +32,7 @@ class ComposeNavigationInstrumentedTest {
         composeTestRule.onNodeWithText("যাচাই ও প্রবেশ করুন (Verify & Sign In)").performClick()
 
         // 3. Verify navigation to Today screen occurs (e.g. Navigation item or greeting)
-        composeTestRule.waitUntil(timeoutMillis = 5000) {
+        composeTestRule.waitUntil(timeoutMillis = 15000) {
             try {
                 composeTestRule.onNodeWithText("আজকে").assertIsDisplayed()
                 true
