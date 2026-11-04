@@ -77,3 +77,16 @@ Thumbs.db
 
 # OpenTelemetry / debug logs
 *.log
+
+google-services.json
+*.keystore
+*.jks
+
+# Android & Gradle
+.gradle/
+**/build/
+android/local.properties
+android_phone_*.png
+android_tablet_*.png
+
+

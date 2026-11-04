@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">ThinkBuddy</string>
+    <string name="app_tagline">স্মার্ট রুটিন ও সার্বক্ষণিক পড়াশোনার বিশ্বস্ত সঙ্গী</string>
+    <string name="nav_today">আজকের সূচি</string>
+    <string name="nav_plan">পরিকল্পনা</string>
+    <string name="nav_quiz">অনুশীলন ও কুইজ</string>
+    <string name="nav_chat">শিক্ষক এআই</string>
+    <string name="nav_settings">সেটিংস</string>
+</resources>

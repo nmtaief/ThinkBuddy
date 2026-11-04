@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "123456789000",
+    "project_id": "thinkbuddy-placeholder-dev",
+    "storage_bucket": "thinkbuddy-placeholder-dev.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123456789000:android:placeholder123456",
+        "android_client_info": {
+          "package_name": "com.thinkbuddy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyPlaceholderDevKeyForLocalCiOnly"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+

@@ -12,7 +12,7 @@ Per `docs/08_CLIENT_PLATFORM_GUIDE.md` and `android/README.md`:
   - *Medium & Expanded (>= 600 dp):* Navigation rail, adaptive two-pane master-detail layouts.
   - Tested on both Phone (e.g. Pixel 8) and Tablet (e.g. Pixel Tablet) emulators.
 - **Design Tokens & Fonts:** Mapped from `/design/tokens.json`. Default Bangla typography (Noto Sans Bengali / Hind Siliguri) with line height >= 1.5, Bengali digit formatting, and English language switch.
-- **Hardware-Backed Token Storage:** Modern Android Keystore-backed AES-GCM encrypted storage (avoiding deprecated `EncryptedSharedPreferences`) storing access and refresh tokens (Rule 17).
+- **Hardware-Backed Token Storage:** Modern Android Keystore-backed AES-GCM encrypted storage storing access and refresh tokens (Rule 17).
 - **Assessed Quiz Security:** `FLAG_SECURE` window protection, multi-window/split-screen detection & pause, Google Play Integrity token with nonce bound to attempt ID, plus low-trust fallback path for devices without Google Play Services (Rule 18 / `docs/05_SECURE_QUIZ.md`).
 - **Push Notifications:** FCM push receiver with generic non-leaking alert text (Rule 15).
 - **Network Security:** Strict HTTPS by default; cleartext HTTP to `10.0.2.2` (emulator host) permitted in `debug` builds only via `network_security_config.xml`.

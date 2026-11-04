@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">ThinkBuddy</string>
+    <string name="app_tagline">Smart personalized learning platform for Bangladesh students</string>
+    <string name="nav_today">Today</string>
+    <string name="nav_plan">Plan</string>
+    <string name="nav_quiz">Quiz</string>
+    <string name="nav_chat">AI Tutor</string>
+    <string name="nav_settings">Settings</string>
+</resources>
+

@@ -16,7 +16,7 @@ PATTERNS: dict[str, re.Pattern[str]] = {
     ),
 }
 
-EXCLUDE_DIRS = {".git", ".pytest_cache", ".venv", "venv", "__pycache__", "docs-generated", "node_modules", ".next"}
+EXCLUDE_DIRS = {".git", ".pytest_cache", ".venv", "venv", "__pycache__", "docs-generated", "node_modules", ".next", ".gradle"}
 EXCLUDE_FILES = {".env.example"}
 
 
