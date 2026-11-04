@@ -4,6 +4,7 @@ import com.google.gson.annotations.SerializedName
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -355,6 +356,8 @@ data class ParentalConsentResponseDto(
 data class ParentalConsentStatusDto(
     @SerializedName("has_consent") val hasConsent: Boolean,
     @SerializedName("version") val version: String? = null,
+    @SerializedName("terms_hash") val termsHash: String? = null,
+    @SerializedName("reconsent_required") val reconsentRequired: Boolean? = false,
     @SerializedName("consented_at") val consentedAt: String? = null
 )
 
@@ -362,7 +365,29 @@ data class FamilyDataExportDto(
     @SerializedName("export_id") val exportId: String,
     @SerializedName("family_id") val familyId: String,
     @SerializedName("exported_at") val exportedAt: String,
-    @SerializedName("data") val data: Map<String, Any>
+    @SerializedName("data") val data: Map<String, Any>,
+    @SerializedName("download_url") val downloadUrl: String? = null,
+    @SerializedName("expires_at") val expiresAt: String? = null
+)
+
+data class ReauthRequestDto(
+    @SerializedName("id_token") val idToken: String
+)
+
+data class ReauthResponseDto(
+    @SerializedName("reauth_token") val reauthToken: String,
+    @SerializedName("expires_in") val expiresIn: Int
+)
+
+data class WithdrawConsentRequestDto(
+    @SerializedName("reason") val reason: String? = null
+)
+
+data class WithdrawConsentResponseDto(
+    @SerializedName("status") val status: String,
+    @SerializedName("parent_id") val parentId: String,
+    @SerializedName("withdrawn_at") val withdrawnAt: String,
+    @SerializedName("minor_processing_suspended") val minorProcessingSuspended: Boolean
 )
 
 data class AccountDeletionRequestDto(
@@ -602,6 +627,11 @@ interface ApiService {
         @Body request: RedeemLinkRequest
     ): Response<RedeemLinkResponse>
 
+    @POST("v1/auth/reauthenticate")
+    suspend fun reauthenticate(
+        @Body request: ReauthRequestDto
+    ): Response<ReauthResponseDto>
+
     @POST("v1/parents/consent")
     suspend fun recordParentConsent(
         @Body request: ParentalConsentRequestDto
@@ -610,11 +640,20 @@ interface ApiService {
     @GET("v1/parents/consent")
     suspend fun getParentConsent(): Response<ParentalConsentStatusDto>
 
+    @POST("v1/parents/consent/withdraw")
+    suspend fun withdrawParentConsent(
+        @Header("X-Reauth-Token") reauthToken: String,
+        @Body request: WithdrawConsentRequestDto
+    ): Response<WithdrawConsentResponseDto>
+
     @GET("v1/parents/me/export")
-    suspend fun exportFamilyData(): Response<FamilyDataExportDto>
+    suspend fun exportFamilyData(
+        @Header("X-Reauth-Token") reauthToken: String? = null
+    ): Response<FamilyDataExportDto>
 
     @POST("v1/users/me/delete")
     suspend fun requestAccountDeletion(
+        @Header("X-Reauth-Token") reauthToken: String? = null,
         @Body request: AccountDeletionRequestDto
     ): Response<AccountDeletionResponseDto>
 

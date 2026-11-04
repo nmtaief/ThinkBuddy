@@ -321,9 +321,35 @@ open class ParentRepository(
         }
     }
 
-    open suspend fun exportFamilyData(): Result<FamilyDataExportDto> = withContext(Dispatchers.IO) {
+    open suspend fun reauthenticate(idToken: String): Result<ReauthResponseDto> = withContext(Dispatchers.IO) {
         try {
-            val res = api.exportFamilyData()
+            val res = api.reauthenticate(ReauthRequestDto(idToken = idToken))
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Re-authentication failed"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun withdrawParentConsent(reauthToken: String, reason: String? = null): Result<WithdrawConsentResponseDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.withdrawParentConsent(reauthToken, WithdrawConsentRequestDto(reason = reason))
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to withdraw parental consent"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun exportFamilyData(reauthToken: String? = null): Result<FamilyDataExportDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.exportFamilyData(reauthToken)
             if (res.isSuccessful && res.body() != null) {
                 Result.success(res.body()!!)
             } else {
@@ -334,9 +360,9 @@ open class ParentRepository(
         }
     }
 
-    open suspend fun requestAccountDeletion(confirmation: String, reason: String? = null): Result<AccountDeletionResponseDto> = withContext(Dispatchers.IO) {
+    open suspend fun requestAccountDeletion(confirmation: String, reason: String? = null, reauthToken: String? = null): Result<AccountDeletionResponseDto> = withContext(Dispatchers.IO) {
         try {
-            val res = api.requestAccountDeletion(AccountDeletionRequestDto(confirmation = confirmation, reason = reason))
+            val res = api.requestAccountDeletion(reauthToken, AccountDeletionRequestDto(confirmation = confirmation, reason = reason))
             if (res.isSuccessful && res.body() != null) {
                 Result.success(res.body()!!)
             } else {

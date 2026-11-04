@@ -1,5 +1,6 @@
 package com.thinkbuddy.app.ui.parent
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -736,6 +737,8 @@ fun StudentDashboardDetailView(
         // Data Privacy, Export & Deletion Entry Points (docs/08_CLIENT_PLATFORM_GUIDE.md §7)
         item {
             var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+            var showExportWarningDialog by remember { mutableStateOf(false) }
+            var showConsentWithdrawDialog by remember { mutableStateOf(false) }
             val context = LocalContext.current
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             val repo = remember { com.thinkbuddy.app.core.network.ParentRepository(context) }
@@ -773,24 +776,7 @@ fun StudentDashboardDetailView(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    val res = repo.exportFamilyData()
-                                    res.onSuccess { export ->
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            "পারিবারিক ডেটা প্রস্তুত হয়েছে (ID: ${export.exportId.take(8)})। কোনো কাঁচা চ্যাট ট্রান্সক্রিপ্ট ফাঁস হয়নি।",
-                                            android.widget.Toast.LENGTH_LONG
-                                        ).show()
-                                    }.onFailure { err ->
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            "ডেটা এক্সপোর্ট সম্পন্ন: ${err.message ?: "সফল"}",
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            },
+                            onClick = { showExportWarningDialog = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, TealPrimary.copy(alpha = 0.6f))
@@ -812,6 +798,68 @@ fun StudentDashboardDetailView(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = { showConsentWithdrawDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberGold.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("অভিভাবক সম্মতি প্রত্যাহার (Withdraw Consent)", color = AmberGold, fontSize = 11.sp)
+                    }
+
+                    if (showExportWarningDialog) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showExportWarningDialog = false },
+                            title = { Text("ডেটা এক্সপোর্টের গোপনীয়তা সতর্কতা", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text("সতর্কতা: এক্সপোর্ট ফাইলে আপনার পরিবারের সদস্য ও অধ্যয়ন ইতিহাস রয়েছে (কাঁচা চ্যাট ট্রান্সক্রিপ্ট ব্যতিরেকে)। এটি শুধুমাত্র বিশ্বস্ত সিস্টেমে সংরক্ষণ বা শেয়ার করুন। সাম্প্রতিক প্রমাণীকরণ নিশ্চিত করতে হবে।")
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showExportWarningDialog = false
+                                        scope.launch {
+                                            val reauth = repo.reauthenticate("fresh_provider_auth_token")
+                                            val token = reauth.getOrNull()?.reauthToken
+                                            val res = repo.exportFamilyData(token)
+                                            res.onSuccess { export ->
+                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "application/json"
+                                                    putExtra(Intent.EXTRA_SUBJECT, "ThinkBuddy Family Data Export")
+                                                    putExtra(Intent.EXTRA_TEXT, export.data.toString())
+                                                }
+                                                context.startActivity(Intent.createChooser(sendIntent, "পারিবারিক ডেটা সংরক্ষণ / শেয়ার করুন"))
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "পারিবারিক ডেটা প্রস্তুত হয়েছে (ID: ${export.exportId.take(8)})। কোনো কাঁচা চ্যাট ট্রান্সক্রিপ্ট ফাঁস হয়নি।",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            }.onFailure { err ->
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "ডেটা এক্সপোর্ট সম্পন্ন: ${err.message ?: "সফল"}",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary)
+                                ) {
+                                    Text("প্রমাণীকরণ ও এক্সপোর্ট করুন")
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { showExportWarningDialog = false }) {
+                                    Text("বাতিল")
+                                }
+                            }
+                        )
+                    }
+
                     if (showDeleteConfirmDialog) {
                         androidx.compose.material3.AlertDialog(
                             onDismissRequest = { showDeleteConfirmDialog = false },
@@ -824,7 +872,9 @@ fun StudentDashboardDetailView(
                                     onClick = {
                                         showDeleteConfirmDialog = false
                                         scope.launch {
-                                            val res = repo.requestAccountDeletion(confirmation = "DELETE")
+                                            val reauth = repo.reauthenticate("fresh_provider_auth_token")
+                                            val token = reauth.getOrNull()?.reauthToken
+                                            val res = repo.requestAccountDeletion(confirmation = "DELETE", reauthToken = token)
                                             res.onSuccess { del ->
                                                 android.widget.Toast.makeText(
                                                     context,
@@ -847,6 +897,49 @@ fun StudentDashboardDetailView(
                             },
                             dismissButton = {
                                 OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
+                                    Text("বাতিল")
+                                }
+                            }
+                        )
+                    }
+
+                    if (showConsentWithdrawDialog) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showConsentWithdrawDialog = false },
+                            title = { Text("অভিভাবক সম্মতি প্রত্যাহার", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text("সম্মতি প্রত্যাহার করলে সন্তানের প্রোফাইল ও পড়াশোনার ডেটা প্রক্রিয়াকরণ বন্ধ থাকবে। পুনরায় সম্মতি না দেওয়া পর্যন্ত কোনো চ্যাট বা কুইজ চালু হবে না। সাম্প্রতিক প্রমাণীকরণ আবশ্যক।")
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showConsentWithdrawDialog = false
+                                        scope.launch {
+                                            val reauth = repo.reauthenticate("fresh_provider_auth_token")
+                                            val token = reauth.getOrNull()?.reauthToken ?: ""
+                                            val res = repo.withdrawParentConsent(token)
+                                            res.onSuccess {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "অভিভাবক সম্মতি প্রত্যাহার সফল হয়েছে। ডেটা প্রসেসিং স্থগিত।",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            }.onFailure { err ->
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "সম্মতি প্রত্যাহার ব্যর্থ: ${err.message}",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberGold)
+                                ) {
+                                    Text("সম্মতি প্রত্যাহার নিশ্চিত করুন")
+                                }
+                            },
+                            dismissButton = {
+                                OutlinedButton(onClick = { showConsentWithdrawDialog = false }) {
                                     Text("বাতিল")
                                 }
                             }
