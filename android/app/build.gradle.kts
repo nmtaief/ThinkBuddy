@@ -98,7 +98,7 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.okhttp.sse)
 
-    // Hardware-backed Keystore & Play Integrity
+    // Keystore-backed storage & Play Integrity
     implementation(libs.play.services.integrity)
 
     // Vetted QR Code Generation (ISO/IEC 18004 Standard)

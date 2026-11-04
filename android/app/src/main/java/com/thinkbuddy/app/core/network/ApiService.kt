@@ -17,7 +17,20 @@ data class ClientConfigResponse(
     @SerializedName("quiz_security_mode") val quizSecurityMode: String = "assessed_app_only",
     @SerializedName("features") val features: Map<String, Boolean> = emptyMap(),
     @SerializedName("allowed_assessment_modes") val allowedAssessmentModes: List<String> = listOf("practice", "assessed"),
-    @SerializedName("locale") val locale: String = "bn"
+    @SerializedName("locale") val locale: String = "bn",
+    @SerializedName("planner_config") val plannerConfig: PlannerConfigDto? = null
+)
+
+data class PlannerConfigDto(
+    @SerializedName("class_band_limits") val classBandLimits: Map<String, ClassBandLimitsDto> = emptyMap(),
+    @SerializedName("hard_limits") val hardLimits: Map<String, Int> = mapOf("school_day" to 360, "holiday" to 600)
+)
+
+data class ClassBandLimitsDto(
+    @SerializedName("min_daily_minutes") val minDailyMinutes: Int = 0,
+    @SerializedName("max_daily_minutes") val maxDailyMinutes: Int = 600,
+    @SerializedName("recommended_daily_minutes") val recommendedDailyMinutes: Int = 90,
+    @SerializedName("recommended_minutes") val recommendedMinutes: Map<String, Int> = emptyMap()
 )
 
 data class AuthExchangeRequest(

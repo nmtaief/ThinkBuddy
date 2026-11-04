@@ -110,12 +110,14 @@ fun StudySetupEditorScreen(
     studentId: String,
     repository: ParentRepository? = null,
     initialSettings: StudentStudySettingsDto? = null,
+    initialConfig: ClientConfigResponse? = null,
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val repo = remember { repository ?: ParentRepository(context) }
     val scope = rememberCoroutineScope()
 
+    var clientConfig by remember { mutableStateOf<ClientConfigResponse?>(initialConfig) }
     var isLoading by remember { mutableStateOf(initialSettings == null) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -170,12 +172,24 @@ fun StudySetupEditorScreen(
         }, h, m, true)
     }
 
-    val recommendedSchoolMinutes = when (classBand) {
-        "6-8" -> 90
-        "9-10" -> 150
-        "11-12" -> 210
-        else -> 120
-    }
+    val bandLimits = clientConfig?.plannerConfig?.classBandLimits?.get(classBand)
+    val recommendedSchoolMinutes = bandLimits?.recommendedMinutes?.get("school_day")
+        ?: bandLimits?.recommendedDailyMinutes
+        ?: when (classBand) {
+            "6-8" -> 90
+            "9-10" -> 150
+            "11-12" -> 210
+            else -> 120
+        }
+    val recommendedHolidayMinutes = bandLimits?.recommendedMinutes?.get("holiday")
+        ?: when (classBand) {
+            "6-8" -> 150
+            "9-10" -> 240
+            "11-12" -> 300
+            else -> 180
+        }
+    val maxSchoolMinutes = clientConfig?.plannerConfig?.hardLimits?.get("school_day")?.toFloat() ?: 360f
+    val maxHolidayMinutes = clientConfig?.plannerConfig?.hardLimits?.get("holiday")?.toFloat() ?: 600f
 
     var subjectPriorities by remember {
         mutableStateOf(
@@ -212,6 +226,9 @@ fun StudySetupEditorScreen(
         errorMessage = null
         conflictMessage = null
         scope.launch {
+            repo.getClientConfig().onSuccess { cfg ->
+                clientConfig = cfg
+            }
             val res = repo.getStudySettings(studentId)
             res.onSuccess { data ->
                 currentVersion = data.version
@@ -550,7 +567,7 @@ fun StudySetupEditorScreen(
                                 Text("${BengaliDigits.fromEnglish(schoolDayMinutes.toInt())} মিনিট", color = TealPrimary, fontWeight = FontWeight.Bold)
                             }
                             Text(
-                                "শ্রেণি $classBand ব্যান্ড: প্রস্তাবিত ৯০-১২০ মিনিট (সর্বোচ্চ ৩৬০ মিনিট)",
+                                "শ্রেণি $classBand ব্যান্ড: প্রস্তাবিত ${BengaliDigits.fromEnglish(recommendedSchoolMinutes)} মিনিট (সর্বোচ্চ ${BengaliDigits.fromEnglish(maxSchoolMinutes.toInt())} মিনিট)",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
@@ -558,8 +575,8 @@ fun StudySetupEditorScreen(
                             Slider(
                                 value = schoolDayMinutes,
                                 onValueChange = { schoolDayMinutes = it },
-                                valueRange = 15f..360f,
-                                steps = 22, // 15-minute intervals up to 360m
+                                valueRange = 15f..maxSchoolMinutes,
+                                steps = ((maxSchoolMinutes - 15f) / 15f).toInt().coerceAtLeast(1) - 1,
                                 colors = SliderDefaults.colors(
                                     thumbColor = TealPrimary,
                                     activeTrackColor = TealPrimary,
@@ -579,7 +596,7 @@ fun StudySetupEditorScreen(
                                     Icon(Icons.Default.Warning, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        "সতর্কতা: শ্রেণি $classBand-এর প্রস্তাবিত দৈনিক সময় ${BengaliDigits.fromEnglish(recommendedSchoolMinutes)} মিনিট। দীর্ঘ সময় শিক্ষার্থীদের ক্লান্ত করতে পারে।",
+                                        "বিজ্ঞপ্তি: নির্ধারিত সময় শ্রেণি $classBand-এর প্রস্তাবিত সীমা (${BengaliDigits.fromEnglish(recommendedSchoolMinutes)} মিনিট) অতিক্রম করেছে।",
                                         color = AmberGold,
                                         fontSize = 11.sp
                                     )
@@ -605,7 +622,7 @@ fun StudySetupEditorScreen(
                                 Text("${BengaliDigits.fromEnglish(holidayMinutes.toInt())} মিনিট", color = AmberGold, fontWeight = FontWeight.Bold)
                             }
                             Text(
-                                "ছুটির দিনে নির্ধারিত সময় (সর্বোচ্চ ৬০০ মিনিট)",
+                                "ছুটির দিনে নির্ধারিত সময়: প্রস্তাবিত ${BengaliDigits.fromEnglish(recommendedHolidayMinutes)} মিনিট (সর্বোচ্চ ${BengaliDigits.fromEnglish(maxHolidayMinutes.toInt())} মিনিট)",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
@@ -613,15 +630,14 @@ fun StudySetupEditorScreen(
                             Slider(
                                 value = holidayMinutes,
                                 onValueChange = { holidayMinutes = it },
-                                valueRange = 15f..600f,
-                                steps = 38, // 15-minute intervals up to 600m
+                                valueRange = 15f..maxHolidayMinutes,
+                                steps = ((maxHolidayMinutes - 15f) / 15f).toInt().coerceAtLeast(1) - 1,
                                 colors = SliderDefaults.colors(
                                     thumbColor = AmberGold,
                                     activeTrackColor = AmberGold,
                                     inactiveTrackColor = BorderDark
                                 )
                             )
-                            val recommendedHolidayMinutes = (recommendedSchoolMinutes * 1.5).toInt()
                             if (holidayMinutes.toInt() > recommendedHolidayMinutes) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Row(
@@ -635,7 +651,7 @@ fun StudySetupEditorScreen(
                                     Icon(Icons.Default.Warning, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        "সতর্কতা: ছুটির দিনে প্রস্তাবিত সময় ${BengaliDigits.fromEnglish(recommendedHolidayMinutes)} মিনিট। শিক্ষার্থীর বিশ্রাম ও বিনোদনের সুযোগ রাখা জরুরি।",
+                                        "বিজ্ঞপ্তি: নির্ধারিত সময় ছুটির দিনের প্রস্তাবিত সীমা (${BengaliDigits.fromEnglish(recommendedHolidayMinutes)} মিনিট) অতিক্রম করেছে।",
                                         color = AmberGold,
                                         fontSize = 11.sp
                                     )

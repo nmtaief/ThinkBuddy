@@ -153,8 +153,8 @@ fun ParentConsentScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     ConsentFeatureRow(
-                        title = "হার্ডওয়্যার-সমর্থিত নিরাপত্তা",
-                        description = "লগইন সেশন ও অথরাইজেশন টোকেন সরাসরি অ্যান্ড্রয়েড কী-স্টোরে সুরক্ষিত থাকে।"
+                        title = "কী-স্টোর সমর্থিত নিরাপত্তা (Keystore-backed)",
+                        description = "লগইন সেশন ও অফলাইন ক্যাশ সরাসরি অ্যান্ড্রয়েড কী-স্টোরে (Keystore-backed) সুরক্ষিত থাকে।"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     ConsentFeatureRow(

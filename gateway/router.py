@@ -210,6 +210,10 @@ async def get_client_config(
                     "min_daily_minutes": 0,
                     "max_daily_minutes": 600,
                     "recommended_daily_minutes": 90,
+                    "recommended_minutes": {
+                        "school_day": 90,
+                        "holiday": 150,
+                    },
                     "max_block_minutes": 90,
                     "latest_end_time": "22:00",
                 },
@@ -217,6 +221,10 @@ async def get_client_config(
                     "min_daily_minutes": 0,
                     "max_daily_minutes": 600,
                     "recommended_daily_minutes": 150,
+                    "recommended_minutes": {
+                        "school_day": 150,
+                        "holiday": 240,
+                    },
                     "max_block_minutes": 90,
                     "latest_end_time": "22:00",
                 },
@@ -224,9 +232,17 @@ async def get_client_config(
                     "min_daily_minutes": 0,
                     "max_daily_minutes": 600,
                     "recommended_daily_minutes": 210,
+                    "recommended_minutes": {
+                        "school_day": 210,
+                        "holiday": 300,
+                    },
                     "max_block_minutes": 90,
                     "latest_end_time": "22:00",
                 },
+            },
+            "hard_limits": {
+                "school_day": 360,
+                "holiday": 600,
             },
             "default_parameters": {
                 "study_share": 0.65,

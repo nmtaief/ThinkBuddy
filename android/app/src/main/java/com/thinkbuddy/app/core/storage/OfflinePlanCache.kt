@@ -16,7 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
  * Keystore-backed Offline Plan Cache (Rule 17 & docs/08_CLIENT_PLATFORM_GUIDE.md §2 & §6)
  *
  * Requirements:
- * 1. Hardware Keystore-backed AES-256-GCM encryption at rest.
+ * 1. Keystore-backed AES-256-GCM encryption at rest.
  * 2. Purge immediately on user logout.
  * 3. Purge immediately on HTTP 401 Unauthorized.
  * 4. Purge immediately on account change (Student A -> Student B).

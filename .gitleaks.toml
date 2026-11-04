@@ -1,11 +1,15 @@
 [allowlist]
-description = "Ignore build output and dependency directories"
+description = "Ignore build output, generated assets, and dependency directories"
 paths = [
-    '''(^|/)node_modules/''',
-    '''(^|/)\.next/''',
-    '''(^|/)\.gradle/''',
-    '''(^|/)build/''',
-    '''(^|/)\.idea/''',
-    '''(^|/)dist/'''
+    '''^web/node_modules/''',
+    '''^web/\.next/''',
+    '''^web/dist/''',
+    '''^web/out/''',
+    '''^android/\.gradle/''',
+    '''^android/app/build/''',
+    '''^android/build/''',
+    '''^\.gradle/''',
+    '''^\.idea/''',
+    '''^dist/''',
+    '''^build/'''
 ]
-

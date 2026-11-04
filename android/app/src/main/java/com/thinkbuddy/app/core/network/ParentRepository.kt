@@ -16,6 +16,19 @@ open class ParentRepository(
             ?: throw IllegalStateException("Context or ApiService required for ParentRepository"))
     }
 
+    open suspend fun getClientConfig(): Result<ClientConfigResponse> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getClientConfig()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to fetch client config"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     open suspend fun getOverviewDashboard(): Result<ParentOverviewResponse> = withContext(Dispatchers.IO) {
         try {
             val res = api.getParentOverviewDashboard()
