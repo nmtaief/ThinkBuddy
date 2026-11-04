@@ -64,6 +64,16 @@ from core.planner.schemas import (
     UpsertStudySetupRequest,
 )
 from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
+from core.privacy.schemas import (
+    AccountDeletionResponse,
+    CancelDeletionResponse,
+    FamilyDataExportResponse,
+    ParentalConsentRequest,
+    ParentalConsentResponse,
+    ParentalConsentStatusResponse,
+    PurgeJobReport,
+    RequestAccountDeletionBody,
+)
 from gateway.client import core_client
 
 router = APIRouter(prefix="/v1")
@@ -1294,4 +1304,96 @@ async def gateway_notification_preferences_get(request: Request) -> Response:
 )
 async def gateway_notification_preferences_put(request: Request) -> Response:
     """Forward notification preferences PUT requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+# -------------------------------------------------------------------------
+# Privacy, Parental Consent & Data Lifecycle (docs/04_API_CONTRACT.md / P07b)
+# -------------------------------------------------------------------------
+@router.post(
+    "/parents/consent",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_record_parental_consent",
+)
+async def gateway_record_parental_consent(request: Request) -> Response:
+    """Forward parental consent recording POST request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/consent",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_get_parental_consent_status",
+)
+async def gateway_get_parental_consent_status(request: Request) -> Response:
+    """Forward parental consent status GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/me/export",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_export_family_data_get",
+)
+async def gateway_export_family_data_get(request: Request) -> Response:
+    """Forward family data export GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/me/export",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_export_family_data_post",
+)
+async def gateway_export_family_data_post(request: Request) -> Response:
+    """Forward family data export POST request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/users/me/delete",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_request_user_deletion",
+)
+async def gateway_request_user_deletion(request: Request) -> Response:
+    """Forward account deletion request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/users/me/cancel-deletion",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_cancel_user_deletion",
+)
+async def gateway_cancel_user_deletion(request: Request) -> Response:
+    """Forward account deletion cancellation downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/families/{family_id}/delete",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_request_family_deletion",
+)
+async def gateway_request_family_deletion(family_id: uuid.UUID, request: Request) -> Response:
+    """Forward family deletion request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/families/{family_id}/cancel-deletion",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_cancel_family_deletion",
+)
+async def gateway_cancel_family_deletion(family_id: uuid.UUID, request: Request) -> Response:
+    """Forward family deletion cancellation downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/admin/privacy/purge",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_trigger_privacy_purge",
+)
+async def gateway_trigger_privacy_purge(request: Request) -> Response:
+    """Forward privacy purge maintenance trigger downstream to Core Service."""
     return await forward_to_core(request)
