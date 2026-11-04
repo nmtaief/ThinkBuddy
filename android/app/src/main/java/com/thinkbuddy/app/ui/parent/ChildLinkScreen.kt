@@ -3,10 +3,11 @@ package com.thinkbuddy.app.ui.parent
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,7 +64,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -555,9 +559,9 @@ fun ChildLinkScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            SimulatedQrCodeView(
+                            RealQrCodeView(
                                 payload = generatedCode ?: "TB-LINK-CODE",
-                                modifier = Modifier.size(140.dp)
+                                modifier = Modifier.size(150.dp)
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
@@ -629,7 +633,7 @@ fun ChildLinkScreen(
                             value = manualCode,
                             onValueChange = { manualCode = it.uppercase() },
                             label = { Text("৮-ডিজিট লিংক কোড") },
-                            placeholder = { Text("যেমন: TB-1234-KID") },
+                            placeholder = { Text("যেমন: K7M2N9P4") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
@@ -696,47 +700,50 @@ fun ChildLinkScreen(
 }
 
 /**
- * Procedural QR pattern representation without external heavy libraries.
+ * Real ISO/IEC 18004 standard QR Code generated using vetted ZXing library.
+ * Fully compatible with real device cameras, Google Lens, and barcode scanners.
  */
 @Composable
-fun SimulatedQrCodeView(
+fun RealQrCodeView(
     payload: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sizePx: Int = 512
 ) {
+    val bitmap = remember(payload) {
+        try {
+            val writer = QRCodeWriter()
+            val bitMatrix = writer.encode(payload, BarcodeFormat.QR_CODE, sizePx, sizePx)
+            val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+            for (x in 0 until sizePx) {
+                for (y in 0 until sizePx) {
+                    bmp.setPixel(
+                        x,
+                        y,
+                        if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                    )
+                }
+            }
+            bmp
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color.White)
-            .padding(10.dp),
+            .padding(8.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val step = size.width / 15f
-            val hash = payload.hashCode()
-
-            // Draw corner marker boxes
-            fun drawMarker(x: Float, y: Float) {
-                drawRect(Color.Black, Offset(x, y), Size(step * 4, step * 4))
-                drawRect(Color.White, Offset(x + step, y + step), Size(step * 2, step * 2))
-                drawRect(Color.Black, Offset(x + step * 1.5f, y + step * 1.5f), Size(step, step))
-            }
-
-            drawMarker(0f, 0f)
-            drawMarker(size.width - step * 4, 0f)
-            drawMarker(0f, size.height - step * 4)
-
-            // Draw procedural data dots based on payload hash
-            for (r in 0..14) {
-                for (c in 0..14) {
-                    val inMarker = (r < 5 && c < 5) || (r < 5 && c > 9) || (r > 9 && c < 5)
-                    if (!inMarker) {
-                        val bit = (hash xor (r * 31 + c * 17)) % 3 == 0
-                        if (bit) {
-                            drawRect(Color.Black, Offset(c * step, r * step), Size(step * 0.9f, step * 0.9f))
-                        }
-                    }
-                }
-            }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "QR Code for link code $payload",
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Text("QR কোড লোড হচ্ছে...", color = Color.Gray, fontSize = 11.sp)
         }
     }
 }

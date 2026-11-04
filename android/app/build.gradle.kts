@@ -101,6 +101,9 @@ dependencies {
     // Hardware-backed Keystore & Play Integrity
     implementation(libs.play.services.integrity)
 
+    // Vetted QR Code Generation (ISO/IEC 18004 Standard)
+    implementation(libs.zxing.core)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
