@@ -340,6 +340,55 @@ data class RedeemLinkResponse(
     @SerializedName("student_name") val studentName: String
 )
 
+data class ParentalConsentRequestDto(
+    @SerializedName("version") val version: String = "1.0",
+    @SerializedName("consented") val consented: Boolean = true
+)
+
+data class ParentalConsentResponseDto(
+    @SerializedName("status") val status: String,
+    @SerializedName("version") val version: String,
+    @SerializedName("consented_at") val consentedAt: String,
+    @SerializedName("parent_id") val parentId: String
+)
+
+data class ParentalConsentStatusDto(
+    @SerializedName("has_consent") val hasConsent: Boolean,
+    @SerializedName("version") val version: String? = null,
+    @SerializedName("consented_at") val consentedAt: String? = null
+)
+
+data class FamilyDataExportDto(
+    @SerializedName("export_id") val exportId: String,
+    @SerializedName("family_id") val familyId: String,
+    @SerializedName("exported_at") val exportedAt: String,
+    @SerializedName("data") val data: Map<String, Any>
+)
+
+data class AccountDeletionRequestDto(
+    @SerializedName("confirmation") val confirmation: String,
+    @SerializedName("reason") val reason: String? = null
+)
+
+data class AccountDeletionResponseDto(
+    @SerializedName("deletion_id") val deletionId: String,
+    @SerializedName("target_type") val targetType: String,
+    @SerializedName("target_id") val targetId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("grace_period_days") val gracePeriodDays: Int,
+    @SerializedName("requested_at") val requestedAt: String,
+    @SerializedName("scheduled_purge_at") val scheduledPurgeAt: String,
+    @SerializedName("message") val message: String
+)
+
+data class CancelDeletionResponseDto(
+    @SerializedName("deletion_id") val deletionId: String,
+    @SerializedName("target_type") val targetType: String,
+    @SerializedName("target_id") val targetId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String
+)
+
 // --- Retrofit API Service ---
 
 interface ApiService {
@@ -552,4 +601,23 @@ interface ApiService {
     suspend fun redeemLinkCode(
         @Body request: RedeemLinkRequest
     ): Response<RedeemLinkResponse>
+
+    @POST("v1/parents/consent")
+    suspend fun recordParentConsent(
+        @Body request: ParentalConsentRequestDto
+    ): Response<ParentalConsentResponseDto>
+
+    @GET("v1/parents/consent")
+    suspend fun getParentConsent(): Response<ParentalConsentStatusDto>
+
+    @GET("v1/parents/me/export")
+    suspend fun exportFamilyData(): Response<FamilyDataExportDto>
+
+    @POST("v1/users/me/delete")
+    suspend fun requestAccountDeletion(
+        @Body request: AccountDeletionRequestDto
+    ): Response<AccountDeletionResponseDto>
+
+    @POST("v1/users/me/cancel-deletion")
+    suspend fun cancelAccountDeletion(): Response<CancelDeletionResponseDto>
 }

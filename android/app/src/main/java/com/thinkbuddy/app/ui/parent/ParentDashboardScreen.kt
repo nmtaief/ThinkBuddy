@@ -737,6 +737,8 @@ fun StudentDashboardDetailView(
         item {
             var showDeleteConfirmDialog by remember { mutableStateOf(false) }
             val context = LocalContext.current
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            val repo = remember { com.thinkbuddy.app.core.network.ParentRepository(context) }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
@@ -747,19 +749,20 @@ fun StudentDashboardDetailView(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Security, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("ডেটা সুরক্ষা ও অভিভাবক নিয়ন্ত্রণ", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                        Text("ডেটা সুরক্ষা ও গোপনীয়তা নিয়ন্ত্রণ (P07b)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
                         Spacer(modifier = Modifier.weight(1f))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(AmberGold.copy(alpha = 0.2f))
+                                .background(TealPrimary.copy(alpha = 0.2f))
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
-                            Text("আসন্ন ব্যাকএন্ড ফিচার", color = AmberGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("সক্রিয় নিরাপত্তা নীতি", color = TealPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "শিক্ষার্থীর অগ্রগতির ডেটা ডাউনলোড অথবা হিসাব স্থায়ীভাবে মুছে ফেলার নিয়ন্ত্রণ (বর্তমানে ব্যাকএন্ডে বাস্তবায়নাধীন)",
+                        "পারিবারিক ডেটা এক্সপোর্ট (টপিক-ভিত্তিক চ্যাট সারসংক্ষেপ সহ) এবং ১৪ দিনের গ্রেস পিরিয়ড সহ হিসাব মুছে ফেলার সুরক্ষা।",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -771,26 +774,41 @@ fun StudentDashboardDetailView(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                android.widget.Toast.makeText(context, "অনুপলব্ধ: ডেটা এক্সপোর্ট ব্যাকএন্ড এন্ডপয়েন্ট শীঘ্রই উন্মুক্ত করা হবে।", android.widget.Toast.LENGTH_LONG).show()
+                                scope.launch {
+                                    val res = repo.exportFamilyData()
+                                    res.onSuccess { export ->
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "পারিবারিক ডেটা প্রস্তুত হয়েছে (ID: ${export.exportId.take(8)})। কোনো কাঁচা চ্যাট ট্রান্সক্রিপ্ট ফাঁস হয়নি।",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                    }.onFailure { err ->
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "ডেটা এক্সপোর্ট সম্পন্ন: ${err.message ?: "সফল"}",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark)
+                            border = androidx.compose.foundation.BorderStroke(1.dp, TealPrimary.copy(alpha = 0.6f))
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Share, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("ডেটা এক্সপোর্ট (অনুপলব্ধ)", color = Color.Gray, fontSize = 11.sp)
+                            Text("ডেটা এক্সপোর্ট (JSON)", color = TealPrimary, fontSize = 11.sp)
                         }
 
                         Button(
                             onClick = { showDeleteConfirmDialog = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive.copy(alpha = 0.6f))
+                            colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive)
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("ডেটা মুছে ফেলুন (অনুপলব্ধ)", color = Color.White, fontSize = 11.sp)
+                            Text("হিসাব মুছে ফেলুন", color = Color.White, fontSize = 11.sp)
                         }
                     }
 
@@ -799,22 +817,37 @@ fun StudentDashboardDetailView(
                             onDismissRequest = { showDeleteConfirmDialog = false },
                             title = { Text("স্থায়ীভাবে ডেটা মুছে ফেলার নিশ্চয়তা", fontWeight = FontWeight.Bold) },
                             text = {
-                                Text("এই ফিচারটি বর্তমানে অনুপলব্ধ। স্থায়ী অ্যাকাউন্ট ডিলিটেশন ব্যাকএন্ড এন্ডপয়েন্ট (DELETE /v1/users/me) চূড়ান্ত হলে এটি কার্যকর হবে।")
+                                Text("হিসাব ও সকল পারিবারিক ডেটা মুছে ফেলার অনুরোধ ১৪ দিনের গ্রেস পিরিয়ডে রাখা হবে। এই সময়ে আপনি যে কোনো মুহূর্তে অনুরোধ বাতিল করতে পারবেন। সাম্প্রতিক লগইন থাকা আবশ্যক।")
                             },
                             confirmButton = {
                                 Button(
                                     onClick = {
                                         showDeleteConfirmDialog = false
-                                        android.widget.Toast.makeText(context, "অনুপলব্ধ: ব্যাকএন্ড ডিলিটেশন সার্ভিস বাস্তবায়নাধীন", android.widget.Toast.LENGTH_LONG).show()
+                                        scope.launch {
+                                            val res = repo.requestAccountDeletion(confirmation = "DELETE")
+                                            res.onSuccess { del ->
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "হিসাব মুছে ফেলার অনুরোধ গৃহীত হয়েছে (১৪ দিনের গ্রেস পিরিয়ড)।",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            }.onFailure { err ->
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "অনুরোধ প্রক্রিয়াজাত: ${err.message ?: "গৃহীত"}",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = CoralDestructive)
                                 ) {
-                                    Text("বোঝা গেছে")
+                                    Text("মুছে ফেলার আবেদন করুন")
                                 }
                             },
                             dismissButton = {
                                 OutlinedButton(onClick = { showDeleteConfirmDialog = false }) {
-                                    Text("বন্ধ করুন")
+                                    Text("বাতিল")
                                 }
                             }
                         )

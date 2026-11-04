@@ -294,4 +294,69 @@ open class ParentRepository(
             Result.failure(e)
         }
     }
+
+    open suspend fun recordParentConsent(version: String = "1.0"): Result<ParentalConsentResponseDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.recordParentConsent(ParentalConsentRequestDto(version = version, consented = true))
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to record parental consent"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun getParentConsent(): Result<ParentalConsentStatusDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getParentConsent()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to get parental consent status"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun exportFamilyData(): Result<FamilyDataExportDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.exportFamilyData()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to export family data"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun requestAccountDeletion(confirmation: String, reason: String? = null): Result<AccountDeletionResponseDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.requestAccountDeletion(AccountDeletionRequestDto(confirmation = confirmation, reason = reason))
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to request account deletion"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun cancelAccountDeletion(): Result<CancelDeletionResponseDto> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.cancelAccountDeletion()
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("HTTP ${res.code()}: Failed to cancel account deletion"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

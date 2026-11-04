@@ -142,19 +142,19 @@ class ParentScreensAndChatInstrumentedTest {
         }
 
         // Scroll to Data Privacy & Deletion section in LazyColumn
-        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText("ডেটা সুরক্ষা ও অভিভাবক নিয়ন্ত্রণ"))
-        composeTestRule.onNodeWithText("ডেটা সুরক্ষা ও অভিভাবক নিয়ন্ত্রণ").assertIsDisplayed()
-        composeTestRule.onNodeWithText("ডেটা এক্সপোর্ট (অনুপলব্ধ)").assertIsDisplayed()
+        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText("ডেটা সুরক্ষা ও গোপনীয়তা নিয়ন্ত্রণ (P07b)"))
+        composeTestRule.onNodeWithText("ডেটা সুরক্ষা ও গোপনীয়তা নিয়ন্ত্রণ (P07b)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("ডেটা এক্সপোর্ট (JSON)").assertIsDisplayed()
 
         // Click delete button
-        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText("ডেটা মুছে ফেলুন (অনুপলব্ধ)"))
-        val deleteButton = composeTestRule.onNodeWithText("ডেটা মুছে ফেলুন (অনুপলব্ধ)")
+        composeTestRule.onNode(hasScrollAction()).performScrollToNode(hasText("হিসাব মুছে ফেলুন"))
+        val deleteButton = composeTestRule.onNodeWithText("হিসাব মুছে ফেলুন")
         deleteButton.assertIsDisplayed()
         deleteButton.performClick()
 
-        // Verify Confirmation Alert Dialog
+        // Verify Confirmation Alert Dialog with 14-day grace period
         composeTestRule.onNodeWithText("স্থায়ীভাবে ডেটা মুছে ফেলার নিশ্চয়তা").assertIsDisplayed()
-        composeTestRule.onNodeWithText("বন্ধ করুন").performClick()
+        composeTestRule.onNodeWithText("বাতিল").performClick()
     }
 
     @Test
