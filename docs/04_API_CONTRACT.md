@@ -152,6 +152,25 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
   - Delivery Auditing: Every delivery attempt (in-app and push) is recorded in the `notification_deliveries` table with channel, status, provider message ID, and suppression reasons.
   - System Triggers: `daily_reminder`, `task_missed`, `quiz_ready`, `plan_changed`, `integrity_flag`, and scheduled bilingual `weekly_parent_summary`.
 
+### Privacy, Parental Consent & Data Lifecycle (P07b)
+- `POST /v1/parents/consent` – record verified parental consent (version, timestamp, client IP, user agent). Required before any minor child profile or study data may be processed. Returns `{ "status": "granted", "version": "1.0", "consented_at": "..." }`.
+- `GET /v1/parents/consent` – fetch current parental consent record and version status for the authenticated parent.
+- `GET /v1/parents/me/export` & `POST /v1/parents/me/export` – trigger and retrieve complete family data export JSON. Restricted to authenticated parent/family guardian (Rule 9). In strict compliance with Rule 15 and Decision 9, student AI chat activity is exported as topic-level aggregations only (subject, chapter, topic, message count, timestamp); raw chat messages, prompts, and tokens are strictly excluded.
+- `POST /v1/users/me/delete` – schedule self account deletion. Enforces recent re-authentication (access token issued within 15 minutes / 900 seconds). Enters default 14-day grace period with scheduled purge timestamp. Returns HTTP 200 with grace period details and cancellation instructions.
+- `POST /v1/users/me/cancel-deletion` – cancel pending account deletion within the 14-day grace period, restoring active status.
+- `POST /v1/families/{family_id}/delete` – schedule complete family deletion. Enforces:
+  1. Role check: Students are strictly forbidden from deleting a family (HTTP 403 `STUDENT_CANNOT_DELETE_FAMILY`).
+  2. Ownership check: Only the owning parent (`owner_parent_id`) may schedule family deletion.
+  3. Re-authentication check: Access token `iat` must be within 15 minutes.
+  4. 14-day grace period applied across all family members.
+- `POST /v1/families/{family_id}/cancel-deletion` – cancel pending family deletion within the 14-day grace period.
+- `POST /admin/privacy/purge` – execute data purge job for records past their grace period (`scheduled_purge_at <= now`):
+  1. Revokes all active user sessions (`Session`).
+  2. Revokes all push tokens and removes device bindings (`Device`).
+  3. Purges Redis cache keys for student dashboards, schedules, and sessions.
+  4. Deletes personal academic data (profiles, setups, tasks, plans, attempts, broad answers, chat).
+  5. Anonymizes compliance audit records (`AuditLog`): nulls `actor_id` and redacts PII while retaining timestamps and action types for legal compliance.
+
 ### Teacher (flagged off in beta)
 - `GET /teacher/queue`, `POST /teacher/submissions/{id}/review`, `POST /teacher/topics/flag`.
 

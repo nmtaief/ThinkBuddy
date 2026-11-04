@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Request, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -149,6 +149,7 @@ async def add_child_to_family(
     payload: AddChildRequest,
     current_user: Annotated[User, Depends(require_role("parent", "admin"))],
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    request: Request = None,
 ) -> AddChildResponse:
     """Parent adds a child profile, creating an expiring link code for the student to redeem."""
     # Verify parent owns or belongs to family
@@ -161,6 +162,18 @@ async def add_child_to_family(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN_FAMILY_ACCESS", "message": "You do not own this family."},
         )
+
+    # Verify parental consent is on record before processing child data
+    if not current_user.has_parental_consent and current_user.role != "admin":
+        enforce_gate = (not settings.is_local) or (request is not None and request.headers.get("x-enforce-consent", "").lower() == "true")
+        if enforce_gate:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "PARENTAL_CONSENT_REQUIRED",
+                    "message": "Parental consent must be recorded before child data can be processed.",
+                },
+            )
 
     # Create student user and academic profile
     student_uid = f"student_{uuid.uuid4().hex[:12]}"
