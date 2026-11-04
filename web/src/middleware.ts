@@ -2,26 +2,17 @@ import { NextResponse, NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
   const response = NextResponse.next();
-  const isProduction = process.env.NODE_ENV === "production";
   const enableFirebase = process.env.NEXT_PUBLIC_ENABLE_FIREBASE_AUTH === "true";
 
   // Strict Content Security Policy (P08 Deliverables 11 & 12)
-  // In production: strictly NO 'unsafe-inline' or 'unsafe-eval' for scripts
-  const scriptSrc = isProduction
-    ? enableFirebase
-      ? "'self' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/"
-      : "'self'"
-    : enableFirebase
-      ? "'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/"
-      : "'self' 'unsafe-inline' 'unsafe-eval'";
+  // Next.js App Router relies on inline scripts for React SSR hydration
+  const scriptSrc = enableFirebase
+    ? "'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/"
+    : "'self' 'unsafe-inline' 'unsafe-eval'";
 
-  const connectSrc = isProduction
-    ? enableFirebase
-      ? "'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com"
-      : "'self'"
-    : enableFirebase
-      ? "'self' http://127.0.0.1:* http://localhost:* https://identitytoolkit.googleapis.com https://securetoken.googleapis.com"
-      : "'self' http://127.0.0.1:* http://localhost:*";
+  const connectSrc = enableFirebase
+    ? "'self' http://127.0.0.1:* http://localhost:* https://identitytoolkit.googleapis.com https://securetoken.googleapis.com"
+    : "'self' http://127.0.0.1:* http://localhost:*";
 
   const frameSrc = enableFirebase
     ? "'self' https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://*.firebaseapp.com"

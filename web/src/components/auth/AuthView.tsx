@@ -88,6 +88,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
           <button
+            id="btn-auth-toggle-lang"
+            data-testid="btn-auth-toggle-lang"
             onClick={onToggleLang}
             className="btn-secondary touch-target"
             style={{ display: "flex", gap: "var(--space-1)", fontSize: "var(--text-sm)" }}
@@ -98,6 +100,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
           </button>
 
           <button
+            id="btn-auth-toggle-theme"
+            data-testid="btn-auth-toggle-theme"
             onClick={onToggleTheme}
             className="btn-secondary touch-target"
             style={{ width: 44, height: 44, padding: 0 }}

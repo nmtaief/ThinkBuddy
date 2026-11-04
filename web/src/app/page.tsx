@@ -104,14 +104,54 @@ export default function Home() {
     loadData();
   }, [user, activeChildId]);
 
+    // Restore user preferences
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem("tb_theme") as "light" | "dark" | null;
+      if (savedTheme) {
+        setTheme(savedTheme);
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        if (savedTheme === "dark") {
+          document.documentElement.classList.add("dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+        }
+      }
+      const savedLang = localStorage.getItem("tb_lang") as Language | null;
+      if (savedLang) {
+        setLang(savedLang);
+        document.documentElement.lang = savedLang;
+      }
+    } catch {}
+  }, []);
+
   const toggleLang = () => {
-    setLang((prev) => (prev === "bn" ? "en" : "bn"));
+    setLang((prev) => {
+      const next = prev === "bn" ? "en" : "bn";
+      if (typeof document !== "undefined") {
+        document.documentElement.lang = next;
+      }
+      try {
+        localStorage.setItem("tb_lang", next);
+      } catch {}
+      return next;
+    });
   };
 
   const toggleTheme = () => {
     setTheme((prev) => {
       const next = prev === "light" ? "dark" : "light";
-      document.documentElement.setAttribute("data-theme", next);
+      if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-theme", next);
+        if (next === "dark") {
+          document.documentElement.classList.add("dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+        }
+      }
+      try {
+        localStorage.setItem("tb_theme", next);
+      } catch {}
       return next;
     });
   };

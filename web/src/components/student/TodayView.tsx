@@ -62,7 +62,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-      {/* Warm Religious Greeting Card */}
+      {/* Daily Overview Header */}
       <div
         className="card"
         style={{
@@ -80,12 +80,12 @@ export const TodayView: React.FC<TodayViewProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
             <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
+              {lang === "bn" ? "দৈনিক ড্যাশবোর্ড" : "Daily Dashboard"}
             </span>
           </div>
           <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 2 }}>
+            {lang === "bn" ? "আজকের পড়াশোনার পরিকল্পনা ও অগ্রগতি" : "Today's Study Plan & Progress"}
           </div>
-          <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", margin: 0 }}>
-          </p>
         </div>
 
         <div

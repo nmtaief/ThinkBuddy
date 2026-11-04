@@ -12,11 +12,12 @@ import { SessionUser } from "@/lib/types";
 
 function validateOrigin(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
+  const forwardedHost = req.headers.get("x-forwarded-host");
   const host = req.headers.get("host");
-  if (!origin || !host) return true;
+  if (!origin || (!host && !forwardedHost)) return true;
   try {
     const originHost = new URL(origin).host;
-    return originHost === host;
+    return originHost === host || (forwardedHost !== null && originHost === forwardedHost);
   } catch {
     return false;
   }

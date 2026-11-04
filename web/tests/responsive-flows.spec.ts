@@ -23,7 +23,7 @@ test.describe("Responsive User Flows & Learning Loop", () => {
     await langBtn.click();
 
     // Verify English text
-    await expect(page.getByText(/Today's Study Plan/i)).toBeVisible();
+    await expect(page.getByText(/Today's Study Plan/i).first()).toBeVisible();
     await expect(page.getByText(/Daily Streak/i)).toBeVisible();
 
     // Toggle back to Bangla

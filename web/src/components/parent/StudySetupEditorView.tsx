@@ -243,7 +243,7 @@ export const StudySetupEditorView: React.FC<StudySetupEditorViewProps> = ({
         {/* Blocked Observances from Catalog */}
         <div>
           <h3 style={{ fontSize: "var(--text-sm)", fontWeight: 600, marginBottom: "var(--space-2)" }}>
-            {t.parent.blockedObservances} (ধর্মীয় ও বিশেষ দিবস বিরতি)
+            {t.parent.blockedObservances} (বিশেষ দিবস ও ছুটির বিরতি)
           </h3>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
             {config.observance_catalog.map((obs) => {

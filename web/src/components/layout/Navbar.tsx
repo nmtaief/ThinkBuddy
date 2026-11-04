@@ -76,6 +76,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
         {/* Language switch */}
         <button
+          id="btn-toggle-lang"
+          data-testid="btn-toggle-lang"
           onClick={onToggleLang}
           className="btn-secondary touch-target"
           style={{ display: "flex", gap: "var(--space-1)", fontSize: "var(--text-sm)" }}
@@ -88,6 +90,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Theme switch */}
         <button
+          id="btn-toggle-theme"
+          data-testid="btn-toggle-theme"
           onClick={onToggleTheme}
           className="btn-secondary touch-target"
           style={{ width: 44, height: 44, padding: 0 }}

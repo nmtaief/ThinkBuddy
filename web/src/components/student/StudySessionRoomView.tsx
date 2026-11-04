@@ -375,26 +375,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Religious Blessing Banner */}
-      <div
-        className="card"
-        style={{
-          background: "linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(16, 185, 129, 0.10) 100%)",
-          border: "1px solid var(--color-border)",
-          padding: "var(--space-5) var(--space-6)",
-          borderRadius: "var(--radius-xl)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-1)" }}>
-          <Sparkles size={18} style={{ color: "var(--color-primary)" }} />
-          <span style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--color-primary)" }}>
-          </span>
-        </div>
-        <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 800, margin: "var(--space-1) 0" }}>
-        </h2>
-        <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
-        </p>
-      </div>
+
 
       {/* Chapter 3-Part Chunking & Textbook Citation Card */}
       <div
@@ -792,9 +773,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
           </span>
         </div>
 
-        {/* Dynamic Religious Note Prompt */}
-        <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", marginBottom: "var(--space-3)" }}>
-        </p>
+
 
         {/* Text Note Area */}
         <textarea
