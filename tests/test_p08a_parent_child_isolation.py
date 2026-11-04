@@ -157,3 +157,4 @@ async def test_real_backend_parent_isolation_and_immediate_revocation(
     )
     assert res_post_revoke_dashboard.status_code == 403
     assert res_post_revoke_dashboard.json()["error"]["code"] in ("FORBIDDEN_STUDENT_ACCESS", "FAMILY_ACCESS_DENIED")
+

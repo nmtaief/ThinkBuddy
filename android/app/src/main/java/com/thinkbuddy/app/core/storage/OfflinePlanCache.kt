@@ -52,3 +52,4 @@ object OfflinePlanCache {
         prefs.edit().remove(KEY_PLAN_DATA).apply()
     }
 }
+

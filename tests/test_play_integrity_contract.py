@@ -302,3 +302,25 @@ def test_device_db_attestation_blocks_downgrade() -> None:
         account_has_valid_attestation=True,
     )
     assert verdict == DeviceIntegrityVerdict.COMPROMISED
+
+def test_migration_0019_and_0020_reversibility() -> None:
+    """Verify migrations 0019 (nonce_hash and attestation) and 0020 (account attestation and flags) can be cleanly downgraded and upgraded."""
+    import subprocess
+    import sys
+
+    # Downgrade 2 steps back (from 0020 to 0018_reseed_admin_policy_ceilings)
+    res_down = subprocess.run(
+        [sys.executable, "-m", "alembic", "downgrade", "-2"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_down.returncode == 0, f"Alembic downgrade -2 failed: {res_down.stderr}"
+
+    # Upgrade back to head (0020)
+    res_up = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+    )
+    assert res_up.returncode == 0, f"Alembic upgrade head failed: {res_up.stderr}"
+

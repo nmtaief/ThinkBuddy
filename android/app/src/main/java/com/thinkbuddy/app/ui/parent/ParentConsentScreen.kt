@@ -264,3 +264,4 @@ private fun ConsentFeatureRow(title: String, description: String) {
         }
     }
 }
+
