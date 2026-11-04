@@ -129,7 +129,7 @@ data class StudentStudySettingsDto(
     @SerializedName("adaptive_mode") val adaptiveMode: String = "suggest", // suggest, auto_within_limits, manual
     @SerializedName("exam_name") val examName: String? = "অর্ধবার্ষিক মূল্যায়ন ২০২৬",
     @SerializedName("exam_date") val examDate: String? = "2026-12-15",
-    @SerializedName("subject_priorities") val subjectPriorities: Map<String, String> = mapOf("পদার্থবিজ্ঞান" to "high", "গণিত" to "normal"),
+    @SerializedName("subject_priorities") val subjectPriorities: Map<String, String> = mapOf("পদার্থবিজ্ঞান" to "main", "গণিত" to "normal"),
     @SerializedName("blocked_observance_keys") val blockedObservanceKeys: List<String> = listOf("eid_ul_fitr", "durga_puja", "pohela_boishakh"),
     @SerializedName("custom_blackout_dates") val customBlackoutDates: List<BlackoutDateDto> = emptyList(),
     @SerializedName("recurring_unavailable_blocks") val recurringUnavailableBlocks: List<UnavailableBlockDto> = emptyList(),

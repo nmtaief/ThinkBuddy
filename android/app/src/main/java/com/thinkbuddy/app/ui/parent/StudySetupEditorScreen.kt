@@ -74,6 +74,7 @@ import com.thinkbuddy.app.core.network.ParentRepository
 import com.thinkbuddy.app.core.network.StudentStudySettingsDto
 import com.thinkbuddy.app.core.network.UpdateStudySettingsRequest
 import com.thinkbuddy.app.core.utils.BengaliDigits
+import java.util.Calendar
 import com.thinkbuddy.app.ui.theme.AmberGold
 import com.thinkbuddy.app.ui.theme.BackgroundDark
 import com.thinkbuddy.app.ui.theme.BorderDark
@@ -131,15 +132,56 @@ fun StudySetupEditorScreen(
     var isSubjectPrioritiesLocked by remember { mutableStateOf(false) }
 
     // Section Controls from §3
+    val calendar = remember { Calendar.getInstance() }
     var examName by remember { mutableStateOf("অর্ধবার্ষিক মূল্যায়ন ২০২৬") }
     var examDate by remember { mutableStateOf("2026-12-15") }
     var adaptiveMode by remember { mutableStateOf("suggest") } // suggest, auto_within_limits, manual
+
+    val datePickerDialog = remember(context) {
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                examDate = String.format("%04d-%02d-%02d", year, month + 1, dayOfMonth)
+            },
+            calendar.get(Calendar.YEAR),
+            calendar.get(Calendar.MONTH),
+            calendar.get(Calendar.DAY_OF_MONTH)
+        ).apply {
+            datePicker.minDate = System.currentTimeMillis()
+        }
+    }
+
+    val startTimePickerDialog = remember(context, studyWindowStart) {
+        val parts = studyWindowStart.split(":")
+        val h = parts.getOrNull(0)?.toIntOrNull() ?: 17
+        val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        android.app.TimePickerDialog(context, { _, hour, minute ->
+            studyWindowStart = String.format("%02d:%02d", hour, minute)
+        }, h, m, true)
+    }
+
+    val endTimePickerDialog = remember(context, studyWindowEnd) {
+        val parts = studyWindowEnd.split(":")
+        val h = parts.getOrNull(0)?.toIntOrNull() ?: 21
+        val m = parts.getOrNull(1)?.toIntOrNull() ?: 30
+        android.app.TimePickerDialog(context, { _, hour, minute ->
+            studyWindowEnd = String.format("%02d:%02d", hour, minute)
+        }, h, m, true)
+    }
+
+    val recommendedSchoolMinutes = when (classBand) {
+        "6-8" -> 90
+        "9-10" -> 150
+        "11-12" -> 210
+        else -> 120
+    }
+
     var subjectPriorities by remember {
         mutableStateOf(
             mapOf(
-                "পদার্থবিজ্ঞান" to "high",
+                "পদার্থবিজ্ঞান" to "difficult",
                 "রসায়ন" to "normal",
-                "সাধারণ গণিত" to "high",
+                "সাধারণ গণিত" to "main",
                 "ইংরেজি" to "normal"
             )
         )
@@ -399,7 +441,15 @@ fun StudySetupEditorScreen(
                                 onValueChange = { examDate = it },
                                 label = { Text("পরীক্ষার তারিখ (YYYY-MM-DD)") },
                                 singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
+                                readOnly = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { datePickerDialog.show() },
+                                trailingIcon = {
+                                    IconButton(onClick = { datePickerDialog.show() }) {
+                                        Icon(Icons.Default.DateRange, contentDescription = "তারিখ নির্বাচন করুন", tint = TealPrimary)
+                                    }
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = TealPrimary, unfocusedBorderColor = BorderDark)
                             )
@@ -513,6 +563,25 @@ fun StudySetupEditorScreen(
                                     inactiveTrackColor = BorderDark
                                 )
                             )
+                            if (schoolDayMinutes.toInt() > recommendedSchoolMinutes) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AmberGold.copy(alpha = 0.15f))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "সতর্কতা: শ্রেণি $classBand-এর প্রস্তাবিত দৈনিক সময় ${BengaliDigits.fromEnglish(recommendedSchoolMinutes)} মিনিট। দীর্ঘ সময় শিক্ষার্থীদের ক্লান্ত করতে পারে।",
+                                        color = AmberGold,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -549,6 +618,26 @@ fun StudySetupEditorScreen(
                                     inactiveTrackColor = BorderDark
                                 )
                             )
+                            val recommendedHolidayMinutes = (recommendedSchoolMinutes * 1.5).toInt()
+                            if (holidayMinutes.toInt() > recommendedHolidayMinutes) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AmberGold.copy(alpha = 0.15f))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "সতর্কতা: ছুটির দিনে প্রস্তাবিত সময় ${BengaliDigits.fromEnglish(recommendedHolidayMinutes)} মিনিট। শিক্ষার্থীর বিশ্রাম ও বিনোদনের সুযোগ রাখা জরুরি।",
+                                        color = AmberGold,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -574,10 +663,10 @@ fun StudySetupEditorScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 TimeBox(label = "শুরুর সময়", time = studyWindowStart, modifier = Modifier.weight(1f)) {
-                                    studyWindowStart = if (studyWindowStart == "17:00") "18:00" else "17:00"
+                                    startTimePickerDialog.show()
                                 }
                                 TimeBox(label = "শেষের সময়", time = studyWindowEnd, modifier = Modifier.weight(1f)) {
-                                    studyWindowEnd = if (studyWindowEnd == "21:30") "22:00" else "21:30"
+                                    endTimePickerDialog.show()
                                 }
                             }
                         }
@@ -606,7 +695,7 @@ fun StudySetupEditorScreen(
                                 ) {
                                     Text(subName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf("high" to "উচ্চ", "normal" to "সাধারণ", "low" to "কম").forEach { (levelKey, levelLabel) ->
+                                        listOf("normal" to "সাধারণ (Normal)", "main" to "প্রধান (Main)", "difficult" to "কঠিন (Difficult)").forEach { (levelKey, levelLabel) ->
                                             val isSel = currentPriority == levelKey
                                             Box(
                                                 modifier = Modifier

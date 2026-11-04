@@ -269,7 +269,7 @@ class AiChatSecurityLifecycleTest {
         assertNotNull("UUID token must be generated", k1)
         assertNotNull("UUID token must be generated", k2)
         assertTrue("UUID token must be non-empty", k1.isNotEmpty())
-        assertNotEquals("Different requests must carry unique UUID tokens", k1, k2)
+        assertTrue("Different requests must carry unique UUID tokens", k1 != k2)
     }
 
     // -------------------------------------------------------------------------
