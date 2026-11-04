@@ -140,6 +140,10 @@ class CoreSettings(BaseSettings):
         default=True,
         description="Global feature flag for Web Application & BFF Proxy (P08).",
     )
+    FEATURE_ANDROID_APP: bool = Field(
+        default=True,
+        description="Global feature flag for Native Android Application (P08a).",
+    )
 
     # AI Planner Integration (P06a)
     AI_PLANNER_ENABLED: bool = Field(

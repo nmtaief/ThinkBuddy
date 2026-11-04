@@ -173,6 +173,7 @@ async def get_client_config(
             "rag_chat": settings.FEATURE_RAG_CHAT_ENABLED,
             "progress_mastery": settings.FEATURE_PROGRESS_MASTERY_ENABLED,
             "spaced_revision": settings.FEATURE_SPACED_REVISION_ENABLED,
+            "android_client": settings.FEATURE_ANDROID_APP,
         },
         "entitlements": {
             "daily_chat_quota": 50,
