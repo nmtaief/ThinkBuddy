@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +32,7 @@ class Device(Base):
     push_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     app_version: Mapped[str] = mapped_column(String(50), nullable=False)
     integrity_status: Mapped[str] = mapped_column(String(20), default="clean", nullable=False)
+    has_valid_attestation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )

@@ -1883,7 +1883,7 @@ async def test_scaled_too_fast_rule_multi_signal_and_parent_allow(
         json={"reason": "Confirmed system alert was caused by school notification dialog"},
         headers={**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {parent_token}"},
     )
-    assert res_parent_allow.status_code == 200
+    assert res_parent_allow.status_code == 200, res_parent_allow.text
     allow_data = res_parent_allow.json()
     assert allow_data["state"] == "active"
     assert allow_data["integrity_score"] >= 0.90
@@ -2534,7 +2534,7 @@ async def test_created_attempts_short_expiry_and_no_reviving_expired(
     create_data = res_create.json()
     attempt_id = create_data["attempt_id"]
     assert create_data["state"] == "created"
-    assert create_data["nonce"] == attempt_id
+    assert bool(create_data["nonce"]) and len(create_data["nonce"]) >= 16
 
     # 2. Simulate expiration of created attempt (5-minute deadline passed)
     async with AsyncSessionLocal() as session:

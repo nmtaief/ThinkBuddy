@@ -129,8 +129,10 @@ class QuizGradingService:
         final_score = round((total_points / max_possible) * 100.0, 1) if max_possible > 0 else 0.0
         attempt.score = final_score
 
-        # Reduced mastery weight scaling for unverified devices (0.7x)
+        # Reduced mastery weight scaling for unverified devices (0.7x) and lowest weight on account downgrade (0.2x)
+        raw_weight = getattr(attempt, "mastery_weight", 1.0)
         device_mult = 0.7 if getattr(attempt, "unverified_device", False) else 1.0
+        device_mult = min(device_mult, raw_weight)
 
         # Emit learning signals for mistakes and slow responses idempotently via ON CONFLICT DO NOTHING
         for it in items:

@@ -27,16 +27,15 @@ class CoreSettings(BaseSettings):
     CORE_PORT: int = Field(default=8001, description="Core port")
 
     # Reverse proxy security (restricted to specific web/gateway addresses, no whole private ranges)
+    # Reverse proxy security: Core trusts strictly the Gateway's specific fixed IP/loopback.
+    # No whole private ranges and no container hostnames.
     TRUSTED_PROXIES: list[str] = Field(
         default=[
             "127.0.0.1",
             "::1",
-            "core",
-            "gateway",
-            "web",
-            "thinkbuddy-web",
+            "172.29.0.2",  # Gateway fixed address in internal network
         ],
-        description="Trusted reverse proxy IP addresses or container hostnames",
+        description="Core trusted reverse proxy IP addresses (strictly Gateway only, no hostnames)",
     )
 
     # Internal service authentication

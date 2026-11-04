@@ -628,6 +628,9 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
             "0015_p07_parent_notifications",
             "0016_p07_delivery_and_rollout",
             "0017_p07_tail_enhancements",
+            "0018_reseed_admin_policy_ceilings",
+            "0019_p08a_nonce_hash_and_attestation",
+            "0020_p08a_account_attestation_and_flags",
         )
 
         # 3. Test policy directly against live Postgres DB rows

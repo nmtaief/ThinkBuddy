@@ -22,18 +22,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def is_peer_trusted_proxy(peer_ip: str) -> bool:
-    """Check if peer is among configured trusted proxy hosts or specific CIDR addresses.
+def is_peer_trusted_proxy(peer_ip: str, trusted_list: list[str] | None = None) -> bool:
+    """Check if peer is among configured trusted proxy addresses or dedicated network CIDRs.
 
     Strictly restricted to explicit web container / gateway addresses.
     No whole private ranges (e.g. 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, or ip.is_private)
-    are trusted without explicit configuration.
+    and no hostnames are trusted.
     """
-    if peer_ip in settings.TRUSTED_PROXIES:
+    if trusted_list is None:
+        try:
+            from gateway.config import settings as gw_settings
+            trusted_list = list(gw_settings.GATEWAY_TRUSTED_PROXIES)
+        except Exception:
+            trusted_list = list(settings.TRUSTED_PROXIES)
+
+    if peer_ip in trusted_list:
         return True
     try:
         ip = ipaddress.ip_address(peer_ip)
-        for proxy_entry in settings.TRUSTED_PROXIES:
+        for proxy_entry in trusted_list:
             if "/" in proxy_entry:
                 try:
                     if ip in ipaddress.ip_network(proxy_entry, strict=False):

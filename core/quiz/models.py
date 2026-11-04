@@ -176,7 +176,11 @@ class QuizAttempt(Base):
     invalid_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pause_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    unverified_device: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    unverified_device: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    nonce_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mastery_weight: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    parent_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    parent_flag_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

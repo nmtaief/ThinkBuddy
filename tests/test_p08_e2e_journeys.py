@@ -18,7 +18,8 @@ from core.common.rate_limit import RateLimiter
 
 CLIENT_HEADERS_WEB = {
     "X-Client-Platform": "web",
-    "X-Client-Form-Factor": "expanded",
+    "X-Client-Form-Factor": "desktop",
+    "Accept-Language": "bn",
     "X-App-Version": "1.0.0",
     "X-Device-Id": "web_test_device_01",
     "X-Forwarded-For": "203.0.113.100, 127.0.0.1",
@@ -81,6 +82,7 @@ async def test_p08_e2e_parent_and_student_journeys(gateway_client: AsyncClient) 
     )
     assert res_s_auth.status_code == 200, res_s_auth.text
     student_token = res_s_auth.json()["access_token"]
+    student_id = res_s_auth.json().get("user", {}).get("id") or student_id
     student_headers = {**CLIENT_HEADERS_WEB, "Authorization": f"Bearer {student_token}"}
 
     # Student redeems link code directly
@@ -102,11 +104,11 @@ async def test_p08_e2e_parent_and_student_journeys(gateway_client: AsyncClient) 
     assert res_today.status_code == 200, res_today.text
     today_data = res_today.json()
     assert "date" in today_data
-    assert "tasks" in today_data
+    assert "study_tasks" in today_data
 
     # If tasks exist, student marks one as completed
-    if today_data["tasks"]:
-        first_task_id = today_data["tasks"][0]["id"]
+    if today_data.get("study_tasks"):
+        first_task_id = today_data["study_tasks"][0]["id"]
         res_task = await gateway_client.patch(
             f"/v1/tasks/{first_task_id}",
             json={"status": "completed"},
@@ -120,8 +122,10 @@ async def test_p08_e2e_parent_and_student_journeys(gateway_client: AsyncClient) 
     res_cr = await gateway_client.post(
         f"/v1/students/{student_id}/study-settings/change-requests",
         json={
-            "requested_school_day_minutes": 120,
-            "reason": "বিদ্যালয়ের বার্ষিক ক্রীড়া প্রতিযোগিতা অনুশীলনের জন্য সাময়িক কমানোর অনুরোধ।",
+            "requested_changes": {
+                "requested_school_day_minutes": 120,
+                "reason": "বিদ্যালয়ের বার্ষিক ক্রীড়া প্রতিযোগিতা অনুশীলনের জন্য সাময়িক কমানোর অনুরোধ।",
+            }
         },
         headers=student_headers,
     )
@@ -143,6 +147,6 @@ async def test_p08_e2e_parent_and_student_journeys(gateway_client: AsyncClient) 
     res_assessed_blocked = await gateway_client.post(
         f"/v1/quizzes/{dummy_quiz_id}/attempts",
         json={"mode": "assessed"},
-        headers=CLIENT_HEADERS_WEB,
+        headers=student_headers,
     )
     assert res_assessed_blocked.status_code in (400, 403, 404, 422)

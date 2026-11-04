@@ -43,6 +43,18 @@ class GatewaySettings(BaseSettings):
         description="Shared secret for gateway-to-core communication",
     )
 
+    # Reverse proxy security: Gateway trusts strictly the Web container's fixed address / dedicated network and production edge proxy.
+    # No whole private ranges and no container hostnames.
+    GATEWAY_TRUSTED_PROXIES: list[str] = Field(
+        default=[
+            "127.0.0.1",
+            "::1",
+            "172.28.0.3",     # Web container fixed address
+            "172.28.0.0/29",  # Dedicated edge network for web container
+        ],
+        description="Gateway trusted reverse proxy IP addresses (Web container & production edge proxy only, no hostnames)",
+    )
+
     # Redis
     REDIS_URL: str = Field(
         default="redis://127.0.0.1:6379/0",

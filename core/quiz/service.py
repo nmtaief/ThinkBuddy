@@ -11,6 +11,8 @@ Per docs/05_SECURE_QUIZ.md:
 
 from __future__ import annotations
 
+import hashlib
+
 import logging
 import random
 import secrets
@@ -25,7 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.quiz.builder import QuizBuilderService
 from core.quiz.grading import QuizGradingService
+from core.auth.models import User
+from core.devices.models import Device
 from core.quiz.integrity import (
+    ATTESTED_DEVICES,
     DeviceIntegrityVerdict,
     IntegrityEngine,
     check_and_auto_resume_pause,
@@ -164,6 +169,9 @@ class QuizService:
         # Created attempts get a short expiry (5 minutes) per P04 requirement 6
         deadline = now + timedelta(minutes=5)
         attempt_id = uuid.uuid4()
+        # Generate random single-use server nonce stored hashed
+        raw_nonce = secrets.token_urlsafe(32)
+        nonce_hash = hashlib.sha256(raw_nonce.encode("utf-8")).hexdigest()
         attempt = QuizAttempt(
             id=attempt_id,
             quiz_id=quiz.id,
@@ -176,7 +184,9 @@ class QuizService:
             deadline_at=deadline,
             integrity_score=1.0,
             unverified_device=False,
+            nonce_hash=nonce_hash,
         )
+        setattr(attempt, "_raw_nonce", raw_nonce)
         try:
             self.db.add(attempt)
             await self.db.flush()
@@ -264,13 +274,33 @@ class QuizService:
             init_integrity_score = 1.0
             is_unverified = False
             if quiz.mode == "assessed":
+                # Check DB for account and device attestation history
+                usr_stmt = select(User).where(User.id == student_id)
+                u_res = await self.db.execute(usr_stmt)
+                u_obj = u_res.scalar_one_or_none()
+                account_attested = bool(u_obj and u_obj.has_valid_attestation)
+
+                target_dev_id = device_id or attempt.device_id
+                device_attested = target_dev_id in ATTESTED_DEVICES if target_dev_id else False
+                if target_dev_id and not device_attested:
+                    try:
+                        d_uuid = uuid.UUID(str(target_dev_id))
+                        d_res = await self.db.execute(select(Device).where(Device.id == d_uuid))
+                        d_obj = d_res.scalar_one_or_none()
+                        device_attested = bool(d_obj and d_obj.has_valid_attestation)
+                    except ValueError:
+                        pass
+
                 attestation = evaluate_device_attestation(
                     platform=client_platform,
-                    device_id=device_id or attempt.device_id,
+                    device_id=target_dev_id,
                     integrity_verdict=integrity_verdict,
                     headers=headers,
-                    expected_nonce=str(attempt.id),
+                    expected_nonce=str(attempt.id) if not attempt.nonce_hash else None,
+                    expected_nonce_hash=attempt.nonce_hash,
                     attempt_id=attempt.id,
+                    device_has_valid_attestation=device_attested,
+                    account_has_valid_attestation=account_attested,
                 )
                 if attestation == DeviceIntegrityVerdict.COMPROMISED:
                     raise HTTPException(
@@ -283,18 +313,43 @@ class QuizService:
                             ),
                         },
                     )
+                elif attestation == DeviceIntegrityVerdict.LOW_TRUST_ACCOUNT_FLAGGED:
+                    init_integrity_score = 0.70
+                    is_unverified = True
+                    attempt.mastery_weight = 0.2
+                    attempt.parent_flag = True
+                    attempt.parent_flag_reason = "downgrade_unsupported_claim"
+                    self.db.add(AttemptEvent(
+                        attempt_id=attempt.id,
+                        event_type="downgrade_unsupported_flag",
+                        data={"reason": "account_previously_attested", "device_id": str(target_dev_id)}
+                    ))
                 elif attestation == DeviceIntegrityVerdict.LOW_TRUST:
                     init_integrity_score = 0.85
                     is_unverified = True
                 elif attestation == DeviceIntegrityVerdict.UNVERIFIED:
                     init_integrity_score = 0.90
                     is_unverified = True
+                elif attestation in (DeviceIntegrityVerdict.SECURE, DeviceIntegrityVerdict.BASIC):
+                    if u_obj:
+                        u_obj.has_valid_attestation = True
+                    if target_dev_id:
+                        ATTESTED_DEVICES.add(str(target_dev_id))
+                        try:
+                            d_uuid = uuid.UUID(str(target_dev_id))
+                            d_res = await self.db.execute(select(Device).where(Device.id == d_uuid))
+                            d_obj = d_res.scalar_one_or_none()
+                            if d_obj:
+                                d_obj.has_valid_attestation = True
+                        except ValueError:
+                            pass
 
             attempt.state = "active"
             attempt.started_at = now
             attempt.deadline_at = now + timedelta(seconds=quiz.time_limit_s)
             attempt.integrity_score = init_integrity_score
             attempt.unverified_device = is_unverified
+            attempt.nonce_hash = None  # Single-use nonce consumed upon activation
             await self.db.commit()
             await self.db.refresh(attempt)
 
@@ -883,7 +938,6 @@ class QuizService:
                 ParentStudentLink.parent_id == user_id,
                 ParentStudentLink.student_id == attempt.student_id,
                 ParentStudentLink.status == "active",
-                ParentStudentLink.revoked_at.is_(None),
             )
             link_res = await self.db.execute(link_stmt)
             if not link_res.scalar_one_or_none():

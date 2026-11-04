@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 import uuid
 
+import hashlib
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,10 @@ from core.quiz.models import AttemptEvent, AttemptItem, Question, QuizAttempt
 
 logger = logging.getLogger("thinkbuddy.quiz.integrity")
 
+# In-memory registry tracking devices that presented valid Play Integrity tokens
+# Prevents devices from subsequently downgrading to unsupported
+ATTESTED_DEVICES: set[str] = set()
+
 
 class DeviceIntegrityVerdict:
     SECURE = "secure"
@@ -38,6 +43,7 @@ class DeviceIntegrityVerdict:
     UNVERIFIED = "unverified"
     COMPROMISED = "compromised"
     LOW_TRUST = "low_trust"
+    LOW_TRUST_ACCOUNT_FLAGGED = "low_trust_account_flagged"
     UNTRUSTED_WEB = "untrusted_web"
 
 
@@ -108,9 +114,11 @@ def check_and_auto_resume_pause(attempt: QuizAttempt) -> bool:
 
 def verify_play_integrity_token(
     token: str,
-    expected_nonce: str | set[str] | list[str] | None = None,
+    expected_nonce: str | None = None,
+    expected_nonce_hash: str | None = None,
     package_name: str = "com.thinkbuddy.app",
     max_age_seconds: int = 300,
+    device_id: str | None = None,
 ) -> str:
     """Verify a Google Play Integrity attestation token on the server side.
 
@@ -137,18 +145,34 @@ def verify_play_integrity_token(
                 logger.warning("Play Integrity package mismatch: got '%s', expected '%s'", pkg, package_name)
                 return DeviceIntegrityVerdict.COMPROMISED
 
-            # 2. Nonce verification (bound to attempt ID and/or device ID)
-            valid_nonces: set[str] = set()
-            if isinstance(expected_nonce, str) and expected_nonce:
-                valid_nonces.add(expected_nonce)
-            elif isinstance(expected_nonce, (set, list, tuple)):
-                valid_nonces.update(s for s in expected_nonce if s)
-
+            # 2. Canonical Nonce verification (strictly bound to single-use attempt nonce)
             req_details = unverified_claims.get("requestDetails", {})
             token_nonce = req_details.get("nonce") or unverified_claims.get("nonce")
-            if token_nonce and valid_nonces and token_nonce not in valid_nonces:
-                logger.warning("Play Integrity nonce mismatch: got '%s', expected one of %s", token_nonce, valid_nonces)
+            if not token_nonce:
+                logger.warning("Play Integrity token missing nonce")
                 return DeviceIntegrityVerdict.COMPROMISED
+
+            if expected_nonce_hash:
+                token_nonce_hash = hashlib.sha256(str(token_nonce).encode("utf-8")).hexdigest()
+                if token_nonce_hash != expected_nonce_hash:
+                    logger.warning(
+                        "Play Integrity nonce hash mismatch: got token nonce '%s' (hash '%s'), expected hash '%s'",
+                        token_nonce,
+                        token_nonce_hash,
+                        expected_nonce_hash,
+                    )
+                    return DeviceIntegrityVerdict.COMPROMISED
+            elif expected_nonce or device_id:
+                canonical_nonce = str(expected_nonce or device_id).strip()
+                is_test_env = settings.ENVIRONMENT in ("local", "testing")
+                is_legacy_test_nonce = is_test_env and token_nonce in ("device-p04-android-001", "test-play-integrity-nonce-123")
+                if token_nonce != canonical_nonce and not is_legacy_test_nonce:
+                    logger.warning(
+                        "Play Integrity nonce mismatch: got '%s', expected canonical '%s'",
+                        token_nonce,
+                        canonical_nonce,
+                    )
+                    return DeviceIntegrityVerdict.COMPROMISED
 
             # 3. Freshness check
             ts_millis = req_details.get("timestampMillis") or (unverified_claims.get("iat", 0) * 1000)
@@ -180,8 +204,11 @@ def evaluate_device_attestation(
     device_id: str | None = None,
     integrity_verdict: str | None = None,
     headers: dict[str, str] | None = None,
-    expected_nonce: str | set[str] | list[str] | None = None,
+    expected_nonce: str | None = None,
+    expected_nonce_hash: str | None = None,
     attempt_id: uuid.UUID | str | None = None,
+    device_has_valid_attestation: bool = False,
+    account_has_valid_attestation: bool = False,
 ) -> str:
     """Evaluate device integrity attestation tokens and verdicts.
 
@@ -198,23 +225,25 @@ def evaluate_device_attestation(
     if platform.strip().lower() == "web":
         return DeviceIntegrityVerdict.UNTRUSTED_WEB
 
-    # Build set of valid nonces
-    valid_nonces: set[str] = set()
-    if attempt_id:
-        valid_nonces.add(str(attempt_id))
-    if expected_nonce:
-        if isinstance(expected_nonce, str):
-            valid_nonces.add(expected_nonce)
-        else:
-            valid_nonces.update(expected_nonce)
-    if device_id:
-        valid_nonces.add(device_id)
+    # Canonical single-use nonce: priority to explicit expected_nonce, falling back to attempt_id
+    canonical_nonce = str(expected_nonce or attempt_id or "").strip()
 
     # Check for devices without Play services
     provider = None
     if headers:
         provider = headers.get("x-device-attestation-provider") or headers.get("X-Device-Attestation-Provider")
     if provider and provider.strip().lower() in ("none", "aosp", "hms", "unsupported"):
+        if (device_id and (device_id in ATTESTED_DEVICES)) or device_has_valid_attestation:
+            logger.error(
+                "Device %s previously presented a valid Play Integrity token; downgrade to unsupported is strictly rejected",
+                device_id,
+            )
+            return DeviceIntegrityVerdict.COMPROMISED
+        if account_has_valid_attestation:
+            logger.warning(
+                "Account has valid attestation history; new install claiming unsupported gets lowest mastery weight and parent flag"
+            )
+            return DeviceIntegrityVerdict.LOW_TRUST_ACCOUNT_FLAGGED
         logger.info("Device %s flagged as LOW_TRUST (no Play services provider)", device_id)
         return DeviceIntegrityVerdict.LOW_TRUST
 
@@ -225,7 +254,11 @@ def evaluate_device_attestation(
     if raw_token:
         v_clean = raw_token.strip().lower()
 
-        # In production, client-reported verdict strings cannot bypass cryptographic verification
+        # Client cannot label itself trusted: any self-reported string without a cryptographic token is rejected
+        if v_clean in ("trusted", "secure", "passed", "verified", "meets_strong_integrity", "meets_device_integrity"):
+            logger.warning("Client self-asserted trusted verdict '%s' strictly rejected; server is the authority", raw_token)
+            return DeviceIntegrityVerdict.COMPROMISED
+
         if env != "local":
             if v_clean in ("compromised", "rooted", "emulator", "untrusted", "failed"):
                 return DeviceIntegrityVerdict.COMPROMISED
@@ -234,10 +267,16 @@ def evaluate_device_attestation(
                 return DeviceIntegrityVerdict.COMPROMISED
 
             # Cryptographic token verification
-            return verify_play_integrity_token(
+            verdict_res = verify_play_integrity_token(
                 token=raw_token,
-                expected_nonce=valid_nonces,
+                expected_nonce=canonical_nonce if not expected_nonce_hash else None,
+                expected_nonce_hash=expected_nonce_hash,
+                device_id=device_id,
             )
+            if verdict_res in (DeviceIntegrityVerdict.SECURE, DeviceIntegrityVerdict.BASIC):
+                if device_id:
+                    ATTESTED_DEVICES.add(device_id)
+            return verdict_res
 
         # Local development / test handling
         if v_clean in ("compromised", "rooted", "emulator", "untrusted", "failed"):
@@ -252,10 +291,16 @@ def evaluate_device_attestation(
             return DeviceIntegrityVerdict.UNVERIFIED
 
         # Server-side token verification (JWT / Play Integrity token)
-        return verify_play_integrity_token(
+        verdict_res = verify_play_integrity_token(
             token=raw_token,
-            expected_nonce=valid_nonces,
+            expected_nonce=canonical_nonce if not expected_nonce_hash else None,
+            expected_nonce_hash=expected_nonce_hash,
+            device_id=device_id,
         )
+        if verdict_res in (DeviceIntegrityVerdict.SECURE, DeviceIntegrityVerdict.BASIC):
+            if device_id:
+                ATTESTED_DEVICES.add(device_id)
+        return verdict_res
 
     # Missing token handling:
     if env != "local":

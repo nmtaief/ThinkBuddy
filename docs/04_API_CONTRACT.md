@@ -72,8 +72,9 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
-- `POST /quizzes/{id}/attempts/create` – create attempt in state `created` with short 5-minute expiry; returns `attempt_id`, `state="created"`, `nonce` (bound to `attempt_id`) for client to request Play Integrity attestation.
-- `POST /quizzes/{id}/attempts` – start attempt or activate a `created` attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
+- `POST /quizzes/{id}/attempts/create` – create attempt in state `created` with short 5-minute expiry; generates a random single-use server nonce (stored hashed on server) and returns `attempt_id`, `state="created"`, `nonce`, `deadline_at` for client to request Play Integrity attestation.
+- `POST /attempts/{id}/attest` – attest and activate a `created` attempt using Play Integrity token bound to the random single-use server nonce; transitions state from `created` to `active`, consumes the nonce, enforces device downgrade protection (a device that has presented a valid token cannot later downgrade to `unsupported`), and returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item`.
+- `POST /quizzes/{id}/attempts` – start attempt directly or activate a `created` attempt; returns `attempt_id`, `deadline_at`, `attempt_token`, `current_item` with opaque options and per-item nonce.
   - Restrictions: Web platform practice-only (403 `WEB_PLATFORM_PRACTICE_ONLY`); one-active-assessed-attempt limit across all open states (`created`, `active`, `warned`, `paused`) via 409 `ACTIVE_ATTEMPT_ALREADY_EXISTS`.
   - Device Integrity: Evaluates Play Integrity tokens with package name (`com.thinkbuddy.app`), nonce bound to `attempt_id`, and freshness (< 5 min) checks; in production, client-reported verdict fields are rejected in favor of cryptographic verification; unverified or self-declared-provider devices receive reduced mastery weight (0.7x) and an `unverified_device` flag.
   - Dual Rate limits: 5 requests / min per authenticated user plus higher 25 requests / min per-IP ceiling.

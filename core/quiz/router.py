@@ -128,10 +128,11 @@ async def create_quiz_attempt_endpoint(
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
     )
+    raw_nonce = getattr(attempt, "_raw_nonce", str(attempt.id))
     return {
         "attempt_id": str(attempt.id),
         "state": attempt.state,
-        "nonce": str(attempt.id),
+        "nonce": raw_nonce,
         "deadline_at": attempt.deadline_at.isoformat() if attempt.deadline_at else None,
         "attempt_token": attempt.attempt_token,
     }
@@ -169,6 +170,45 @@ async def start_quiz_attempt(
         integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
         headers=dict(request.headers),
         attempt_id=payload.attempt_id,
+    )
+
+
+@router.post(
+    "/attempts/{attempt_id}/attest",
+    response_model=StartAttemptResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def attest_quiz_attempt(
+    attempt_id: uuid.UUID,
+    payload: StartAttemptRequest,
+    current_user: Annotated[User, Depends(require_role("student"))],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    request: Request,
+    x_client_platform: str = Header("android", alias="X-Client-Platform"),
+    x_device_id: str | None = Header(None, alias="X-Device-Id"),
+    x_device_integrity: str | None = Header(None, alias="X-Device-Integrity"),
+) -> StartAttemptResponse:
+    """Attest and activate a created quiz attempt using Play Integrity token.
+
+    Moves attempt state from 'created' to 'active'.
+    Validates single-use random server nonce and enforces device downgrade prevention.
+    """
+    service = QuizService(db)
+    attempt_res = await db.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))
+    attempt = attempt_res.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+        )
+    return await service.start_attempt(
+        quiz_id=attempt.quiz_id,
+        student_id=current_user.id,
+        client_platform=x_client_platform,
+        device_id=payload.device_id or x_device_id,
+        integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
+        headers=dict(request.headers),
+        attempt_id=attempt_id,
     )
 
 
