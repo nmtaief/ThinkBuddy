@@ -1,0 +1,57 @@
+# Caddyfile for ThinkBuddy Production Reverse Proxy
+{
+    email ops@thinkbuddy.com
+    admin off
+}
+
+# Production Ingress
+api.thinkbuddy.com, {$PUBLIC_DOMAIN:localhost} {
+    encode zstd gzip
+
+    # Health check bypass for load balancer
+    handle /healthz {
+        respond "OK" 200
+    }
+
+    # Prometheus metrics endpoint (internal network only)
+    handle /metrics {
+        @internal remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/32
+        handle @internal {
+            reverse_proxy gateway:8000
+        }
+        respond "Forbidden" 403
+    }
+
+    # Server-Sent Events (SSE) AI tutoring chat streaming - flush immediately, no buffering
+    handle /v1/chat/messages* {
+        reverse_proxy gateway:8000 {
+            flush_interval -1
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_down Cache-Control "no-cache, no-transform"
+            header_down X-Accel-Buffering "no"
+        }
+    }
+
+    # All API endpoints routed to Gateway
+    handle /* {
+        reverse_proxy gateway:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Hardened Security Headers
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Cross-Origin-Opener-Policy "same-origin"
+        -Server
+    }
+}

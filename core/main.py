@@ -11,7 +11,9 @@ from core.common.auth import verify_internal_service_token
 from core.common.config import settings
 from core.common.database import check_database_ready
 from core.common.logging import RequestIDMiddleware, request_id_ctx, setup_logging
+from core.common.metrics import metrics_endpoint, metrics_middleware
 from core.common.redis import check_redis_ready, close_redis
+from core.common.sentry import init_sentry
 from core.common.telemetry import setup_telemetry
 
 # Setup structured logging
@@ -21,6 +23,10 @@ setup_logging(service_name=settings.OTEL_SERVICE_NAME, log_level=settings.LOG_LE
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown hooks."""
+    init_sentry(
+        dsn=getattr(settings, "SENTRY_DSN", None),
+        environment=settings.ENVIRONMENT,
+    )
     setup_telemetry(
         service_name=settings.OTEL_SERVICE_NAME,
         enabled=settings.OTEL_ENABLED,
@@ -44,6 +50,13 @@ app = FastAPI(
 
 # Correlation ID and structured HTTP logging middleware
 app.add_middleware(RequestIDMiddleware)
+app.middleware("http")(metrics_middleware)
+
+
+@app.get("/metrics", tags=["Observability"])
+async def get_metrics() -> Any:
+    """Prometheus metrics scrape endpoint."""
+    return metrics_endpoint()
 
 
 @app.get("/healthz", tags=["Health"])

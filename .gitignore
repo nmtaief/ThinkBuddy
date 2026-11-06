@@ -70,6 +70,7 @@ venv.bak/
 *.sqlite3
 *.db
 local_data/
+backups/
 
 # OS
 .DS_Store

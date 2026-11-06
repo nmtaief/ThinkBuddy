@@ -1,0 +1,90 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "API Request Rate (req/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(thinkbuddy_http_requests_total[1m])) by (status_code)",
+          "legendFormat": "Status {{status_code}}"
+        }
+      ]
+    },
+    {
+      "title": "API Latency p95 / p99 (Target: Non-Chat < 400ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(thinkbuddy_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 Latency"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(thinkbuddy_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99 Latency"
+        }
+      ]
+    },
+    {
+      "title": "Chat Streaming First-Token Latency (Target: < 2.5s p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(thinkbuddy_chat_first_token_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95 First Token"
+        }
+      ]
+    },
+    {
+      "title": "LLM Serving Cost Tracking ($ USD)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(thinkbuddy_llm_cost_usd_total) by (model)",
+          "legendFormat": "{{model}} Cost ($)"
+        }
+      ]
+    },
+    {
+      "title": "Active Quiz Attempts (Assessed vs Practice)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "thinkbuddy_quiz_attempts_active",
+          "legendFormat": "{{mode}} Mode"
+        }
+      ]
+    },
+    {
+      "title": "Daily Quota Exhaustions",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(thinkbuddy_chat_quota_exhausted_total[5m])) by (class_band)",
+          "legendFormat": "Class {{class_band}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["thinkbuddy", "production", "beta"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ThinkBuddy Production Observability Dashboard",
+  "version": 1
+}

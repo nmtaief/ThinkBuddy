@@ -9,7 +9,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from core.common.logging import RequestIDMiddleware, request_id_ctx, setup_logging
+from core.common.metrics import metrics_endpoint, metrics_middleware
 from core.common.redis import check_redis_ready, close_redis
+from core.common.sentry import init_sentry
 from core.common.telemetry import setup_telemetry
 from gateway.client import core_client
 from gateway.config import settings
@@ -23,6 +25,10 @@ setup_logging(service_name=settings.OTEL_SERVICE_NAME, log_level=settings.LOG_LE
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown hooks."""
+    init_sentry(
+        dsn=getattr(settings, "SENTRY_DSN", None),
+        environment=settings.ENVIRONMENT,
+    )
     setup_telemetry(
         service_name=settings.OTEL_SERVICE_NAME,
         enabled=settings.OTEL_ENABLED,
@@ -46,6 +52,13 @@ app = FastAPI(
 
 # Correlation ID and structured HTTP logging middleware
 app.add_middleware(RequestIDMiddleware)
+app.middleware("http")(metrics_middleware)
+
+
+@app.get("/metrics", tags=["Observability"])
+async def get_metrics() -> Any:
+    """Prometheus metrics scrape endpoint."""
+    return metrics_endpoint()
 
 # Client headers enforcement middleware
 app.add_middleware(ClientHeadersMiddleware)

@@ -1,0 +1,147 @@
+services:
+  caddy:
+    image: caddy:2.9.1-alpine
+    container_name: thinkbuddy-caddy-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-api.thinkbuddy.com}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - thinkbuddy-net
+
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    container_name: thinkbuddy-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-thinkbuddy}
+      POSTGRES_USER: ${POSTGRES_USER:-thinkbuddy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - thinkbuddy-net
+
+  redis:
+    image: redis:7.4.11-alpine
+    container_name: thinkbuddy-redis-prod
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Redis password required}
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - thinkbuddy-net
+
+  core:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.core
+    container_name: thinkbuddy-core-prod
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      CORE_HOST: 0.0.0.0
+      CORE_PORT: 8001
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Internal service token required}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://prometheus:9090}
+      FEATURE_ANDROID_APP: "true"
+      FEATURE_AI_PLANNER: ${FEATURE_AI_PLANNER:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - thinkbuddy-net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.gateway
+    container_name: thinkbuddy-gateway-prod
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8000
+      CORE_INTERNAL_URL: http://core:8001
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT secret required}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-thinkbuddy-prod}
+    depends_on:
+      core:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - thinkbuddy-net
+
+  workers:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.workers
+    container_name: thinkbuddy-workers-prod
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A workers.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+    networks:
+      - thinkbuddy-net
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data_prod:
+  redis_data_prod:
+
+networks:
+  thinkbuddy-net:
+    driver: bridge
