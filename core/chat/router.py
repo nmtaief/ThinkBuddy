@@ -46,12 +46,24 @@ async def create_chat_session(
     if current_user.status == "pending_deletion":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Chat processing is suspended during the grace period."},
+            detail={
+                "code": "ACCOUNT_PENDING_DELETION",
+                "message": (
+                    "Account is pending deletion. "
+                    "Chat processing is suspended during the grace period."
+                ),
+            },
         )
     if not current_user.has_parental_consent:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": (
+                    "Parental consent is required to process minor student data. "
+                    "Processing is suspended."
+                ),
+            },
         )
     orchestrator = ChatOrchestrator(db)
     await orchestrator.assert_no_active_assessed_quiz(current_user.id)
@@ -132,18 +144,26 @@ async def send_chat_message(
     if current_user.status == "pending_deletion":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Chat processing is suspended during the grace period."},
+            detail={
+                "code": "ACCOUNT_PENDING_DELETION",
+                "message": (
+                    "Account is pending deletion. "
+                    "Chat processing is suspended during the grace period."
+                ),
+            },
         )
     if not current_user.has_parental_consent:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": (
+                    "Parental consent is required to process minor student data. "
+                    "Processing is suspended."
+                ),
+            },
         )
     orchestrator = ChatOrchestrator(db)
-
-    # Active Quiz Lockout Check and Quota Check before initiating response
-    await orchestrator.assert_no_active_assessed_quiz(current_user.id)
-    await orchestrator.check_quota(current_user.id)
 
     # Determine streaming vs JSON fallback
     wants_sse = (accept is not None and "text/event-stream" in accept) or payload.stream

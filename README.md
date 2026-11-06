@@ -54,4 +54,4 @@ These are defaults so Antigravity never has to guess. Each can be flipped withou
 - Can a student propose a syllabus/exam change, or only a parent edit it? *Default: parent edits; student can request.*
 - Quiz on web: allowed for assessed quizzes? *Default: practice-only on web; assessed quizzes are mobile-app only (see `05_SECURE_QUIZ.md`).*
 - Which classes/subjects are in beta? *Default: Class 6–8, matching the data team's work.*
-- **NCTB Content Licensing (Open Item):** National curriculum textbooks and question banks are NCTB intellectual property under Bangladesh Copyright Act 2000/2023. Private beta operates under educational evaluation; commercial rollout requires formal written licensing or MOU with the Ministry of Education / NCTB (see `docs/ingest_format.md §3`).
+- **NCTB Content Licensing (Open Question for NCTB and Legal Counsel):** What formal permissions, licensing agreements, or MOUs are required from NCTB / Ministry of Education for digitizing curriculum textbooks and indexing competencies for AI-assisted tutoring? Open question for legal counsel and NCTB; no legal conclusions reached (see `docs/ingest_format.md §3`).

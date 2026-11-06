@@ -1,0 +1,17 @@
+# ThinkBuddy Repository Code Owners
+# Global default maintainers
+* @thinkbuddy/core-maintainers
+
+# Backend architecture, API, routing, and data models
+/core/ @thinkbuddy/backend-leads
+/gateway/ @thinkbuddy/backend-leads
+/rag/ @thinkbuddy/ai-rag-team
+/workers/ @thinkbuddy/backend-leads
+
+# Android Client Application
+/android/ @thinkbuddy/android-leads
+
+# Security, Deployment, Infrastructure, and CI Scanners
+/.github/ @thinkbuddy/security-infrastructure
+/infra/ @thinkbuddy/security-infrastructure
+/docs/ @thinkbuddy/core-maintainers

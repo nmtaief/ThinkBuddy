@@ -601,8 +601,36 @@ class QuizService:
                 detail={"code": "ITEM_NOT_FOUND", "message": f"No item at position {position}."},
             )
 
-        # Check if item already answered
+        # Check if item already answered (with idempotent return on retry with matching nonce)
         if item.answered_at is not None:
+            if item.nonce == nonce:
+                next_stmt = select(AttemptItem).where(
+                    AttemptItem.attempt_id == attempt.id,
+                    AttemptItem.position == position + 1,
+                )
+                next_res = await self.db.execute(next_stmt)
+                next_item = next_res.scalar_one_or_none()
+                next_item_public: AttemptItemPublic | None = None
+                if next_item:
+                    q_res = await self.db.execute(
+                        select(Question).where(Question.id == next_item.question_id)
+                    )
+                    q_next = q_res.scalar_one()
+                    next_item_public = AttemptItemPublic(
+                        position=next_item.position,
+                        nonce=next_item.nonce,
+                        question=_format_attempt_question_public(q_next, attempt.id),
+                    )
+                quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == attempt.quiz_id))
+                quiz = quiz_res.scalar_one()
+                feedback_correct = item.is_correct if quiz.mode == "practice" else None
+                return AnswerItemResponse(
+                    position=position,
+                    answered=True,
+                    is_correct=feedback_correct,
+                    next_item=next_item_public,
+                    has_more=next_item is not None,
+                )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
