@@ -16,9 +16,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -54,6 +56,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Rule: Role choice is strictly shown only during first-time Registration.
  * Student registration requires a valid parent invitation link code.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthScreen(
     onAuthSuccess: (role: String) -> Unit
@@ -105,16 +108,10 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Mode Selector: Sign-In vs Registration
-            TabRow(
+            PrimaryTabRow(
                 selectedTabIndex = if (isRegistering) 1 else 0,
                 containerColor = Color.Transparent,
                 contentColor = TealPrimary,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[if (isRegistering) 1 else 0]),
-                        color = TealPrimary
-                    )
-                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Tab(

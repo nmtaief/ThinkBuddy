@@ -7,6 +7,7 @@ with a FakeAuthProvider for fast, deterministic local development and automated 
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -22,6 +23,7 @@ class AuthProviderUser:
     phone: str | None = None
     email: str | None = None
     display_name: str | None = None
+    auth_time: int | None = None
 
 
 @runtime_checkable
@@ -73,6 +75,7 @@ class FakeAuthProvider:
                     phone=data.get("phone"),
                     email=data.get("email"),
                     display_name=data.get("display_name", "Test User"),
+                    auth_time=data.get("auth_time", int(time.time())),
                 )
             except json.JSONDecodeError as exc:
                 msg = f"Malformed test auth token: {exc}"
@@ -86,6 +89,7 @@ class FakeAuthProvider:
                 provider="phone_otp",
                 phone=phone,
                 display_name=f"User {phone[-4:]}",
+                auth_time=int(time.time()),
             )
 
         # Format: fake:google:<email>
@@ -96,6 +100,7 @@ class FakeAuthProvider:
                 provider="google",
                 email=email,
                 display_name=email.split("@")[0].capitalize(),
+                auth_time=int(time.time()),
             )
 
         # Generic fake fallback for test tokens
@@ -105,6 +110,7 @@ class FakeAuthProvider:
                 uid=f"fake_uid_{name}",
                 provider="fake",
                 display_name=name,
+                auth_time=int(time.time()),
             )
 
         msg = f"Unsupported or unrecognized token format: {token[:10]}..."
@@ -143,6 +149,7 @@ class FirebaseAuthProvider:
                 phone=decoded.get("phone_number"),
                 email=decoded.get("email"),
                 display_name=decoded.get("name"),
+                auth_time=decoded.get("auth_time"),
             )
         except ImportError:
             # Fallback if firebase-admin package is not yet installed in local dev

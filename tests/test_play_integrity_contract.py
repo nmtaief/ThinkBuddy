@@ -347,6 +347,13 @@ def test_migration_0019_and_0020_reversibility() -> None:
     if res_down.returncode == 0:
         assert res_up_0019.returncode == 0, f"Alembic upgrade 0019 failed: {res_up_0019.stderr}"
         assert res_up_0020.returncode == 0, f"Alembic upgrade 0020 failed: {res_up_0020.stderr}"
+        # Restore to head (including subsequent revisions like 0021)
+        res_up_head = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+        )
+        assert res_up_head.returncode == 0, f"Alembic upgrade to head failed: {res_up_head.stderr}"
     else:
         err = res_down.stderr.lower()
         assert "connect" in err or "connection" in err or "refused" in err, f"Unexpected downgrade error: {res_down.stderr}"

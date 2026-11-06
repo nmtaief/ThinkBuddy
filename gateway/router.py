@@ -64,6 +64,20 @@ from core.planner.schemas import (
     UpsertStudySetupRequest,
 )
 from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
+from core.privacy.schemas import (
+    AccountDeletionResponse,
+    CancelDeletionResponse,
+    ConsentVersionDetailResponse,
+    FamilyDataExportResponse,
+    ParentalConsentRequest,
+    ParentalConsentResponse,
+    ParentalConsentStatusResponse,
+    PurgeJobReport,
+    RequestAccountDeletionBody,
+    WithdrawConsentRequest,
+    WithdrawConsentResponse,
+)
+from core.auth.router import ReauthenticateRequest, ReauthenticateResponse
 from gateway.client import core_client
 
 router = APIRouter(prefix="/v1")
@@ -259,6 +273,11 @@ async def get_client_config(
 # -------------------------------------------------------------------------
 # Auth & Identity
 # -------------------------------------------------------------------------
+@router.post("/auth/reauthenticate", response_model=ReauthenticateResponse, tags=["Auth"])
+async def reauthenticate_auth_token(payload: ReauthenticateRequest, request: Request) -> Response:
+    """Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time."""
+    return await forward_to_core(request)
+
 @router.post("/auth/exchange", response_model=TokenResponse, tags=["Auth"])
 async def exchange_auth_token(payload: AuthExchangeRequest, request: Request) -> Response:
     """Exchange third-party provider credential for ThinkBuddy session tokens.
@@ -1294,4 +1313,127 @@ async def gateway_notification_preferences_get(request: Request) -> Response:
 )
 async def gateway_notification_preferences_put(request: Request) -> Response:
     """Forward notification preferences PUT requests downstream to Core Service."""
+    return await forward_to_core(request)
+
+# -------------------------------------------------------------------------
+# Privacy, Parental Consent & Data Lifecycle (docs/04_API_CONTRACT.md / P07b)
+# -------------------------------------------------------------------------
+@router.post(
+    "/parents/consent",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_record_parental_consent",
+)
+async def gateway_record_parental_consent(request: Request) -> Response:
+    """Forward parental consent recording POST request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.get(
+    "/parents/consent",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_get_parental_consent_status",
+)
+async def gateway_get_parental_consent_status(request: Request) -> Response:
+    """Forward parental consent status GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+@router.get(
+    "/parents/consent/current",
+    response_model=ConsentVersionDetailResponse,
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_get_current_consent_version",
+)
+async def gateway_get_current_consent_version(request: Request) -> Response:
+    """Forward active parental consent version terms GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+@router.post(
+    "/parents/consent/withdraw",
+    response_model=WithdrawConsentResponse,
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_withdraw_parental_consent",
+)
+async def gateway_withdraw_parental_consent(request: Request) -> Response:
+    """Forward parental consent withdrawal downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+
+@router.get(
+    "/parents/me/export",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_export_family_data_get",
+)
+async def gateway_export_family_data_get(request: Request) -> Response:
+    """Forward family data export GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/parents/me/export",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_export_family_data_post",
+)
+async def gateway_export_family_data_post(request: Request) -> Response:
+    """Forward family data export POST request downstream to Core Service."""
+    return await forward_to_core(request)
+
+@router.get(
+    "/parents/me/export/{export_id}/download",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_download_family_export",
+)
+async def gateway_download_family_export(export_id: uuid.UUID, request: Request) -> Response:
+    """Forward family data export download GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+
+@router.post(
+    "/users/me/delete",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_request_user_deletion",
+)
+async def gateway_request_user_deletion(request: Request) -> Response:
+    """Forward account deletion request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/users/me/cancel-deletion",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_cancel_user_deletion",
+)
+async def gateway_cancel_user_deletion(request: Request) -> Response:
+    """Forward account deletion cancellation downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/families/{family_id}/delete",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_request_family_deletion",
+)
+async def gateway_request_family_deletion(family_id: uuid.UUID, request: Request) -> Response:
+    """Forward family deletion request downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/families/{family_id}/cancel-deletion",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_cancel_family_deletion",
+)
+async def gateway_cancel_family_deletion(family_id: uuid.UUID, request: Request) -> Response:
+    """Forward family deletion cancellation downstream to Core Service."""
+    return await forward_to_core(request)
+
+
+@router.post(
+    "/admin/privacy/purge",
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_trigger_privacy_purge",
+)
+async def gateway_trigger_privacy_purge(request: Request) -> Response:
+    """Forward privacy purge maintenance trigger downstream to Core Service."""
     return await forward_to_core(request)

@@ -56,6 +56,14 @@ async def check_student_access(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> User:
     """Dependency enforcing student data ownership; raises 403 if unauthorized."""
+    if user.role == "student" and getattr(user, "has_parental_consent", True) is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": "Parental consent is required to process minor student data. Processing is suspended.",
+            },
+        )
     has_access = await can_access_student(user, student_id, session)
     if not has_access:
         raise HTTPException(

@@ -152,6 +152,43 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
   - Delivery Auditing: Every delivery attempt (in-app and push) is recorded in the `notification_deliveries` table with channel, status, provider message ID, and suppression reasons.
   - System Triggers: `daily_reminder`, `task_missed`, `quiz_ready`, `plan_changed`, `integrity_flag`, and scheduled bilingual `weekly_parent_summary`.
 
+### Privacy, Parental Consent & Data Lifecycle (P07b)
+- `POST /v1/auth/reauthenticate` – dedicated re-authentication endpoint validating fresh third-party provider credentials (`auth_time` within 300 seconds / 5 minutes). Issues a short-lived signed JWT re-authentication token (`reauth_token`, TTL 10 minutes) cryptographically bound to a single action (`account_delete`, `family_delete`, `family_export`, `consent_withdraw`) and caller, enforced single-use.
+- `GET /v1/parents/consent/current` – fetch active parental consent version terms and full legal disclosure text in Bengali (`text_bn`) and English (`text_en`), with composite SHA-256 fingerprint (`terms_hash`).
+- `POST /v1/parents/consent` – record verified parental consent (version, terms hash, timestamp, client IP, user agent). Required before any minor child profile or study data may be processed. Returns `{ "status": "granted", "version": "1.0", "terms_hash": "...", "consented_at": "..." }`.
+- `GET /v1/parents/consent` – fetch current recorded parental consent status and version. Detects if terms text has changed by comparing `terms_hash` against `CURRENT_CONSENT_TEXT_HASH`; returns `reconsent_required: true` when terms update, which blocks child data processing until affirmative re-consent is granted.
+- `POST /v1/parents/consent/withdraw` – withdraw parental consent. Requires `X-Reauth-Token` bound to `consent_withdraw`. Suspends all minor child study data processing (chat, quizzes, and planner blocked with 403 `CONSENT_WITHDRAWN`).
+- `GET /v1/parents/me/export` & `POST /v1/parents/me/export` – trigger and retrieve family data export. Enforces:
+  1. Authorization: Restricted to authenticated parent/family guardian (Rule 9).
+  2. Re-authentication: Requires valid `X-Reauth-Token` bound to `family_export`.
+  3. Encryption At Rest: Export payloads are stored encrypted using AES-256-GCM (`encrypted_payload`).
+  4. Dual-Auth Download: `GET /v1/parents/me/export/{id}/download` requires both active parent session (Bearer JWT) and short-lived download token.
+  5. Rate Limiting: Strictly limited to 1 export request per parent per 24 hours (HTTP 429 `EXPORT_RATE_LIMITED`).
+  6. Short-Lived Signed Download Link: Generates a signed download URL (`download_url`, TTL 15 minutes) for secure delivery.
+  7. Retention: Export archives retained for 7 days before automated cleanup.
+  6. Non-Leakage (Rule 15 & Decision 9): Raw chat messages, prompts, and tokens are strictly excluded. Student chat activity is exported as curriculum topic-level summaries only (book, chapter, message count, timestamp).
+- `GET /v1/parents/me/export/{export_id}/download` – download family export JSON archive using signed download token. Enforces Rule 9 cross-parent isolation: Parent B requesting Parent A's export gets HTTP 403 `FORBIDDEN_EXPORT_ACCESS`.
+- `POST /v1/users/me/delete` – schedule self account deletion. Requires `X-Reauth-Token`. Enters 14-day grace period with scheduled purge timestamp.
+- `POST /v1/users/me/cancel-deletion` – cancel pending account deletion within the 14-day grace period, restoring active status.
+- `POST /v1/families/{family_id}/delete` – schedule complete family deletion. Enforces:
+  1. Role check: Students are strictly forbidden from deleting a family (HTTP 403 `STUDENT_CANNOT_DELETE_FAMILY`).
+  2. Ownership check: Only the family owner parent (`owner_parent_id`) may schedule family deletion (HTTP 403 `ONLY_FAMILY_OWNER_CAN_DELETE`).
+  3. Re-authentication check: Requires valid `X-Reauth-Token`.
+  4. Grace period & processing suspension: 14-day grace period applied across all family members. During the grace period, AI chat is blocked (HTTP 403 `ACCOUNT_PENDING_DELETION`), push notifications are suppressed (`suppressed_pending_deletion`), and study plan regeneration is stopped.
+  5. Member Notification: Immediately dispatches `family_deletion_scheduled` push notifications to all other members in the family.
+- `POST /v1/families/{family_id}/cancel-deletion` – cancel pending family deletion within the 14-day grace period. Any parent belonging to the family can cancel, which restores all family members to `active` status and sends notification alerts.
+- `POST /admin/privacy/purge` – execute data purge job for records past their grace period (`scheduled_purge_at <= now`):
+  1. Revokes all active user sessions (`Session`).
+  2. Revokes all push tokens and removes device bindings (`Device`).
+  3. Purges Redis cache keys for student dashboards, schedules, and sessions.
+  4. Deletes personal academic data (profiles, setups, tasks, plans, attempts, broad answers, citations, chat, invitations).
+  5. Deletes broad answer images and uploaded media from object storage (S3/MinIO).
+  6. Purges notifications, delivery logs, learning signals, and AI planner shadow runs.
+  7. Anonymizes compliance audit records (`AuditLog`): nulls `actor_id` and redacts personal PII while retaining audit action types and timestamps for statutory legal compliance.
+  8. Idempotency: Executes per-user in isolated nested transactions so failures in one account do not abort batch processing.
+  9. Audited: Admin trigger is audited with `AuditLog(action="privacy.purge_triggered")`.
+- **Database Backup Retention Policy**: Encrypted disaster-recovery database snapshots (PostgreSQL full dumps and WAL archives) are stored in an encrypted, access-restricted bucket with automated object lifecycle rules enforcing permanent deletion after exactly 30 days. Personal data purged from the live database is therefore guaranteed to be completely expunged from all disaster recovery backups within 30 days.
+
 ### Teacher (flagged off in beta)
 - `GET /teacher/queue`, `POST /teacher/submissions/{id}/review`, `POST /teacher/topics/flag`.
 

@@ -10,6 +10,7 @@ celery_app = Celery(
     "thinkbuddy_workers",
     broker=REDIS_URL,
     backend=REDIS_URL,
+    include=["workers.planner_tasks", "workers.quiz_tasks", "workers.privacy_tasks"],
 )
 
 celery_app.conf.update(
@@ -31,6 +32,10 @@ celery_app.conf.update(
         "dispatch-deferred-pushes-every-minute": {
             "task": "dispatch_deferred_pushes_task",
             "schedule": 60.0,  # every minute
+        },
+        "daily-privacy-data-purge": {
+            "task": "daily_privacy_purge_task",
+            "schedule": 86400.0,  # daily purge at 24h interval
         },
     },
 )

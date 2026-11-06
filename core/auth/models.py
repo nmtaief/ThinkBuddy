@@ -37,6 +37,9 @@ class User(Base):
     locale: Mapped[str] = mapped_column(String(10), default="bn", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     has_valid_attestation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    has_parental_consent: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    consent_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    consent_terms_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -44,6 +47,10 @@ class User(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("has_parental_consent", True)
+        super().__init__(**kwargs)
 
     # Relationships
     sessions: Mapped[list[Session]] = relationship(

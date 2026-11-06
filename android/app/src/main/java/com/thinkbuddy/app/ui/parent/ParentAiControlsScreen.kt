@@ -29,15 +29,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -78,6 +79,7 @@ import kotlinx.coroutines.launch
  * Tab 1: AI Suggestions & Auto-adjustments with One-Tap Undo
  * Tab 2: Student Change Requests Review (Approve/Decline with optional comment)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ParentAiControlsScreen(
     studentId: String,
@@ -180,16 +182,10 @@ fun ParentAiControlsScreen(
             }
 
             // Tabs Row
-            TabRow(
+            PrimaryTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = SurfaceDark,
-                contentColor = TealPrimary,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = TealPrimary
-                    )
-                }
+                contentColor = TealPrimary
             ) {
                 Tab(
                     selected = selectedTab == 0,

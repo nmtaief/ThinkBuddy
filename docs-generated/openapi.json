@@ -118,6 +118,48 @@
         }
       }
     },
+    "/v1/auth/reauthenticate": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reauthenticate Auth Token",
+        "description": "Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.",
+        "operationId": "reauthenticate_auth_token_v1_auth_reauthenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthenticateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReauthenticateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/exchange": {
       "post": {
         "tags": [
@@ -2946,6 +2988,312 @@
           }
         }
       }
+    },
+    "/v1/parents/consent": {
+      "get": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Get Parental Consent Status",
+        "description": "Forward parental consent status GET request downstream to Core Service.",
+        "operationId": "gateway_get_parental_consent_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Record Parental Consent",
+        "description": "Forward parental consent recording POST request downstream to Core Service.",
+        "operationId": "gateway_record_parental_consent",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/consent/current": {
+      "get": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Get Current Consent Version",
+        "description": "Forward active parental consent version terms GET request downstream to Core Service.",
+        "operationId": "gateway_get_current_consent_version",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentVersionDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/consent/withdraw": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Withdraw Parental Consent",
+        "description": "Forward parental consent withdrawal downstream to Core Service.",
+        "operationId": "gateway_withdraw_parental_consent",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawConsentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/me/export": {
+      "get": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Export Family Data Get",
+        "description": "Forward family data export GET request downstream to Core Service.",
+        "operationId": "gateway_export_family_data_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Export Family Data Post",
+        "description": "Forward family data export POST request downstream to Core Service.",
+        "operationId": "gateway_export_family_data_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/parents/me/export/{export_id}/download": {
+      "get": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Download Family Export",
+        "description": "Forward family data export download GET request downstream to Core Service.",
+        "operationId": "gateway_download_family_export",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/me/delete": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Request User Deletion",
+        "description": "Forward account deletion request downstream to Core Service.",
+        "operationId": "gateway_request_user_deletion",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/me/cancel-deletion": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Cancel User Deletion",
+        "description": "Forward account deletion cancellation downstream to Core Service.",
+        "operationId": "gateway_cancel_user_deletion",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{family_id}/delete": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Request Family Deletion",
+        "description": "Forward family deletion request downstream to Core Service.",
+        "operationId": "gateway_request_family_deletion",
+        "parameters": [
+          {
+            "name": "family_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Family Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{family_id}/cancel-deletion": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Cancel Family Deletion",
+        "description": "Forward family deletion cancellation downstream to Core Service.",
+        "operationId": "gateway_cancel_family_deletion",
+        "parameters": [
+          {
+            "name": "family_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Family Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/privacy/purge": {
+      "post": {
+        "tags": [
+          "Privacy & Data Management"
+        ],
+        "summary": "Gateway Trigger Privacy Purge",
+        "description": "Forward privacy purge maintenance trigger downstream to Core Service.",
+        "operationId": "gateway_trigger_privacy_purge",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4119,6 +4467,45 @@
         ],
         "title": "ConceptSummary"
       },
+      "ConsentVersionDetailResponse": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Consent legal terms version (e.g. 'v1.0')"
+          },
+          "text_bn": {
+            "type": "string",
+            "title": "Text Bn",
+            "description": "Full legal disclosure text in Bengali"
+          },
+          "text_en": {
+            "type": "string",
+            "title": "Text En",
+            "description": "Full legal disclosure text in English"
+          },
+          "terms_hash": {
+            "type": "string",
+            "title": "Terms Hash",
+            "description": "Cryptographic SHA-256 fingerprint of full composite terms"
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effective At",
+            "description": "Timestamp when version became effective"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "text_bn",
+          "text_en",
+          "terms_hash",
+          "effective_at"
+        ],
+        "title": "ConsentVersionDetailResponse"
+      },
       "CreateAttemptRequest": {
         "properties": {
           "device_id": {
@@ -4702,6 +5089,54 @@
         ],
         "title": "QuestionPublic",
         "description": "Question representation served to students during active quizzes.\n\nZero answer keys, rubrics, or explanations are present."
+      },
+      "ReauthenticateRequest": {
+        "properties": {
+          "provider_token": {
+            "type": "string",
+            "title": "Provider Token"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "Target action: 'account_delete', 'family_delete', 'family_export', or 'consent_withdraw'",
+            "default": "general"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_token"
+        ],
+        "title": "ReauthenticateRequest"
+      },
+      "ReauthenticateResponse": {
+        "properties": {
+          "reauth_token": {
+            "type": "string",
+            "title": "Reauth Token"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "default": "general"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "default": 600
+          },
+          "reauthenticated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reauthenticated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reauth_token",
+          "reauthenticated_at"
+        ],
+        "title": "ReauthenticateResponse"
       },
       "RecurringUnavailableBlock": {
         "properties": {
@@ -6064,6 +6499,38 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WithdrawConsentResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Consent status updated to withdrawn",
+            "default": "withdrawn"
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Parent Id"
+          },
+          "withdrawn_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Withdrawn At"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Confirmation notice in Bangla and English"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_id",
+          "withdrawn_at",
+          "message"
+        ],
+        "title": "WithdrawConsentResponse"
       }
     }
   }

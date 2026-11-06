@@ -132,6 +132,7 @@ async def exchange_token(
                 )
 
         display_name = payload.display_name or verified_user.display_name or "ThinkBuddy User"
+        initial_consent = False if requested_role == "parent" else True
         user = User(
             id=uuid.uuid4(),
             auth_provider=verified_user.provider,
@@ -142,6 +143,7 @@ async def exchange_token(
             email=verified_user.email,
             locale=payload.locale,
             status="active",
+            has_parental_consent=initial_consent,
         )
         db.add(user)
         await db.flush()
@@ -416,3 +418,76 @@ async def get_current_user_profile(
 async def auth_status() -> dict[str, str]:
     """Module status endpoint for internal health and service verification."""
     return {"module": "auth", "status": "active"}
+
+
+class ReauthenticateRequest(BaseModel):
+    provider_token: str
+    action: str = Field(
+        default="general",
+        description="Target action: 'account_delete', 'family_delete', 'family_export', or 'consent_withdraw'",
+    )
+
+
+class ReauthenticateResponse(BaseModel):
+    reauth_token: str
+    action: str = "general"
+    expires_in: int = 600
+    reauthenticated_at: datetime
+
+
+@router.post("/auth/reauthenticate", response_model=ReauthenticateResponse)
+async def reauthenticate_user(
+    payload: ReauthenticateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ReauthenticateResponse:
+    """Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.
+
+    Required before performing sensitive operations:
+    - Account and family deletion
+    - Family data export
+    - Parental consent withdrawal
+    """
+    from core.auth.provider import get_auth_provider
+    from core.auth.tokens import create_reauth_jwt
+
+    provider = get_auth_provider()
+    try:
+        auth_user = await provider.verify_token(payload.provider_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_PROVIDER_CREDENTIAL", "message": f"Could not verify credential: {e}"},
+        )
+
+    # 1. Identity match check: Provider identity must match authenticated user
+    identity_matched = False
+    if current_user.auth_uid and auth_user.uid == current_user.auth_uid:
+        identity_matched = True
+    elif current_user.phone and auth_user.phone and auth_user.phone == current_user.phone:
+        identity_matched = True
+    elif current_user.email and auth_user.email and auth_user.email == current_user.email:
+        identity_matched = True
+
+    if not identity_matched:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "IDENTITY_MISMATCH", "message": "Provider credential does not match the active session user."},
+        )
+
+    # 2. Freshness check: auth_time must be within 300 seconds (5 minutes)
+    now_epoch = int(datetime.now(UTC).timestamp())
+    if auth_user.auth_time is not None:
+        if (now_epoch - auth_user.auth_time) > 300:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "REAUTH_STALE", "message": "Authentication is too old. Fresh sign-in required within 5 minutes."},
+            )
+
+    # 3. Mint short-lived re-auth JWT (10 min TTL) bound to requested action
+    token = create_reauth_jwt(current_user.id, action=payload.action)
+    return ReauthenticateResponse(
+        reauth_token=token,
+        action=payload.action,
+        expires_in=600,
+        reauthenticated_at=datetime.now(UTC),
+    )

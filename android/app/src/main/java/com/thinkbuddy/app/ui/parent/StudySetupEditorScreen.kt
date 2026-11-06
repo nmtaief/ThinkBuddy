@@ -70,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.thinkbuddy.app.core.network.ConflictException
+import com.thinkbuddy.app.core.network.ClientConfigResponse
 import com.thinkbuddy.app.core.network.ParentRepository
 import com.thinkbuddy.app.core.network.StudentStudySettingsDto
 import com.thinkbuddy.app.core.network.UpdateStudySettingsRequest
