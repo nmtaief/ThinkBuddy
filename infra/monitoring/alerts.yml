@@ -36,3 +36,4 @@ groups:
         annotations:
           summary: "Non-chat API latency p95 > 400ms"
           description: "Non-chat API p95 response time is {{ $value | printf \"%.3f\" }}s, exceeding the 400ms SLA target."
+

@@ -7,7 +7,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-api.thinkbuddy.com}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Error: PUBLIC_DOMAIN must be explicitly set for production}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -22,6 +22,7 @@ services:
     image: pgvector/pgvector:0.8.7-pg16
     container_name: thinkbuddy-postgres-prod
     restart: unless-stopped
+    command: postgres -c max_connections=250 -c shared_buffers=256MB
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-thinkbuddy}
       POSTGRES_USER: ${POSTGRES_USER:-thinkbuddy}
@@ -60,9 +61,13 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Error: PUBLIC_DOMAIN must be explicitly set for production}
       CORE_HOST: 0.0.0.0
       CORE_PORT: 8001
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DB_POOL_SIZE: 50
+      DB_MAX_OVERFLOW: 50
+      DB_POOL_TIMEOUT: 15.0
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Internal service token required}
       SENTRY_DSN: ${SENTRY_DSN:-}
@@ -91,6 +96,7 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Error: PUBLIC_DOMAIN must be explicitly set for production}
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8000
       CORE_INTERNAL_URL: http://core:8001

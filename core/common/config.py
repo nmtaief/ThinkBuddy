@@ -56,13 +56,20 @@ class CoreSettings(BaseSettings):
         description="AES-GCM key for encrypting exported family archives at rest",
     )
 
+    # Public ingress domain
+    PUBLIC_DOMAIN: str | None = Field(
+        default=None,
+        description="Public domain for API and client ingress (e.g. api.thinkbuddy.com)",
+    )
+
     # Database
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy",
         description="Async PostgreSQL connection URL with pgvector",
     )
-    DB_POOL_SIZE: int = Field(default=10, description="Database pool size")
-    DB_MAX_OVERFLOW: int = Field(default=20, description="Database pool max overflow")
+    DB_POOL_SIZE: int = Field(default=30, description="Database pool size")
+    DB_MAX_OVERFLOW: int = Field(default=30, description="Database pool max overflow")
+    DB_POOL_TIMEOUT: float = Field(default=15.0, description="Database pool checkout timeout in seconds")
 
     # Redis
     REDIS_URL: str = Field(

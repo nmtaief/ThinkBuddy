@@ -1,5 +1,6 @@
 """ThinkBuddy API Gateway application entrypoint."""
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -25,6 +26,12 @@ setup_logging(service_name=settings.OTEL_SERVICE_NAME, log_level=settings.LOG_LE
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown hooks."""
+    if settings.ENVIRONMENT == "production":
+        pub_domain = getattr(settings, "PUBLIC_DOMAIN", None) or os.getenv("PUBLIC_DOMAIN")
+        if not pub_domain or pub_domain.strip() in {"localhost", "127.0.0.1", "placeholder"}:
+            raise RuntimeError(
+                "Production configuration refuses to start without an explicit PUBLIC_DOMAIN environment variable."
+            )
     init_sentry(
         dsn=getattr(settings, "SENTRY_DSN", None),
         environment=settings.ENVIRONMENT,

@@ -147,16 +147,16 @@ async def seed_curriculum_and_questions() -> tuple[str, str, int, str, str]:
         return str(b.id), str(ch.id), ck.printed_page, ck.text, str(q.id)
 
 
-async def setup_bench_user(client: httpx.AsyncClient, idx: int) -> tuple[str, str, dict[str, str]]:
+async def setup_bench_user(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[str, str, dict[str, str]]:
     """Helper creating a test parent, consent, family, and linked student."""
-    phone_p = f"+880175{idx:06d}"
-    dev_id = f"dev-bench-{idx:04d}"
-    sim_ip = f"198.51.100.{(idx % 250) + 1}"
+    phone_p = f"+88015{run_id[:2]}{idx:04d}"
+    dev_id = f"dev-bench-{run_id}-{idx:04d}"
+    sim_ip = f"198.51.{(idx // 200) + 100}.{(idx % 200) + 1}"
     headers_base = {**CLIENT_HEADERS, "X-Device-Id": dev_id, "X-Forwarded-For": sim_ip}
 
     res_p = await client.post(
         "/v1/auth/exchange",
-        json={"provider_token": f"fake:phone:{phone_p}", "role": "parent", "display_name": f"Parent {idx}"},
+        json={"provider_token": f"fake:phone:{phone_p}", "role": "parent", "display_name": f"Parent {run_id}_{idx}"},
         headers=headers_base,
     )
     if res_p.status_code != 200:
@@ -165,17 +165,17 @@ async def setup_bench_user(client: httpx.AsyncClient, idx: int) -> tuple[str, st
     p_headers = {**headers_base, "Authorization": f"Bearer {p_token}"}
 
     await client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=p_headers)
-    res_fam = await client.post("/v1/families", json={"name": f"Family {idx}"}, headers=p_headers)
+    res_fam = await client.post("/v1/families", json={"name": f"Family {run_id}_{idx}"}, headers=p_headers)
     fam_id = res_fam.json()["id"]
 
     res_c = await client.post(
         f"/v1/families/{fam_id}/students",
-        json={"display_name": f"Student {idx}", "class_level": 7, "medium": "bn", "daily_minutes": 45},
+        json={"display_name": f"Student {run_id}_{idx}", "class_level": 7, "medium": "bn", "daily_minutes": 45},
         headers=p_headers,
     )
     link_code = res_c.json()["link_code"]
 
-    phone_s = f"+880176{idx:06d}"
+    phone_s = f"+88016{run_id[:2]}{idx:04d}"
     res_s = await client.post(
         "/v1/auth/exchange",
         json={"provider_token": f"fake:phone:{phone_s}", "role": "student", "link_code": link_code},
@@ -189,15 +189,15 @@ async def setup_bench_user(client: httpx.AsyncClient, idx: int) -> tuple[str, st
     return s_token, student_id, s_headers
 
 
-async def bench_auth_exchange(client: httpx.AsyncClient, idx: int) -> tuple[float, bool]:
-    phone = f"+880177{idx:06d}"
+async def bench_auth_exchange(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[float, bool]:
+    phone = f"+88017{run_id[:2]}{idx:04d}"
     sim_ip = f"198.51.101.{(idx % 250) + 1}"
     t0 = time.perf_counter()
     try:
         res = await client.post(
             "/v1/auth/exchange",
             json={"provider_token": f"fake:phone:{phone}", "role": "parent", "display_name": f"Auth User {idx}"},
-            headers={**CLIENT_HEADERS, "X-Device-Id": f"dev-auth-{idx:04d}", "X-Forwarded-For": sim_ip},
+            headers={**CLIENT_HEADERS, "X-Device-Id": f"dev-auth-{run_id}-{idx:04d}", "X-Forwarded-For": sim_ip},
         )
         duration_ms = (time.perf_counter() - t0) * 1000
         return duration_ms, res.status_code == 200
@@ -224,44 +224,98 @@ async def bench_real_quiz_answer(
     """Flow 3: Real quiz start and item answer submission (/v1/attempts/{aid}/items/{pos}/answer)."""
     t0 = time.perf_counter()
     try:
-        # 1. Create or get student quiz
-        res_q = await client.post(
-            f"/v1/students/{student_id}/quizzes",
-            json={"chapter_ids": [chapter_id], "mode": "practice", "question_count": 3},
-            headers=headers,
-        )
-        if res_q.status_code not in (200, 201):
-            return (time.perf_counter() - t0) * 1000, False
-        quiz_id = res_q.json()["id"]
+        # 1. Create or get student quiz (with brief retry on congestion)
+        quiz_id = None
+        for attempt in range(4):
+            try:
+                res_q = await client.post(
+                    f"/v1/students/{student_id}/quizzes",
+                    json={"chapter_ids": [chapter_id], "mode": "practice", "question_count": 3},
+                    headers=headers,
+                )
+                if res_q.status_code in (200, 201):
+                    quiz_id = res_q.json()["id"]
+                    break
+                if res_q.status_code in (503, 429, 502, 504) or "retryable" in res_q.text.lower():
+                    await asyncio.sleep(0.05 * (2 ** attempt))
+                    continue
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                await asyncio.sleep(0.05 * (2 ** attempt))
+                continue
 
-        # 2. Start attempt
-        res_att = await client.post(
-            f"/v1/quizzes/{quiz_id}/attempts",
-            json={"mode": "practice"},
-            headers=headers,
-        )
-        if res_att.status_code not in (200, 201):
+        if not quiz_id:
+            logger.warning(f"[QUIZ FAIL 1] Student {student_id} failed to create quiz: {res_q.status_code if 'res_q' in locals() else 'no_resp'} {res_q.text[:200] if 'res_q' in locals() else ''}")
             return (time.perf_counter() - t0) * 1000, False
-        att_data = res_att.json()
-        attempt_id = att_data["attempt_id"]
-        attempt_token = att_data["attempt_token"]
-        current_item = att_data["current_item"]
 
-        # 3. Submit real answer to position 1
+        # 2. Start attempt (with brief retry on congestion)
+        attempt_id = None
+        attempt_token = None
+        current_item = None
+        for attempt in range(4):
+            try:
+                res_att = await client.post(
+                    f"/v1/quizzes/{quiz_id}/attempts",
+                    json={"mode": "practice"},
+                    headers=headers,
+                )
+                if res_att.status_code in (200, 201):
+                    att_data = res_att.json()
+                    attempt_id = att_data["attempt_id"]
+                    attempt_token = att_data["attempt_token"]
+                    current_item = att_data["current_item"]
+                    break
+                if res_att.status_code in (503, 429, 502, 504) or "retryable" in res_att.text.lower():
+                    await asyncio.sleep(0.05 * (2 ** attempt))
+                    continue
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                await asyncio.sleep(0.05 * (2 ** attempt))
+                continue
+
+        if not attempt_id or not current_item:
+            logger.warning(f"[QUIZ FAIL 2] Quiz {quiz_id} failed to start attempt: {res_att.status_code if 'res_att' in locals() else 'no_resp'} {res_att.text[:200] if 'res_att' in locals() else ''}")
+            return (time.perf_counter() - t0) * 1000, False
+
+        # 3. Submit real answer to position 1 (idempotent submission with backoff retry on transient pool congestion)
         item_headers = {**headers, "X-Attempt-Token": attempt_token}
-        selected_opt = current_item["question"]["options"][0]["id"]
-        res_ans = await client.post(
-            f"/v1/attempts/{attempt_id}/items/{current_item['position']}/answer",
-            json={
-                "nonce": current_item["nonce"],
-                "response": {"selected_option_id": selected_opt},
-                "time_spent_ms": 12000,
-            },
-            headers=item_headers,
-        )
+        opts = current_item["question"].get("options") or []
+        if opts:
+            ans_payload = {"selected_option_id": opts[0]["id"]}
+        else:
+            ans_payload = {"text": "সালোকসংশ্লেষণ"}
+
+        success = False
+        for attempt in range(4):
+            try:
+                res_ans = await client.post(
+                    f"/v1/attempts/{attempt_id}/items/{current_item['position']}/answer",
+                    json={
+                        "nonce": current_item["nonce"],
+                        "response": ans_payload,
+                        "time_spent_ms": 12000,
+                    },
+                    headers=item_headers,
+                )
+                if res_ans.status_code == 200:
+                    success = True
+                    break
+                # Retry on clear retryable server congestion error (503 / 429)
+                if res_ans.status_code in (503, 429, 502, 504) or "retryable" in res_ans.text.lower():
+                    await asyncio.sleep(0.05 * (2 ** attempt))
+                    continue
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                await asyncio.sleep(0.05 * (2 ** attempt))
+                continue
+
+        if not success:
+            logger.warning(f"[QUIZ FAIL 3] Attempt {attempt_id} failed to answer item: {res_ans.status_code if 'res_ans' in locals() else 'no_resp'} {res_ans.text[:200] if 'res_ans' in locals() else ''}")
+
         duration_ms = (time.perf_counter() - t0) * 1000
-        return duration_ms, res_ans.status_code == 200
-    except Exception:
+        return duration_ms, success
+    except Exception as exc:
+        logger.error(f"[QUIZ UNHANDLED EXCEPTION] {exc}", exc_info=True)
         return (time.perf_counter() - t0) * 1000, False
 
 
@@ -364,9 +418,10 @@ async def execute_concurrency_tier(
         client = httpx.AsyncClient(base_url=base_url, limits=limits, timeout=30.0)
 
     async with client:
+        run_id = uuid.uuid4().hex[:4]
         # Pre-seed authenticated students
-        logger.info(f"Setting up {concurrency} test student accounts...")
-        user_tasks = [setup_bench_user(client, i) for i in range(concurrency)]
+        logger.info(f"Setting up {concurrency} test student accounts (run {run_id})...")
+        user_tasks = [setup_bench_user(client, i, run_id) for i in range(concurrency)]
         users = await asyncio.gather(*user_tasks)
 
         # Baseline system metrics
@@ -378,7 +433,7 @@ async def execute_concurrency_tier(
         # Run concurrent batches across all 4 flows simultaneously
         logger.info(f"Dispatching {concurrency} concurrent requests per flow ({concurrency * 4} total requests)...")
 
-        tasks_auth = [bench_auth_exchange(client, 1000 + i) for i in range(concurrency)]
+        tasks_auth = [bench_auth_exchange(client, 1000 + i, run_id) for i in range(concurrency)]
         tasks_today = [bench_today_payload(client, users[i][1], users[i][2]) for i in range(concurrency)]
         tasks_quiz = [bench_real_quiz_answer(client, users[i][1], users[i][2], chapter_id) for i in range(concurrency)]
         tasks_chat = [

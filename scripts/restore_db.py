@@ -46,6 +46,41 @@ def compute_sha256(file_path: Path) -> str:
     return h.hexdigest()
 
 
+def decrypt_backup_file(input_enc_path: Path, output_path: Path, key: bytes) -> None:
+    """Decrypt AES-256-GCM encrypted backup archive."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    aesgcm = AESGCM(key)
+    with open(input_enc_path, "rb") as f_in:
+        data = f_in.read()
+    if len(data) < 12:
+        raise ValueError(f"Encrypted file {input_enc_path} is too small to contain valid nonce.")
+    nonce = data[:12]
+    ciphertext = data[12:]
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+    with open(output_path, "wb") as f_out:
+        f_out.write(plaintext)
+
+
+def download_from_offsite_bucket(object_name: str, dest_path: Path, bucket_name: str = "thinkbuddy-backups-offsite") -> Path:
+    """Download encrypted backup archive from offsite S3/MinIO bucket."""
+    import minio
+    from core.common.config import settings
+
+    endpoint = settings.S3_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+    client = minio.Minio(
+        endpoint=endpoint,
+        access_key=settings.S3_ACCESS_KEY_ID,
+        secret_key=settings.S3_SECRET_ACCESS_KEY,
+        secure=settings.S3_USE_SSL,
+    )
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Downloading s3://{bucket_name}/{object_name} -> {dest_path}...")
+    client.fget_object(bucket_name, object_name, str(dest_path))
+    logger.info(f"Successfully downloaded {object_name} from offsite bucket.")
+    return dest_path
+
+
 def verify_manifest(backup_path: Path) -> dict | None:
     """Check if manifest exists and verify checksum."""
     manifest_path = backup_path.with_suffix(backup_path.suffix + ".manifest.json")
@@ -114,7 +149,9 @@ async def replay_deletion_ledger() -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ThinkBuddy Automated Database Restore & Ledger Replay")
-    parser.add_argument("--input", type=Path, required=True, help="Backup file to restore (.sql or .sql.gz)")
+    parser.add_argument("--input", type=Path, default=None, help="Backup file to restore (.sql, .sql.gz, or .sql.gz.enc)")
+    parser.add_argument("--download-s3", type=str, default=None, help="S3/MinIO object name to download from offsite bucket")
+    parser.add_argument("--bucket", type=str, default="thinkbuddy-backups-offsite", help="Offsite S3/MinIO bucket name")
     parser.add_argument("--skip-ledger-replay", action="store_true", help="Skip replaying deletion ledger")
     parser.add_argument("--db-name", default=os.getenv("POSTGRES_DB", "thinkbuddy"), help="Database name")
     parser.add_argument("--user", default=os.getenv("POSTGRES_USER", "thinkbuddy"), help="Postgres user")
@@ -122,26 +159,45 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.getenv("POSTGRES_PORT", "5432")), help="Postgres port")
     args = parser.parse_args()
 
-    if not args.input.exists():
-        logger.error(f"Backup file not found: {args.input}")
-        sys.exit(1)
-
-    logger.info(f"=== Starting Database Restore from {args.input} ===")
-    verify_manifest(args.input)
-
-    # Decompress if needed to temporary file
     temp_dir = tempfile.mkdtemp(prefix="thinkbuddy_restore_")
     try:
-        if str(args.input).endswith(".gz"):
+        target_input = args.input
+
+        # Optional download from offsite S3/MinIO bucket
+        if args.download_s3:
+            s3_dest = Path(temp_dir) / args.download_s3
+            target_input = download_from_offsite_bucket(args.download_s3, s3_dest, bucket_name=args.bucket)
+
+        if not target_input or not target_input.exists():
+            logger.error(f"Backup file not found: {target_input}")
+            sys.exit(1)
+
+        logger.info(f"=== Starting Database Restore from {target_input} ===")
+
+        work_file = target_input
+
+        # Decrypt if encrypted (.enc)
+        if str(work_file).endswith(".enc"):
+            decrypted_path = Path(temp_dir) / work_file.stem
+            enc_key_raw = os.getenv("BACKUP_ENCRYPTION_KEY", "thinkbuddy_secure_backup_key_32b!").encode("utf-8")
+            enc_key = hashlib.sha256(enc_key_raw).digest()
+            logger.info(f"Decrypting AES-256-GCM archive -> {decrypted_path}...")
+            decrypt_backup_file(work_file, decrypted_path, enc_key)
+            work_file = decrypted_path
+
+        verify_manifest(work_file)
+
+        # Decompress if gzip (.gz)
+        if str(work_file).endswith(".gz"):
             sql_path = Path(temp_dir) / "restore.sql"
             logger.info("Decompressing gzip backup...")
-            with gzip.open(args.input, "rb") as f_in, open(sql_path, "wb") as f_out:
+            with gzip.open(work_file, "rb") as f_in, open(sql_path, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
         else:
-            sql_path = args.input
+            sql_path = work_file
 
         execute_restore(sql_path, db_name=args.db_name, user=args.user, host=args.host, port=args.port)
-        logger.info("SQL restore statements executed successfully.")
+        logger.info(f"SQL restore statements executed successfully into '{args.db_name}'.")
 
         # Replay deletion ledger
         if not args.skip_ledger_replay:

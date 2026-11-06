@@ -4,8 +4,8 @@
     admin off
 }
 
-# Production Ingress
-{$PUBLIC_DOMAIN:localhost} {
+# Production Ingress (Refuses to start without an explicit PUBLIC_DOMAIN)
+{$PUBLIC_DOMAIN} {
     encode zstd gzip
 
     # Health check bypass for load balancer

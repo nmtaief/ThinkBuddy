@@ -69,3 +69,61 @@ If data files are damaged or disk hardware failed:
    curl -i http://localhost:8000/v1/client/config -H "X-Client-Platform: android" -H "X-Client-Form-Factor: phone" -H "X-App-Version: 1.0.0"
    ```
 
+---
+
+### Scenario C: Total Infrastructure Catastrophe / Offsite Cold Disaster Recovery
+
+When the primary data center or hosting infrastructure is destroyed or unrecoverable:
+
+#### 1. Key Storage Location & Separation of Duties
+- **Encryption Key:** `BACKUP_ENCRYPTION_KEY`
+- **Location:** Managed separately in Cloud KMS / AWS Secrets Manager / HashiCorp Vault at path `secret/data/production/database/backup-encryption-key`.
+- **Strict Isolation Requirement:** The decryption key is **NEVER** stored in the repository, Docker images, host filesystems, or alongside the backup archives in the offsite bucket. Only designated disaster recovery engineers with audited IAM roles can access the key.
+
+#### 2. Offsite Recovery Steps
+1. **Retrieve the Decryption Key:**
+   ```bash
+   # From AWS Secrets Manager
+   export BACKUP_ENCRYPTION_KEY=$(aws secretsmanager get-secret-value --secret-id prod/database/backup-key --query SecretString --output text)
+   # Or from HashiCorp Vault
+   export BACKUP_ENCRYPTION_KEY=$(vault kv get -field=key secret/production/database/backup-key)
+   ```
+
+2. **List and Identify Latest Offsite Backup Archive:**
+   ```bash
+   # View archives in the offsite disaster recovery bucket
+   aws s3 ls s3://thinkbuddy-backups-offsite/database/
+   ```
+
+3. **Execute End-to-End Download, Decryption, and Database Restore:**
+   ```bash
+   python scripts/restore_db.py \
+       --download-s3 <backup_filename>.sql.gz.enc \
+       --bucket thinkbuddy-backups-offsite \
+       --db-name thinkbuddy
+   ```
+   *The script automatically:*
+   - Streams the ciphertext archive from `s3://thinkbuddy-backups-offsite/` into an isolated temporary workspace.
+   - Decrypts the archive using AES-256-GCM authenticated encryption with `BACKUP_ENCRYPTION_KEY`.
+   - Validates the cryptographic SHA-256 integrity hash against `.manifest.json`.
+   - Decompresses and executes standard SQL restore into PostgreSQL.
+   - Replays the Deletion Ledger (`replay_deletion_ledger()`) to guarantee post-backup GDPR/privacy purges are immediately re-applied.
+
+4. **Verify Database Integrity and Table Counts:**
+   ```bash
+   python -c "
+   import asyncio, asyncpg
+   async def audit():
+       conn = await asyncpg.connect('postgresql://thinkbuddy:thinkbuddy_dev_password@localhost:5432/thinkbuddy')
+       print('Tables restored:', await conn.fetchval(\"SELECT count(*) FROM information_schema.tables WHERE table_schema='public'\"))
+       await conn.close()
+   asyncio.run(audit())
+   "
+   ```
+
+5. **Bring Application Services Online & Verify:**
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d core gateway workers caddy
+   curl -i http://localhost:8001/readyz
+   ```
+

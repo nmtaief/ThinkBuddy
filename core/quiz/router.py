@@ -245,15 +245,43 @@ async def answer_quiz_item(
     """
     token = _extract_token(authorization, x_attempt_token)
     service = QuizService(db)
-    return await service.answer_item(
-        attempt_id=attempt_id,
-        position=position,
-        student_id=current_user.id,
-        nonce=payload.nonce,
-        response=payload.response,
-        time_spent_ms=payload.time_spent_ms,
-        token=token,
-    )
+    try:
+        return await service.answer_item(
+            attempt_id=attempt_id,
+            position=position,
+            student_id=current_user.id,
+            nonce=payload.nonce,
+            response=payload.response,
+            time_spent_ms=payload.time_spent_ms,
+            token=token,
+        )
+    except HTTPException:
+        raise
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        logger.warning("Database timeout during quiz item answer (%s); returning retryable 503", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={"Retry-After": "1"},
+            detail={
+                "code": "DB_CONGESTION_RETRYABLE",
+                "message": "Database connection pool is temporarily congested. Please retry submission.",
+                "retryable": True,
+            },
+        ) from exc
+    except Exception as exc:
+        err_str = str(exc).lower()
+        if any(term in err_str for term in ("timeout", "deadlock", "connection", "lock", "pool")):
+            logger.warning("Transient database contention during quiz answer (%s); returning retryable 503", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                headers={"Retry-After": "1"},
+                detail={
+                    "code": "DB_CONTENTION_RETRYABLE",
+                    "message": "Database is temporarily congested under concurrency. Please retry submission.",
+                    "retryable": True,
+                },
+            ) from exc
+        raise
 
 
 @router.post(
@@ -301,11 +329,39 @@ async def submit_quiz_attempt(
     """Finalize quiz attempt, compute auto-grade score, emit learning signals, and unlock review."""
     token = _extract_token(authorization, x_attempt_token)
     service = QuizService(db)
-    return await service.submit_attempt(
-        attempt_id=attempt_id,
-        student_id=current_user.id,
-        token=token,
-    )
+    try:
+        return await service.submit_attempt(
+            attempt_id=attempt_id,
+            student_id=current_user.id,
+            token=token,
+        )
+    except HTTPException:
+        raise
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        logger.warning("Database timeout during quiz submit (%s); returning retryable 503", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={"Retry-After": "1"},
+            detail={
+                "code": "DB_CONGESTION_RETRYABLE",
+                "message": "Database connection pool is temporarily congested. Please retry submit.",
+                "retryable": True,
+            },
+        ) from exc
+    except Exception as exc:
+        err_str = str(exc).lower()
+        if any(term in err_str for term in ("timeout", "deadlock", "connection", "lock", "pool")):
+            logger.warning("Transient database contention during quiz submit (%s); returning retryable 503", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                headers={"Retry-After": "1"},
+                detail={
+                    "code": "DB_CONTENTION_RETRYABLE",
+                    "message": "Database is temporarily congested under concurrency. Please retry submit.",
+                    "retryable": True,
+                },
+            ) from exc
+        raise
 
 
 @router.get(

@@ -23,6 +23,9 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+# Add project root to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -134,11 +137,27 @@ def encrypt_backup_file(input_path: Path, output_enc_path: Path, key: bytes) -> 
     return compute_sha256(output_enc_path)
 
 
-def upload_offsite_copy(enc_path: Path, destination: str = "s3://thinkbuddy-backups-offsite/database/") -> bool:
+def upload_offsite_copy(enc_path: Path, bucket_name: str = "thinkbuddy-backups-offsite") -> bool:
     """Transfer encrypted backup archive to offsite disaster recovery storage."""
-    logger.info(f"Uploading encrypted backup offsite -> {destination}{enc_path.name}")
-    # In production with MinIO/S3 configured, uploads using S3 client; in local dev simulates offsite replication
-    return True
+    logger.info(f"Uploading encrypted backup offsite -> s3://{bucket_name}/{enc_path.name}")
+    try:
+        import minio
+        from core.common.config import settings
+        endpoint = settings.S3_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+        client = minio.Minio(
+            endpoint=endpoint,
+            access_key=settings.S3_ACCESS_KEY_ID,
+            secret_key=settings.S3_SECRET_ACCESS_KEY,
+            secure=settings.S3_USE_SSL,
+        )
+        if not client.bucket_exists(bucket_name):
+            client.make_bucket(bucket_name)
+        client.fput_object(bucket_name, enc_path.name, str(enc_path))
+        logger.info(f"Successfully uploaded {enc_path.name} to offsite bucket '{bucket_name}'.")
+        return True
+    except Exception as e:
+        logger.warning(f"Offsite backup upload failed: {e}")
+        return False
 
 
 def main() -> None:

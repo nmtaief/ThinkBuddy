@@ -3,6 +3,7 @@ services:
     image: pgvector/pgvector:0.8.7-pg16
     container_name: thinkbuddy-postgres
     restart: unless-stopped
+    command: postgres -c max_connections=250 -c shared_buffers=256MB
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-thinkbuddy}
       POSTGRES_USER: ${POSTGRES_USER:-thinkbuddy}
@@ -70,6 +71,9 @@ services:
       CORE_HOST: 0.0.0.0
       CORE_PORT: 8001
       DATABASE_URL: postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@postgres:5432/thinkbuddy
+      DB_POOL_SIZE: 40
+      DB_MAX_OVERFLOW: 40
+      DB_POOL_TIMEOUT: 15.0
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
     ports:
