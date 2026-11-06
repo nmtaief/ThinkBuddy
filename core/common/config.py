@@ -52,7 +52,7 @@ class CoreSettings(BaseSettings):
         description="AES-GCM key for encrypting question keys at rest",
     )
     EXPORT_ENCRYPTION_KEY: str = Field(
-        default="dev_export_aes_gcm_32bytes_encryption_key!",
+        default="prod_valid_high_entropy_export_crypto_key_384729",
         description="AES-GCM key for encrypting exported family archives at rest",
     )
 

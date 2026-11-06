@@ -95,3 +95,4 @@ def downgrade() -> None:
     # 1. Drop parental_consent_versions
     op.drop_index("ix_parental_consent_versions_version", table_name="parental_consent_versions")
     op.drop_table("parental_consent_versions")
+

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,6 +28,7 @@ from core.planner.models import (
     StudySetup,
     Task,
 )
+from core.privacy.constants import CONSENT_SUSPENSION_RETENTION_DAYS
 from core.privacy.models import AccountDeletion, DataExport, DeletionLedger, ParentalConsent
 from core.privacy.schemas import PurgeJobReport
 from core.progress.models import Mastery, ProgressDaily, RevisionItem
@@ -90,7 +92,38 @@ async def execute_data_purge(
         AccountDeletion.scheduled_purge_at <= now,
     )
     res = await db.execute(stmt)
-    pending_deletions = res.scalars().all()
+    pending_deletions = list(res.scalars().all())
+
+    # Automatically purge student accounts whose parental consent has been suspended beyond the 30-day retention period
+    suspension_cutoff = now - timedelta(days=CONSENT_SUSPENSION_RETENTION_DAYS)
+    stmt_susp = select(ParentStudentLink.student_id).where(
+        ParentStudentLink.status == "consent_suspended",
+        ParentStudentLink.revoked_at.is_not(None),
+        ParentStudentLink.revoked_at <= suspension_cutoff,
+    )
+    res_susp = await db.execute(stmt_susp)
+    expired_suspension_ids = list(res_susp.scalars().all())
+    for s_id in expired_suspension_ids:
+        # Check if an AccountDeletion already exists
+        stmt_exist = select(AccountDeletion).where(
+            AccountDeletion.user_id == s_id,
+            AccountDeletion.status.in_(["pending_grace_period", "purged"]),
+        )
+        existing = (await db.execute(stmt_exist)).scalar_one_or_none()
+        if not existing:
+            del_rec = AccountDeletion(
+                id=uuid.uuid4(),
+                user_id=s_id,
+                target_type="user",
+                requested_at=suspension_cutoff,
+                scheduled_purge_at=now,
+                status="pending_grace_period",
+                meta={"reason": "consent_suspension_retention_expired"},
+            )
+            db.add(del_rec)
+            pending_deletions.append(del_rec)
+    if expired_suspension_ids:
+        await db.flush()
 
     report = PurgeJobReport(executed_at=now)
 
@@ -173,7 +206,10 @@ async def execute_data_purge(
                     stmt_cs = select(ChatSession.id).where(ChatSession.student_id == u_id)
                     cs_ids = (await db.execute(stmt_cs)).scalars().all()
                     if cs_ids:
-                        await db.execute(delete(ChatCitation).where(ChatCitation.session_id.in_(cs_ids)))
+                        stmt_cm = select(ChatMessage.id).where(ChatMessage.session_id.in_(cs_ids))
+                        cm_ids = (await db.execute(stmt_cm)).scalars().all()
+                        if cm_ids:
+                            await db.execute(delete(ChatCitation).where(ChatCitation.message_id.in_(cm_ids)))
                         await db.execute(delete(ChatMessage).where(ChatMessage.session_id.in_(cs_ids)))
                     await db.execute(delete(ChatSession).where(ChatSession.student_id == u_id))
                     await db.execute(delete(UsageCounter).where(UsageCounter.student_id == u_id))

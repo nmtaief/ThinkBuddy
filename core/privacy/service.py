@@ -94,27 +94,47 @@ class PrivacyService:
                         },
                     )
 
-            # Single-use enforcement
+            # Single-use enforcement (fails closed when Redis cannot confirm freshness)
             jti = payload.get("jti")
             if jti:
-                if redis_client:
-                    now_ts = int(utcnow().timestamp())
-                    exp = payload.get("exp", now_ts + 600)
-                    ttl = max(1, exp - now_ts)
-                    key = f"thinkbuddy:reauth_used:{jti}"
-                    is_set = await redis_client.set(key, "1", ex=ttl, nx=True)
-                    if not is_set:
+                r_client = redis_client
+                if r_client is None:
+                    try:
+                        from core.common.redis import get_redis_client
+                        r_client = get_redis_client()
+                    except Exception as exc:
+                        logger.error(f"Cannot obtain Redis client for re-auth token check: {exc}")
                         raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail={"code": "REAUTH_ALREADY_USED", "message": "Re-authentication token has already been consumed."},
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={
+                                "code": "REAUTH_CONFIRMATION_FAILED",
+                                "message": "Re-authentication verification service unavailable. Cannot confirm single-use token freshness.",
+                            },
                         )
-                else:
-                    if jti in _USED_REAUTH_JTIS:
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail={"code": "REAUTH_ALREADY_USED", "message": "Re-authentication token has already been consumed."},
-                        )
-                    _USED_REAUTH_JTIS.add(jti)
+
+                now_ts = int(utcnow().timestamp())
+                exp = payload.get("exp", now_ts + 600)
+                ttl = max(1, exp - now_ts)
+                key = f"thinkbuddy:reauth_used:{jti}"
+                try:
+                    is_set = await r_client.set(key, "1", ex=ttl, nx=True)
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.error(f"Redis error during re-auth token verification: {exc}")
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "code": "REAUTH_CONFIRMATION_FAILED",
+                            "message": "Re-authentication verification service unavailable. Cannot confirm single-use token freshness.",
+                        },
+                    )
+
+                if not is_set:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={"code": "REAUTH_ALREADY_USED", "message": "Re-authentication token has already been consumed."},
+                    )
         except HTTPException:
             raise
         except Exception as e:

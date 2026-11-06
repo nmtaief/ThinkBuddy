@@ -26,12 +26,16 @@ async def wire_gateway_and_reset_rate_limits() -> AsyncGenerator[None, None]:
     original_transport = gateway.client.core_client.transport
     original_url = gateway.client.core_client.base_url
 
+    core_app.dependency_overrides.clear()
+    gateway_app.dependency_overrides.clear()
     gateway.client.core_client.transport = ASGITransport(app=core_app)
     gateway.client.core_client.base_url = "http://testserver"
     await RateLimiter.reset()
 
     yield
 
+    core_app.dependency_overrides.clear()
+    gateway_app.dependency_overrides.clear()
     gateway.client.core_client.transport = original_transport
     gateway.client.core_client.base_url = original_url
     await RateLimiter.reset()

@@ -186,6 +186,23 @@ class NotificationService:
             await db.flush()
             return notif, deliveries
 
+        # Check if parental consent is suspended or withdrawn (Item 5: Central consent guard)
+        if user_res and not user_res.has_parental_consent:
+            logger.info("Push suppressed for user %s: parental consent suspended/withdrawn", user_id)
+            suspended_consent_delivery = NotificationDelivery(
+                notification_id=notif.id,
+                user_id=user_id,
+                channel="push",
+                status="suppressed_consent_suspended",
+                reason="Parental consent is suspended or withdrawn; push processing suspended.",
+                payload={"type": type, "title": generic_title, "body": generic_body},
+                sent_at=current_utc,
+            )
+            db.add(suspended_consent_delivery)
+            deliveries.append(suspended_consent_delivery)
+            await db.flush()
+            return notif, deliveries
+
         # 3. Check Quiet Hours (Asia/Dhaka) - Defer push until quiet hours end (Item 2)
         if NotificationService.is_in_quiet_hours(pref, dhaka_now):
             logger.info("Push suppressed for user %s during quiet hours (Asia/Dhaka); deferred", user_id)

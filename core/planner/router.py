@@ -1147,7 +1147,16 @@ async def get_today_payload(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "FORBIDDEN_STUDENT_ACCESS",
-                "message": "You cannot view this student's tasks.",
+                "message": "You do not view this student's tasks.",
+            },
+        )
+
+    if current_user.role == "student" and current_user.has_parental_consent is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": "Parental consent is required to process minor student data. Processing is suspended.",
             },
         )
 

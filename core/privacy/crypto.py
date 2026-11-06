@@ -67,3 +67,4 @@ def decrypt_export_payload(
     nonce, ciphertext = raw[:12], raw[12:]
     decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
     return json.loads(decrypted_bytes.decode("utf-8"))
+

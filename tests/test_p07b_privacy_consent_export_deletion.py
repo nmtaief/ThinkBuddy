@@ -237,9 +237,16 @@ async def test_family_data_export_strictly_excludes_raw_chat_transcripts_and_rat
     assert downloaded_data["family_id"] == fam_id
 
     # Rate limiting verification: 2nd export within 24h must return 429
+    res_reauth2 = await gateway_client.post(
+        "/v1/auth/reauthenticate",
+        json={"provider_token": f"fake:phone:{phone_p}"},
+        headers=headers_p,
+    )
+    assert res_reauth2.status_code == 200
+    reauth_token2 = res_reauth2.json()["reauth_token"]
     res_rate_limited = await gateway_client.post(
         "/v1/parents/me/export",
-        headers={**headers_p, "X-Reauth-Token": reauth_token},
+        headers={**headers_p, "X-Reauth-Token": reauth_token2},
     )
     assert res_rate_limited.status_code == 429
     assert res_rate_limited.json()["error"]["code"] == "EXPORT_RATE_LIMITED"
@@ -375,11 +382,18 @@ async def test_account_deletion_recent_reauthentication_enforcement(gateway_clie
     )
     assert res_bad.status_code == 400
 
-    # 2. Deletion with valid reauth token schedules deletion with 14-day grace period
+    # 2. Deletion with valid fresh reauth token schedules deletion with 14-day grace period
+    res_reauth2 = await gateway_client.post(
+        "/v1/auth/reauthenticate",
+        json={"provider_token": f"fake:phone:{phone}"},
+        headers=headers,
+    )
+    assert res_reauth2.status_code == 200
+    reauth_token2 = res_reauth2.json()["reauth_token"]
     res_del = await gateway_client.post(
         "/v1/users/me/delete",
         json={"confirmation": "DELETE", "reason": "Moving school"},
-        headers={**headers, "X-Reauth-Token": reauth_token},
+        headers={**headers, "X-Reauth-Token": reauth_token2},
     )
     assert res_del.status_code == 200
     del_data = res_del.json()
@@ -834,12 +848,17 @@ async def test_consent_withdrawal_suspends_child_processing(gateway_client: Asyn
     # Grant initial consent
     await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=p_headers)
 
-    # Create link code & register child
+    # Create family and link code & register child
+    res_fam = await gateway_client.post("/v1/families", json={"name": "Family Consent Test"}, headers=p_headers)
+    assert res_fam.status_code == 201
+    fam_id = res_fam.json()["id"]
+
     res_code = await gateway_client.post(
-        "/v1/parents/students/link-code",
-        json={"child_name": "Child Consent Test", "class_level": 9, "medium": "bn", "daily_minutes": 90},
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "Child Consent Test", "class_level": 9, "medium": "bn", "daily_minutes": 90},
         headers=p_headers,
     )
+    assert res_code.status_code == 201
     link_code = res_code.json()["link_code"]
 
     res_child = await gateway_client.post(
@@ -853,7 +872,7 @@ async def test_consent_withdrawal_suspends_child_processing(gateway_client: Asyn
 
     # Child can initially access chat
     res_chat = await gateway_client.post("/v1/chat/sessions", json={"title": "Math Help"}, headers=child_headers)
-    assert res_chat.status_code == 200
+    assert res_chat.status_code == 201
 
     # Parent withdraws consent (fresh sign-in re-auth)
     res_withdraw = await gateway_client.post(
@@ -867,16 +886,18 @@ async def test_consent_withdrawal_suspends_child_processing(gateway_client: Asyn
     # Child is immediately blocked from creating new chat sessions
     res_blocked_chat = await gateway_client.post("/v1/chat/sessions", json={"title": "Blocked Chat"}, headers=child_headers)
     assert res_blocked_chat.status_code == 403
-    assert res_blocked_chat.json()["detail"]["code"] == "CONSENT_WITHDRAWN"
+    err_chat = res_blocked_chat.json().get("error", res_blocked_chat.json().get("detail", {}))
+    assert err_chat["code"] == "CONSENT_WITHDRAWN"
 
     # Child is immediately blocked from starting quizzes
     res_blocked_quiz = await gateway_client.post(
-        f"/v1/quiz/{uuid.uuid4()}/attempt",
+        f"/v1/quizzes/{uuid.uuid4()}/attempts",
         json={"device_id": "test-device"},
         headers=child_headers,
     )
     assert res_blocked_quiz.status_code == 403
-    assert res_blocked_quiz.json()["detail"]["code"] == "CONSENT_WITHDRAWN"
+    err_quiz = res_blocked_quiz.json().get("error", res_blocked_quiz.json().get("detail", {}))
+    assert err_quiz["code"] == "CONSENT_WITHDRAWN"
 
 
 @pytest.mark.asyncio
@@ -891,8 +912,9 @@ async def test_export_encryption_at_rest_and_dual_auth_download(gateway_client: 
     token = res_p.json()["access_token"]
     headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
 
-    # Grant consent and trigger export
+    # Grant consent, create family, and trigger export
     await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=headers)
+    await gateway_client.post("/v1/families", json={"name": "Export Family"}, headers=headers)
     res_export = await gateway_client.post("/v1/parents/me/export", headers=headers)
     assert res_export.status_code == 200
     export_id = uuid.UUID(res_export.json()["export_id"])
@@ -989,4 +1011,293 @@ async def test_deletion_ledger_recorded_on_purge_and_replayed() -> None:
         await session.refresh(user)
         assert user.status == "purged"
         assert user.display_name == "Deleted User"
+
+
+@pytest.mark.asyncio
+async def test_reauth_single_use_fails_closed_when_redis_unavailable() -> None:
+    """Verify that re-auth token verification strictly fails closed (503 REAUTH_CONFIRMATION_FAILED) when Redis cannot confirm freshness."""
+    from unittest.mock import AsyncMock
+    from fastapi import HTTPException
+    from core.privacy.service import PrivacyService
+    from core.auth.tokens import create_reauth_jwt
+
+    test_user_id = uuid.uuid4()
+    tok = create_reauth_jwt(user_id=test_user_id, action="account_delete")
+
+    # Mock broken redis client that raises ConnectionError on .set()
+    mock_broken_redis = AsyncMock()
+    mock_broken_redis.set.side_effect = ConnectionError("Simulated Redis network disconnection")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await PrivacyService.verify_reauth_token(
+            reauth_token=tok,
+            caller_id=test_user_id,
+            expected_action="account_delete",
+            redis_client=mock_broken_redis,
+        )
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "REAUTH_CONFIRMATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_seeded_user_purge_fk_chains_zero_remaining_rows() -> None:
+    """Follow full foreign key chains from User down to leaf tables, verifying 0 remaining rows after purge."""
+    from core.planner.models import AiPlannerShadowRun, StudentChangeRequest, StudentStudySettings, SyllabusItem
+    from core.curriculum.models import Book, Chapter
+    from core.quiz.models import Question, Quiz
+    from core.chat.models import ChatCitation, ChatMessage, ChatSession, UsageCounter
+    from sqlalchemy import func
+
+    async with AsyncSessionLocal() as session:
+        # Load an existing chapter and question from seed data
+        chap = (await session.execute(select(Chapter).limit(1))).scalar_one_or_none()
+        ques = (await session.execute(select(Question).limit(1))).scalar_one_or_none()
+        chap_id = chap.id if chap else uuid.uuid4()
+        ques_id = ques.id if ques else uuid.uuid4()
+
+        # 1. Create a parent and a student user
+        parent = User(
+            id=uuid.uuid4(),
+            role="parent",
+            auth_provider="phone",
+            auth_uid=f"fake:phone:+880178{uuid.uuid4().hex[:6]}",
+            display_name="Purge FK Parent",
+            has_parental_consent=True,
+            status="active",
+        )
+        student = User(
+            id=uuid.uuid4(),
+            role="student",
+            auth_provider="phone",
+            auth_uid=f"fake:phone:+880179{uuid.uuid4().hex[:6]}",
+            display_name="Purge FK Student",
+            email="student_fk@test.com",
+            phone="+880179000000",
+            has_parental_consent=True,
+            status="active",
+        )
+        session.add_all([parent, student])
+        await session.flush()
+
+        s_id = student.id
+        p_id = parent.id
+
+        # 2. Seed records across ALL FK-dependent tables
+        # Profile & Parent-Student link
+        prof = StudentProfile(user_id=s_id, class_level=8, medium="bn", daily_minutes=45)
+        link = ParentStudentLink(
+            id=uuid.uuid4(), parent_id=p_id, student_id=s_id,
+            status="active",
+            link_code_hash="fakehash", link_code_expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        session.add_all([prof, link])
+
+        # StudySetup, Plan, PlanDay, Task, StudentChangeRequest, StudentStudySettings
+        setup = StudySetup(id=uuid.uuid4(), student_id=s_id, set_by_user_id=p_id, subject="math", exam_name="Annual Exam", exam_date=datetime.now(UTC).date() + timedelta(days=60))
+        session.add(setup)
+        await session.flush()
+
+        plan = Plan(id=uuid.uuid4(), student_id=s_id, setup_id=setup.id, version=1, status="active", reason="Initial plan")
+        session.add(plan)
+        await session.flush()
+
+        pday = PlanDay(id=uuid.uuid4(), plan_id=plan.id, date=datetime.now(UTC).date(), planned_minutes=45)
+        session.add(pday)
+        await session.flush()
+
+        task = Task(id=uuid.uuid4(), plan_day_id=pday.id, student_id=s_id, type="study", est_minutes=30, status="todo", refs={})
+        scr = StudentChangeRequest(id=uuid.uuid4(), student_id=s_id, setup_id=setup.id, requested_changes={"daily_minutes": 60}, status="pending")
+        sss = StudentStudySettings(id=uuid.uuid4(), student_id=s_id, school_day_minutes=60, holiday_minutes=120)
+        session.add_all([task, scr, sss])
+
+        # Quiz, QuizAttempt, AttemptItem, AttemptEvent, BroadSubmission
+        quiz = Quiz(id=uuid.uuid4(), student_id=s_id, title="Daily Math", kind="daily", mode="assessed")
+        session.add(quiz)
+        await session.flush()
+
+        attempt = QuizAttempt(id=uuid.uuid4(), quiz_id=quiz.id, student_id=s_id, state="in_progress", attempt_token="tok_fk_test_123")
+        session.add(attempt)
+        await session.flush()
+
+        if ques:
+            item = AttemptItem(id=uuid.uuid4(), attempt_id=attempt.id, question_id=ques_id, position=1, nonce="testnonce123")
+            session.add(item)
+            await session.flush()
+            bs = BroadSubmission(id=uuid.uuid4(), attempt_item_id=item.id, image_uris=["https://storage.thinkbuddy.com/broad/1.jpg"])
+            session.add(bs)
+
+        ev = AttemptEvent(id=uuid.uuid4(), attempt_id=attempt.id, type="focus_lost")
+        session.add(ev)
+
+        # ChatSession, ChatMessage, ChatCitation, UsageCounter
+        cs = ChatSession(id=uuid.uuid4(), student_id=s_id, title="Math Q&A")
+        session.add(cs)
+        await session.flush()
+
+        cm = ChatMessage(id=uuid.uuid4(), session_id=cs.id, role="user", content="Help me with algebra")
+        session.add(cm)
+        await session.flush()
+
+        cc = ChatCitation(id=uuid.uuid4(), message_id=cm.id, book_title="Math 8", chapter_title="Algebra", printed_page=42, pdf_page_index=44)
+        uc = UsageCounter(student_id=s_id, date=datetime.now(UTC).date(), chat_messages=5, tokens=150)
+        session.add_all([cc, uc])
+
+        # LearningSignal, AIPlannerShadowRun, ProgressDaily, Mastery, RevisionItem
+        ls = LearningSignal(id=uuid.uuid4(), student_id=s_id, source="quiz_wrong", weight=1.0)
+        sr = AiPlannerShadowRun(id=uuid.uuid4(), student_id=s_id, recommendation="adopt", coverage_parity_met=True, churn_rate_pct=0.0, minutes_delta=0)
+        now_dt = datetime.now(UTC)
+        pd = ProgressDaily(id=uuid.uuid4(), student_id=s_id, date=now_dt.date(), minutes=30, created_at=now_dt, updated_at=now_dt)
+        session.add_all([ls, sr, pd])
+
+        if chap:
+            m = Mastery(id=uuid.uuid4(), student_id=s_id, chapter_id=chap_id, score=0.8, updated_at=now_dt)
+            ri = RevisionItem(id=uuid.uuid4(), student_id=s_id, chapter_id=chap_id, due_at=now_dt, updated_at=now_dt)
+            session.add_all([m, ri])
+
+        # Device, UserSession, Notification, NotificationDelivery, NotificationPreference
+        dev = Device(id=uuid.uuid4(), user_id=s_id, push_token=f"fcm_fk_{uuid.uuid4().hex[:8]}", platform="android", app_version="1.0.0")
+        sess = UserSession(id=uuid.uuid4(), user_id=s_id, refresh_token_hash="fakehash", expires_at=datetime.now(UTC) + timedelta(days=7))
+        notif = Notification(id=uuid.uuid4(), user_id=s_id, type="study_reminder", title="Study", body="Time to study", title_bn="পড়ার সময়", body_bn="এখন পড়ার সময় হয়েছে")
+        session.add_all([dev, sess, notif])
+        await session.flush()
+
+        nd = NotificationDelivery(notification_id=notif.id, user_id=s_id, device_id=dev.id, channel="push", status="delivered")
+        np = NotificationPreference(user_id=s_id, quiet_hours_start="22:00", quiet_hours_end="07:00")
+        session.add_all([nd, np])
+
+        # AuditLog
+        audit = AuditLog(
+            id=uuid.uuid4(), actor_id=s_id, action="quiz.started", target_type="quiz_attempt",
+            target_id=str(attempt.id), meta={"ip": "127.0.0.1", "device": "Pixel 8"},
+        )
+        session.add(audit)
+
+        # AccountDeletion past grace period
+        deletion = AccountDeletion(
+            id=uuid.uuid4(), user_id=s_id, target_type="user",
+            status="pending_grace_period", scheduled_purge_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        session.add(deletion)
+        await session.commit()
+
+        # 3. Execute full data purge
+        report = await execute_data_purge(session)
+        assert report.purged_accounts >= 1
+
+        # 4. Verify ZERO remaining rows across ALL FK-dependent tables for this student
+        assert (await session.execute(select(func.count(StudentProfile.user_id)).where(StudentProfile.user_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(ParentStudentLink.id)).where(ParentStudentLink.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(StudySetup.id)).where(StudySetup.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(Plan.id)).where(Plan.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(PlanDay.id)).where(PlanDay.plan_id == plan.id))).scalar() == 0
+        assert (await session.execute(select(func.count(Task.id)).where(Task.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(StudentChangeRequest.id)).where(StudentChangeRequest.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(StudentStudySettings.student_id)).where(StudentStudySettings.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(Quiz.id)).where(Quiz.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(QuizAttempt.id)).where(QuizAttempt.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(AttemptItem.id)).where(AttemptItem.attempt_id == attempt.id))).scalar() == 0
+        assert (await session.execute(select(func.count(AttemptEvent.id)).where(AttemptEvent.attempt_id == attempt.id))).scalar() == 0
+        assert (await session.execute(select(func.count(ChatSession.id)).where(ChatSession.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(ChatMessage.id)).where(ChatMessage.session_id == cs.id))).scalar() == 0
+        assert (await session.execute(select(func.count(ChatCitation.id)).where(ChatCitation.message_id == cm.id))).scalar() == 0
+        assert (await session.execute(select(func.count(UsageCounter.student_id)).where(UsageCounter.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(LearningSignal.id)).where(LearningSignal.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(AiPlannerShadowRun.id)).where(AiPlannerShadowRun.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(ProgressDaily.id)).where(ProgressDaily.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(Mastery.id)).where(Mastery.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(RevisionItem.id)).where(RevisionItem.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(Device.id)).where(Device.user_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(UserSession.id)).where(UserSession.user_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(Notification.id)).where(Notification.user_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(NotificationDelivery.id)).where(NotificationDelivery.user_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(NotificationPreference.id)).where(NotificationPreference.user_id == s_id))).scalar() == 0
+
+        # Verify Audit Log anonymization: actor_id NULL, PII scrubbed
+        await session.refresh(audit)
+        assert audit.actor_id is None
+        assert audit.meta.get("anonymized") is True
+        assert audit.meta.get("reason") == "gdpr_privacy_purge"
+        assert "127.0.0.1" not in str(audit.meta)
+
+        # Verify User PII nullification
+        await session.refresh(student)
+        assert student.status == "purged"
+        assert student.display_name == "Deleted User"
+        assert student.email is None
+        assert student.phone is None
+        assert student.has_parental_consent is False
+
+
+@pytest.mark.asyncio
+async def test_central_consent_guard_and_suspended_retention_purge() -> None:
+    """Verify central consent guard enforcement on planner and notifications, and automatic 30-day suspension purge."""
+    from core.privacy.consent_guard import assert_consent_active, is_suspension_retention_expired
+    from core.notifications.service import NotificationService
+    from fastapi import HTTPException
+
+    async with AsyncSessionLocal() as session:
+        # 1. Suspended student is rejected by assert_consent_active
+        suspended_student = User(
+            id=uuid.uuid4(),
+            role="student",
+            auth_provider="phone",
+            auth_uid=f"fake:phone:+880181{uuid.uuid4().hex[:6]}",
+            display_name="Suspended Consent Student",
+            has_parental_consent=False,
+            status="active",
+        )
+        session.add(suspended_student)
+        await session.flush()
+
+        with pytest.raises(HTTPException) as exc_info:
+            assert_consent_active(suspended_student)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail["code"] == "CONSENT_WITHDRAWN"
+
+        # 2. Push notification delivery is suppressed for consent-suspended student
+        notif, deliveries = await NotificationService.dispatch_notification(
+            db=session,
+            user_id=suspended_student.id,
+            type="study_reminder",
+            title="Daily Study Reminder",
+            body="You have tasks scheduled for today.",
+            title_bn="দৈনিক পড়ার রিমাইন্ডার",
+            body_bn="আজকে পড়ার পরিকল্পনা রয়েছে।",
+        )
+        assert len(deliveries) >= 2
+        push_delivery = next(d for d in deliveries if d.channel == "push")
+        assert push_delivery.status == "suppressed_consent_suspended"
+
+        # 3. Automatic purge when consent suspension exceeds 30-day retention period
+        past_30d = datetime.now(UTC) - timedelta(days=31)
+        assert is_suspension_retention_expired(past_30d) is True
+
+        parent = User(
+            id=uuid.uuid4(),
+            role="parent",
+            auth_provider="phone",
+            auth_uid=f"fake:phone:+880182{uuid.uuid4().hex[:6]}",
+            display_name="Suspended Link Parent",
+            status="active",
+        )
+        session.add(parent)
+        await session.flush()
+
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            parent_id=parent.id,
+            student_id=suspended_student.id,
+            status="consent_suspended",
+            revoked_at=past_30d,
+        )
+        session.add(link)
+        await session.commit()
+
+        # Run purge sweep
+        report = await execute_data_purge(session)
+        assert report.purged_accounts >= 1
+
+        await session.refresh(suspended_student)
+        assert suspended_student.status == "purged"
+
 

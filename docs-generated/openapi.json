@@ -58,7 +58,7 @@
           "Client & Config"
         ],
         "summary": "Get Client Config",
-        "description": "Dynamic client configuration endpoint per docs/04_API_CONTRACT.md \u00a71 & \u00a75.\n\nReturns server-driven settings, minimum version thresholds, active feature flags,\nand quiz security modes allowed per platform without code branching.\nAligned with docs/05_SECURE_QUIZ.md \u00a73 ('assessed' on mobile, 'practice_only' on web).",
+        "description": "Dynamic client configuration endpoint per docs/04_API_CONTRACT.md §1 & §5.\n\nReturns server-driven settings, minimum version thresholds, active feature flags,\nand quiz security modes allowed per platform without code branching.\nAligned with docs/05_SECURE_QUIZ.md §3 ('assessed' on mobile, 'practice_only' on web).",
         "operationId": "get_client_config_v1_client_config_get",
         "parameters": [
           {
@@ -4569,7 +4569,7 @@
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Family name (e.g. '\u09b0\u09b9\u09ae\u09be\u09a8 \u09aa\u09b0\u09bf\u09ac\u09be\u09b0' or 'Rahman Family')"
+            "description": "Family name (e.g. 'রহমান পরিবার' or 'Rahman Family')"
           }
         },
         "type": "object",
@@ -6112,7 +6112,7 @@
           "exam_countdown_days"
         ],
         "title": "TodayHomePayloadResponse",
-        "description": "Home screen learning loop payload (Product Flows \u00a74.2 / Rule 4)."
+        "description": "Home screen learning loop payload (Product Flows §4.2 / Rule 4)."
       },
       "TokenResponse": {
         "properties": {

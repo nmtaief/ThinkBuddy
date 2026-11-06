@@ -132,6 +132,7 @@ async def exchange_token(
                 )
 
         display_name = payload.display_name or verified_user.display_name or "ThinkBuddy User"
+        initial_consent = False if requested_role == "parent" else True
         user = User(
             id=uuid.uuid4(),
             auth_provider=verified_user.provider,
@@ -142,6 +143,7 @@ async def exchange_token(
             email=verified_user.email,
             locale=payload.locale,
             status="active",
+            has_parental_consent=initial_consent,
         )
         db.add(user)
         await db.flush()

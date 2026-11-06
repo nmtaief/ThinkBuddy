@@ -59,3 +59,4 @@ WHERE dl.target_type = 'user' AND u.status != 'purged';
 
 ### Step 5: Resume Traffic
 Once verification returns 0 rows, unpause API Gateway traffic and notify the Incident Response Commander.
+

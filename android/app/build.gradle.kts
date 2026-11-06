@@ -25,7 +25,9 @@ android {
         release {
             isMinifyEnabled = true
             isDebuggable = false
-            buildConfigField("String", "API_BASE_URL", "\"https://api.thinkbuddy.com/\"")
+            val releaseApiUrl = providers.environmentVariable("THINKBUDDY_API_URL").orNull
+                ?: "https://api.thinkbuddy.com/"
+            buildConfigField("String", "API_BASE_URL", "\"$releaseApiUrl\"")
             buildConfigField("Boolean", "ENABLE_FAKE_AUTH", "false")
             buildConfigField("Boolean", "LOG_HTTP_BODIES", "false")
             proguardFiles(
@@ -113,4 +115,15 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+tasks.configureEach {
+    if (name.contains("Release", ignoreCase = true) && (name.startsWith("assemble") || name.startsWith("bundle"))) {
+        doFirst {
+            val url = providers.environmentVariable("THINKBUDDY_API_URL").orNull ?: ""
+            if (url.isBlank() || url.contains("placeholder", ignoreCase = true) || url.contains("example.com", ignoreCase = true)) {
+                throw GradleException("Release builds require a valid, non-placeholder API base URL via THINKBUDDY_API_URL environment variable.")
+            }
+        }
+    }
 }

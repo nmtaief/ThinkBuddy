@@ -30,4 +30,8 @@ CURRENT_CONSENT_TEXT_HASH: str = hashlib.sha256(
     PARENTAL_CONSENT_TERMS_TEXT.strip().encode("utf-8")
 ).hexdigest()
 
+# Retention period for suspended data following parental consent withdrawal (30 days)
+CONSENT_SUSPENSION_RETENTION_DAYS: int = 30
+
+
 
