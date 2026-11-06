@@ -37,6 +37,10 @@ celery_app.conf.update(
             "task": "daily_privacy_purge_task",
             "schedule": 86400.0,  # daily purge at 24h interval
         },
+        "daily-consent-suspension-warnings": {
+            "task": "daily_consent_suspension_warnings_task",
+            "schedule": 86400.0,  # daily check for day-23 warnings
+        },
     },
 )
 

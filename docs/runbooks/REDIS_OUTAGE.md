@@ -52,3 +52,4 @@ Expected output:
 ```json
 {"status": "ok", "db": true, "redis": true}
 ```
+

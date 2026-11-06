@@ -92,3 +92,4 @@ def init_sentry(dsn: str | None, environment: str = "production", release: str =
         logger.warning("sentry_sdk is not installed. Skipping Sentry initialization.")
     except Exception as e:
         logger.error(f"Failed to initialize Sentry: {e}")
+

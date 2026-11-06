@@ -63,7 +63,7 @@ class MockLLMGateway(LLMGateway):
         self,
         default_stream_tokens: list[str] | None = None,
         classification_result: str = "study_question",
-        token_delay_s: float = 0.01,
+        token_delay_s: float = 0.04,
         simulate_disconnect_after_tokens: int | None = None,
         fail_primary: bool = False,
         fallback_stream_tokens: list[str] | None = None,

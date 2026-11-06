@@ -68,3 +68,4 @@ If data files are damaged or disk hardware failed:
    curl -i http://localhost:8001/readyz
    curl -i http://localhost:8000/v1/client/config -H "X-Client-Platform: android" -H "X-Client-Form-Factor: phone" -H "X-App-Version: 1.0.0"
    ```
+

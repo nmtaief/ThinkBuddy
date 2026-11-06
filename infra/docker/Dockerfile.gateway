@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir .
 
 # Copy application source
 COPY gateway/ ./gateway/
-COPY core/common/ ./core/common/
+COPY core/ ./core/
+COPY rag/ ./rag/
 
 # Create unprivileged user
 RUN useradd -m -u 10001 thinkbuddy && \

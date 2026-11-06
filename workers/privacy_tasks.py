@@ -6,10 +6,29 @@ import asyncio
 import logging
 
 from core.common.database import async_session_factory
-from core.privacy.purge import execute_data_purge
+from core.privacy.purge import dispatch_consent_suspension_warnings, execute_data_purge
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="daily_consent_suspension_warnings_task")
+def daily_consent_suspension_warnings_task() -> dict[str, int]:
+    """Daily scheduled background task to notify parents on day 23 of consent suspension."""
+    logger.info("Starting daily consent suspension warnings check...")
+
+    async def _run() -> dict[str, int]:
+        async with async_session_factory() as session:
+            count = await dispatch_consent_suspension_warnings(session)
+            return {"dispatched_warnings": count}
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop.run_until_complete(_run())
 
 
 @celery_app.task(name="daily_privacy_purge_task")

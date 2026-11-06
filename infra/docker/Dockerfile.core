@@ -13,6 +13,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
 COPY core/ ./core/
+COPY rag/ ./rag/
 COPY migrations/ ./migrations/
 COPY alembic.ini .
 

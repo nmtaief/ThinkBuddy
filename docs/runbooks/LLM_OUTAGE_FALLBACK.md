@@ -56,3 +56,4 @@ Monitor Gateway logs:
 docker compose -f docker-compose.prod.yml logs -f --tail=50 gateway | grep "chat_turn"
 ```
 Confirm `HTTP 200 OK` on SSE streams.
+

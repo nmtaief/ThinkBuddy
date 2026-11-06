@@ -113,6 +113,11 @@ async def execute_student_plan_regeneration(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Study plan updates are suspended."},
             )
+        if student_user and not student_user.has_parental_consent:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to generate or update study plans."},
+            )
 
         # 1. Fetch student profile
         stmt_prof = select(StudentProfile).where(StudentProfile.user_id == student_id)

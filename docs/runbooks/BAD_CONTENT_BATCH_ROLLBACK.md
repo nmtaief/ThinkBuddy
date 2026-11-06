@@ -66,3 +66,4 @@ Verify retrieval accuracy:
 python scripts/eval_retrieval.py
 ```
 Confirm retrieval confidence > 0.85 and printed page citations match physical textbooks.
+

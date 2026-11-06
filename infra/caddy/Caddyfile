@@ -5,7 +5,7 @@
 }
 
 # Production Ingress
-api.thinkbuddy.com, {$PUBLIC_DOMAIN:localhost} {
+{$PUBLIC_DOMAIN:localhost} {
     encode zstd gzip
 
     # Health check bypass for load balancer
@@ -13,25 +13,26 @@ api.thinkbuddy.com, {$PUBLIC_DOMAIN:localhost} {
         respond "OK" 200
     }
 
-    # Prometheus metrics endpoint (internal network only)
-    handle /metrics {
-        @internal remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/32
-        handle @internal {
-            reverse_proxy gateway:8000
-        }
+    # Prometheus metrics endpoint: blocked from public ingress (internal network only)
+    @internal_metrics {
+        path /metrics*
+        remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/32 ::1
+    }
+    handle @internal_metrics {
+        reverse_proxy gateway:8000
+    }
+    handle /metrics* {
         respond "Forbidden" 403
     }
 
     # Server-Sent Events (SSE) AI tutoring chat streaming - flush immediately, no buffering
-    handle /v1/chat/messages* {
+    # Real chat stream path matches /v1/chat/sessions/{session_id}/messages
+    handle /v1/chat/sessions/*/messages* {
         reverse_proxy gateway:8000 {
             flush_interval -1
             header_up Host {host}
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             header_down Cache-Control "no-cache, no-transform"
-            header_down X-Accel-Buffering "no"
         }
     }
 
@@ -40,8 +41,6 @@ api.thinkbuddy.com, {$PUBLIC_DOMAIN:localhost} {
         reverse_proxy gateway:8000 {
             header_up Host {host}
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
         }
     }
 

@@ -84,27 +84,35 @@ def verify_staging_health(base_url: str = "http://localhost:8000", max_attempts:
     return False
 
 
-def execute_rollback(snapshot_path: Path | None, prev_compose_file: str = "docker-compose.yml") -> None:
-    """Execute clean automated rollback on deploy failure."""
+def execute_rollback(
+    snapshot_path: Path | None,
+    prev_compose_file: str = "docker-compose.yml",
+    destructive_failure: bool = False,
+) -> None:
+    """Execute clean automated rollback on deploy failure.
+
+    Policy (Item 4):
+    - Primary: Redeploy previous application image with backward-compatible schema (expand-and-contract).
+    - Snapshot restore: Reserved strictly for destructive data corruption failures.
+    """
     logger.error("Initiating automated deployment rollback...")
     try:
-        # Revert container deployment
+        # 1. Stop failed deployment containers
         logger.info("Stopping failed deployment containers...")
-        run_cmd(f"docker compose -f docker-compose.prod.yml down", check=False)
+        run_cmd("docker compose -f docker-compose.prod.yml down", check=False)
 
-        # Restore database snapshot if available
-        if snapshot_path and snapshot_path.exists():
-            logger.info(f"Restoring database state from pre-deploy snapshot: {snapshot_path}")
+        # 2. Prefer redeploying previous image with expand-and-contract
+        if destructive_failure and snapshot_path and snapshot_path.exists():
+            logger.warning(f"Destructive data corruption failure: Restoring DB state from pre-deploy snapshot: {snapshot_path}")
             restore_cmd = [sys.executable, "scripts/restore_db.py", "--input", str(snapshot_path), "--skip-reauth-check"]
             run_cmd(restore_cmd, check=False)
         else:
-            logger.info("Rolling back Alembic migration by 1 revision...")
-            run_cmd("alembic downgrade -1", check=False)
+            logger.info("Non-destructive deployment issue: Relying on expand-and-contract backward-compatible schema.")
 
-        # Restart previous stable stack
-        logger.info(f"Starting previous stable container stack: {prev_compose_file}")
+        # 3. Restart previous stable container stack
+        logger.info(f"Redeploying previous stable container stack: {prev_compose_file}")
         run_cmd(f"docker compose -f {prev_compose_file} up -d", check=True)
-        logger.info("Rollback completed successfully. System restored to previous working state.")
+        logger.info("Rollback completed successfully. Previous stable container image is active.")
     except Exception as rb_err:
         logger.critical(f"FATAL: Rollback procedure encountered an error: {rb_err}")
         sys.exit(2)
@@ -160,3 +168,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

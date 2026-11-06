@@ -275,7 +275,28 @@ async def get_client_config(
 # -------------------------------------------------------------------------
 @router.post("/auth/reauthenticate", response_model=ReauthenticateResponse, tags=["Auth"])
 async def reauthenticate_auth_token(payload: ReauthenticateRequest, request: Request) -> Response:
-    """Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time."""
+    """Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.
+
+    Strictly rate limited to prevent brute force; fails closed/strict on Redis outage.
+    """
+    trusted_ip = get_trusted_client_ip(request)
+    ip_key = f"rl:reauth:ip:{trusted_ip}"
+    allowed, retry_after = await RateLimiter.check_rate_limit(
+        ip_key, max_requests=5, window_seconds=60
+    )
+    if not allowed:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many re-authentication attempts. Please try again later.",
+                    "request_id": req_id,
+                }
+            },
+        )
     return await forward_to_core(request)
 
 @router.post("/auth/exchange", response_model=TokenResponse, tags=["Auth"])

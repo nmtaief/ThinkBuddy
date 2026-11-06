@@ -189,14 +189,27 @@ class ParentService:
         parent_id: uuid.UUID,
         student_id: uuid.UUID,
     ) -> None:
-        """Verify active parent-student family linkage (Rule 9)."""
+        """Verify active parent-student family linkage and consent status (Rule 9)."""
         stmt = select(ParentStudentLink).where(
             ParentStudentLink.parent_id == parent_id,
             ParentStudentLink.student_id == student_id,
-            ParentStudentLink.status == "active",
         )
         res = await db.execute(stmt)
-        if not res.scalars().first():
+        link = res.scalars().first()
+        if not link:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Parent is not linked to this student (Rule 9)",
+            )
+        if link.status == "consent_suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "CONSENT_WITHDRAWN",
+                    "message": "Parental consent for this student was withdrawn. Academic dashboard access is suspended.",
+                },
+            )
+        if link.status != "active":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Parent is not linked to this student (Rule 9)",

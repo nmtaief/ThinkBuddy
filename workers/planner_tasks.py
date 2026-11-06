@@ -41,7 +41,16 @@ async def _async_regenerate_plan(
     setup_id = uuid.UUID(setup_id_str)
 
     async with AsyncSessionLocal() as session:
-        # 1. Idempotency check: if plan for this setup and version already exists and is active
+        # 1. Central Consent Guard: Check if student has active parental consent
+        from core.auth.models import User
+        stmt_user = select(User).where(User.id == student_id)
+        res_user = await session.execute(stmt_user)
+        student_user = res_user.scalar_one_or_none()
+        if not student_user or not student_user.has_parental_consent:
+            logger.info("Student %s lacks active parental consent; skipping plan regeneration.", student_id)
+            return {"status": "skipped", "reason": "consent_withdrawn"}
+
+        # 1b. Idempotency check: if plan for this setup and version already exists and is active
         stmt_plan = select(Plan).where(Plan.setup_id == setup_id, Plan.version == version)
         res_plan = await session.execute(stmt_plan)
         existing_plan = res_plan.scalar_one_or_none()
@@ -232,6 +241,14 @@ async def _async_extend_rolling_plans() -> dict[str, Any]:
         profiles = res_prof.scalars().all()
 
         for prof in profiles:
+            # Check consent before processing
+            from core.auth.models import User
+            stmt_user = select(User).where(User.id == prof.user_id)
+            res_user = await session.execute(stmt_user)
+            student_user = res_user.scalar_one_or_none()
+            if not student_user or not student_user.has_parental_consent:
+                continue
+
             stmt_setups = select(StudySetup).where(StudySetup.student_id == prof.user_id)
             res_s = await session.execute(stmt_setups)
             setups = res_s.scalars().all()

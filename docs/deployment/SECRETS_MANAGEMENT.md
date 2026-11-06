@@ -53,3 +53,12 @@ If a token or secret is suspected of exposure:
 2. Restart all services.
 3. Flush Redis sessions: `redis-cli -a $REDIS_PASSWORD flushdb`.
 4. All active sessions are terminated immediately, forcing fresh authentication.
+
+### 4.4. Error Tracking & Sentry Privacy Architecture
+To prevent student data or PII leakage to third-party SaaS vendors (Rule 15 & GDPR):
+1. **PII Sanitization**: Sentry SDK must always run with `send_default_pii = False` and strict `before_send` scrubbing (scrubbing tokens, passwords, cookies, authorization headers, student prompt content, and OTPs).
+2. **Region & Self-Hosting Strategy**:
+   - **EU Cloud Endpoint**: For cloud Sentry, the DSN must target the Frankfurt, Germany EU ingestion endpoint (e.g. `https://xxx@o0.ingest.de.sentry.io/yyy`), ensuring compliance with European and regional data privacy standards.
+   - **Self-Hosted Sentry (Recommended for Production)**: For strict on-premises data residency, ThinkBuddy supports deploying a self-hosted Sentry instance (`sentry.internal.thinkbuddy.com`) inside the private VPC, keeping all stack traces, error telemetry, and metadata entirely within ThinkBuddy's infrastructure.
+
+

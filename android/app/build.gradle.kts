@@ -25,9 +25,17 @@ android {
         release {
             isMinifyEnabled = true
             isDebuggable = false
-            val releaseApiUrl = providers.environmentVariable("THINKBUDDY_API_URL").orNull
-                ?: "https://api.thinkbuddy.com/"
-            buildConfigField("String", "API_BASE_URL", "\"$releaseApiUrl\"")
+            val releaseApiUrl = providers.environmentVariable("THINKBUDDY_API_URL").orNull ?: ""
+            val isReleaseBuild = gradle.startParameter.taskNames.any {
+                it.contains("Release", ignoreCase = true)
+            }
+            if (isReleaseBuild) {
+                if (releaseApiUrl.isBlank() || !releaseApiUrl.startsWith("https://") || releaseApiUrl.contains("placeholder") || releaseApiUrl.contains("example.com")) {
+                    throw GradleException("Release builds strictly require an explicit HTTPS THINKBUDDY_API_URL environment variable (got: '$releaseApiUrl')")
+                }
+            }
+            val configuredReleaseUrl = if (releaseApiUrl.isNotBlank()) releaseApiUrl else "https://api.thinkbuddy.internal/"
+            buildConfigField("String", "API_BASE_URL", "\"$configuredReleaseUrl\"")
             buildConfigField("Boolean", "ENABLE_FAKE_AUTH", "false")
             buildConfigField("Boolean", "LOG_HTTP_BODIES", "false")
             proguardFiles(

@@ -318,3 +318,68 @@ async def execute_data_purge(
         f"{report.deleted_shadow_runs} shadow runs deleted, {report.anonymized_audit_records} audit entries anonymized."
     )
     return report
+
+
+async def dispatch_consent_suspension_warnings(
+    db: AsyncSession,
+    reference_time: datetime | None = None,
+) -> int:
+    """Find students whose parental consent was suspended 23+ days ago and notify parents.
+
+    Warns parents that learning records will be permanently purged on day 30 if consent is not reinstated.
+    Idempotent: skips if a warning has already been created for this link since suspension.
+    """
+    now = reference_time or utcnow()
+    day23_cutoff = now - timedelta(days=23)
+    day30_cutoff = now - timedelta(days=30)
+
+    # Query links suspended between 23 and 30 days ago
+    stmt = (
+        select(ParentStudentLink, User.display_name)
+        .join(User, User.id == ParentStudentLink.student_id)
+        .where(
+            ParentStudentLink.status == "consent_suspended",
+            ParentStudentLink.revoked_at.is_not(None),
+            ParentStudentLink.revoked_at <= day23_cutoff,
+            ParentStudentLink.revoked_at > day30_cutoff,
+        )
+    )
+    res = await db.execute(stmt)
+    records = res.all()
+
+    dispatched_count = 0
+    for link, student_name in records:
+        # Check if already notified since revoked_at
+        stmt_check = select(Notification).where(
+            Notification.user_id == link.parent_id,
+            Notification.type == "consent_suspension_warning",
+            Notification.created_at >= link.revoked_at,
+        )
+        existing = (await db.execute(stmt_check)).scalar_one_or_none()
+        if existing:
+            continue
+
+        child_name = student_name or "Your child"
+        notif = Notification(
+            id=uuid.uuid4(),
+            user_id=link.parent_id,
+            type="consent_suspension_warning",
+            title="Warning: Child Data Purge in 7 Days",
+            body=f"Parental consent for {child_name} was withdrawn 23 days ago. All learning data will be permanently purged in 7 days unless consent is renewed.",
+            title_bn="সতর্কতা: ৭ দিনের মধ্যে শিক্ষার্থীর তথ্য মুছে ফেলা হবে",
+            body_bn=f"{child_name}-এর অভিভাবকের সম্মতি প্রত্যাহার করা হয়েছে। ৭ দিনের মধ্যে সম্মতি পুনঃপ্রদান না করা হলে সমস্ত তথ্য স্থায়ীভাবে মুছে ফেলা হবে।",
+            data={
+                "student_id": str(link.student_id),
+                "family_id": str(link.family_id),
+                "revoked_at": link.revoked_at.isoformat(),
+                "action": "renew_consent",
+            },
+            created_at=now,
+        )
+        db.add(notif)
+        dispatched_count += 1
+
+    if dispatched_count > 0:
+        await db.commit()
+    return dispatched_count
+

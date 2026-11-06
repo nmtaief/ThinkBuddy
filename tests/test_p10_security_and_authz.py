@@ -243,3 +243,235 @@ async def test_rule_15_pii_and_token_scrubbing(gateway_client: AsyncClient) -> N
     assert res_bad.status_code in (400, 401, 422)
     # The secret token must NOT be reflected in plain text in the error response
     assert "secret_very_sensitive_auth_token_xyz987" not in res_bad.text
+
+
+@pytest.mark.asyncio
+async def test_route_inventory_requires_auth_on_every_route() -> None:
+    """Rule 9: Dynamic route-inventory test asserting auth on every non-public endpoint."""
+    from fastapi.routing import APIRoute
+    from core.main import app as core_app
+
+    public_allowlist = {
+        "/metrics",
+        "/healthz",
+        "/readyz",
+        "/v1/auth/exchange",
+        "/v1/auth/refresh",
+        "/v1/auth/status",
+        "/v1/internal/auth/status",
+        "/auth/exchange",
+        "/auth/refresh",
+        "/auth/status",
+        "/internal/auth/status",
+        "/v1/parents/consent/current",
+        "/parents/consent/current",
+    }
+
+    auth_dependency_names = {
+        "get_current_user",
+        "get_current_user_profile",
+        "role_checker",
+        "check_student_access",
+        "verify_parent_student_link",
+        "require_reauth",
+        "require_internal_service_token",
+        "logout_session",
+    }
+
+    def get_all_dep_names(dependant) -> set[str]:
+        names = set()
+        if hasattr(dependant.call, "__name__"):
+            names.add(dependant.call.__name__)
+        for sub in getattr(dependant, "dependencies", []):
+            names.update(get_all_dep_names(sub))
+        return names
+
+    unprotected_routes = []
+    for route in core_app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        path = route.path
+        if path in public_allowlist:
+            continue
+        dep_names = get_all_dep_names(route.dependant)
+        if path.startswith("/internal") or "/internal/" in path:
+            if "verify_internal_service_token" in dep_names or "require_internal_service_token" in dep_names:
+                continue
+        if not (dep_names & auth_dependency_names):
+            unprotected_routes.append(f"{route.methods} {path} (deps: {dep_names})")
+
+    assert not unprotected_routes, f"Found unprotected routes in core_app: {unprotected_routes}"
+
+
+@pytest.mark.asyncio
+async def test_redis_outage_rate_limit_fails_closed() -> None:
+    """Item 3: Sensitive endpoints (auth, reauth, OTP) fail closed or apply strict in-process limits during Redis outage."""
+    from unittest.mock import patch
+    from core.common.rate_limit import RateLimiter, _mem_counters
+
+    _mem_counters.clear()
+
+    # 1. Test fail-closed on explicit flag
+    with patch("core.common.rate_limit.get_redis_client", side_effect=ConnectionError("Redis down")):
+        allowed, retry_after = await RateLimiter.check_rate_limit(
+            key="rl:reauth:ip:10.0.0.1",
+            max_requests=5,
+            window_seconds=60,
+            fail_closed_on_redis_error=True,
+        )
+        assert allowed is False
+        assert retry_after == 60
+
+    # 2. Test strict in-process rate limit for sensitive keys (max 3 requests)
+    key = f"rl:reauth:test_ip:{uuid.uuid4().hex[:6]}"
+    with patch("core.common.rate_limit.get_redis_client", side_effect=ConnectionError("Redis down")):
+        for attempt in range(1, 4):
+            allowed, retry_after = await RateLimiter.check_rate_limit(
+                key=key,
+                max_requests=10,
+                window_seconds=60,
+                fail_closed_on_redis_error=False,
+            )
+            assert allowed is True, f"Attempt {attempt} should be allowed under strict in-process limit"
+
+        # 4th request must be rejected
+        allowed4, retry_after4 = await RateLimiter.check_rate_limit(
+            key=key,
+            max_requests=10,
+            window_seconds=60,
+            fail_closed_on_redis_error=False,
+        )
+        assert allowed4 is False
+        assert retry_after4 > 0
+
+
+@pytest.mark.asyncio
+async def test_consent_guard_background_jobs_and_dashboards() -> None:
+    """Item 8: Background planner tasks and parent dashboards block access when student parental consent is withdrawn."""
+    from datetime import UTC, datetime
+    from core.common.database import AsyncSessionLocal
+    from core.auth.models import User
+    from core.families.models import Family, ParentStudentLink
+    from core.parent.service import ParentService
+    from workers.planner_tasks import _async_regenerate_plan
+    from fastapi import HTTPException
+
+    async with AsyncSessionLocal() as session:
+        # Create parent and student with valid auth_provider/auth_uid
+        p_id = uuid.uuid4()
+        s_id = uuid.uuid4()
+        fam_id = uuid.uuid4()
+
+        parent = User(
+            id=p_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{p_id.hex[:8]}",
+            phone=f"+880179{uuid.uuid4().hex[:6]}",
+            role="parent",
+            display_name="Consent Parent",
+            has_parental_consent=True,
+        )
+        student = User(
+            id=s_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{s_id.hex[:8]}",
+            phone=f"+880178{uuid.uuid4().hex[:6]}",
+            role="student",
+            display_name="Consent Child",
+            has_parental_consent=False,  # Consent withdrawn
+        )
+        fam = Family(id=fam_id, owner_parent_id=p_id, name="Consent Family")
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            family_id=fam_id,
+            parent_id=p_id,
+            student_id=s_id,
+            status="consent_suspended",
+            revoked_at=datetime.now(UTC),
+        )
+
+        session.add_all([parent, student, fam, link])
+        await session.commit()
+
+        # 1. Background plan regeneration must skip for student without consent
+        res_regen = await _async_regenerate_plan(str(s_id), str(uuid.uuid4()), version=1)
+        assert res_regen["status"] == "skipped"
+        assert res_regen["reason"] == "consent_withdrawn"
+
+        # 2. Parent dashboard check must fail with 403 CONSENT_WITHDRAWN for suspended link
+        with pytest.raises(HTTPException) as exc_info:
+            await ParentService.verify_parent_student_link(session, p_id, s_id)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail.get("code") == "CONSENT_WITHDRAWN"
+
+
+@pytest.mark.asyncio
+async def test_day23_warning_task_before_day30_purge() -> None:
+    """Item 8: Day-23 warning task sends notification to parents before day-30 permanent purge."""
+    from datetime import UTC, datetime, timedelta
+    from sqlalchemy import select
+    from core.common.database import AsyncSessionLocal
+    from core.auth.models import User
+    from core.families.models import Family, ParentStudentLink
+    from core.notifications.models import Notification
+    from core.privacy.purge import dispatch_consent_suspension_warnings
+
+    async with AsyncSessionLocal() as session:
+        p_id = uuid.uuid4()
+        s_id = uuid.uuid4()
+        fam_id = uuid.uuid4()
+
+        parent = User(
+            id=p_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{p_id.hex[:8]}",
+            phone=f"+880177{uuid.uuid4().hex[:6]}",
+            role="parent",
+            display_name="Warning Parent",
+            has_parental_consent=True,
+        )
+        student = User(
+            id=s_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{s_id.hex[:8]}",
+            phone=f"+880175{uuid.uuid4().hex[:6]}",
+            role="student",
+            display_name="Warning Child",
+            has_parental_consent=False,
+        )
+        fam = Family(id=fam_id, owner_parent_id=p_id, name="Warning Family")
+
+        # Suspended 24 days ago (between 23 and 30 days)
+        revoked_at = datetime.now(UTC) - timedelta(days=24)
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            family_id=fam_id,
+            parent_id=p_id,
+            student_id=s_id,
+            status="consent_suspended",
+            revoked_at=revoked_at,
+        )
+
+        session.add_all([parent, student, fam, link])
+        await session.commit()
+
+        # First run: should dispatch 1 warning notification
+        count1 = await dispatch_consent_suspension_warnings(session)
+        assert count1 >= 1
+
+        # Check notification content
+        stmt_n = select(Notification).where(
+            Notification.user_id == p_id,
+            Notification.type == "consent_suspension_warning",
+        )
+        res_n = await session.execute(stmt_n)
+        notif = res_n.scalars().first()
+        assert notif is not None
+        assert "7 days" in notif.body
+        assert "৭ দিনের" in notif.body_bn
+        assert notif.data["student_id"] == str(s_id)
+
+        # Second run (idempotency): should dispatch 0 new notifications
+        count2 = await dispatch_consent_suspension_warnings(session)
+        assert count2 == 0
+

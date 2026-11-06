@@ -65,7 +65,7 @@ services:
     container_name: thinkbuddy-core
     restart: unless-stopped
     environment:
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: INFO
       CORE_HOST: 0.0.0.0
       CORE_PORT: 8001
@@ -92,7 +92,7 @@ services:
     container_name: thinkbuddy-gateway
     restart: unless-stopped
     environment:
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: INFO
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8000

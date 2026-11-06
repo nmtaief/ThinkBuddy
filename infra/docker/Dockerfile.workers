@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir .
 
 COPY workers/ ./workers/
 COPY core/ ./core/
+COPY rag/ ./rag/
 
 RUN useradd -m -u 10001 thinkbuddy && \
     chown -R thinkbuddy:thinkbuddy /app

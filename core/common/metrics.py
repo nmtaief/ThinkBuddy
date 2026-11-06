@@ -90,17 +90,6 @@ async def metrics_middleware(request: Request, call_next: Callable) -> Response:
     endpoint = request.url.path
     method = request.method
 
-    # Normalize variable UUIDs or numeric IDs in endpoint path to avoid metric cardinality explosion
-    norm_parts = []
-    for part in endpoint.split("/"):
-        if len(part) in (32, 36) and ("-" in part or any(c.isdigit() for c in part)):
-            norm_parts.append(":id")
-        elif part.isdigit():
-            norm_parts.append(":id")
-        else:
-            norm_parts.append(part)
-    normalized_path = "/".join(norm_parts) or "/"
-
     try:
         response = await call_next(request)
         status_code = str(response.status_code)
@@ -109,6 +98,21 @@ async def metrics_middleware(request: Request, call_next: Callable) -> Response:
         raise
     finally:
         duration = time.perf_counter() - start_time
+        route = request.scope.get("route")
+        if route and hasattr(route, "path"):
+            normalized_path = route.path
+        else:
+            # Normalize variable UUIDs or numeric IDs in endpoint path to avoid metric cardinality explosion
+            norm_parts = []
+            for part in endpoint.split("/"):
+                if len(part) in (32, 36) and ("-" in part or any(c.isdigit() for c in part)):
+                    norm_parts.append(":id")
+                elif part.isdigit():
+                    norm_parts.append(":id")
+                else:
+                    norm_parts.append(part)
+            normalized_path = "/".join(norm_parts) or "/"
+
         HTTP_REQUESTS_TOTAL.labels(
             method=method, endpoint=normalized_path, status_code=status_code
         ).inc()
@@ -122,3 +126,4 @@ async def metrics_middleware(request: Request, call_next: Callable) -> Response:
 def metrics_endpoint() -> Response:
     """Handler returning Prometheus-formatted text metrics."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+

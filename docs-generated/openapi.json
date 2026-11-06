@@ -146,7 +146,7 @@
           "Auth"
         ],
         "summary": "Reauthenticate Auth Token",
-        "description": "Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.",
+        "description": "Dedicated re-authentication endpoint requiring fresh provider sign-in with recent auth_time.\n\nStrictly rate limited to prevent brute force; fails closed/strict on Redis outage.",
         "operationId": "reauthenticate_auth_token_v1_auth_reauthenticate_post",
         "requestBody": {
           "content": {

@@ -67,7 +67,7 @@ async def setup_curriculum() -> None:
     async with AsyncSessionLocal() as session:
         stmt = select(Book).where(Book.subject == "science", Book.class_level == 7)
         res = await session.execute(stmt)
-        if not res.scalar_one_or_none():
+        if not res.scalars().first():
             sci_book = Book(
                 id=uuid.UUID("4fa85f64-5717-4562-b3fc-2c963f66afa2"),
                 title="বিজ্ঞান (সপ্তম শ্রেণি)",

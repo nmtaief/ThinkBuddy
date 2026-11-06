@@ -145,3 +145,4 @@ volumes:
 networks:
   thinkbuddy-net:
     driver: bridge
+

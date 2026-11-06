@@ -62,3 +62,4 @@ Every endpoint strictly validates the caller's verified JWT claims (UID, role) a
 ## 4. Verification Check
 - `pytest tests/test_p10_security_and_authz.py`: **5 passed in 0.77s**.
 - `gitleaks detect --verbose`: **55 commits scanned, 0 leaks found**.
+

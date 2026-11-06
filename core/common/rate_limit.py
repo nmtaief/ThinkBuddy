@@ -101,6 +101,17 @@ _mem_failures: dict[str, tuple[int, float]] = {}
 _redis_down_until: float = 0.0
 
 
+SENSITIVE_RATE_LIMIT_ACTIONS = (
+    "auth",
+    "auth_exchange",
+    "otp",
+    "link_redeem",
+    "link_code",
+    "reauth",
+    "reauthenticate",
+)
+
+
 class RateLimiter:
     """Distributed rate limiter and consecutive-failure lockout backed strictly by Redis,
     with local in-memory fallback for offline test environments.
@@ -112,6 +123,7 @@ class RateLimiter:
         key: str,
         max_requests: int,
         window_seconds: int,
+        fail_closed_on_redis_error: bool = False,
     ) -> tuple[bool, int]:
         """Check if request is permitted under fixed-window rate limit.
 
@@ -119,12 +131,15 @@ class RateLimiter:
             key: Composite identifier (e.g. "rl:link_redeem:127.0.0.1:user-123")
             max_requests: Maximum allowed attempts in window
             window_seconds: Duration of rate limit window in seconds
+            fail_closed_on_redis_error: If True, reject request immediately on Redis outage
 
         Returns:
             (is_allowed, retry_after_seconds)
         """
         global _redis_down_until
         now = time.monotonic()
+        redis_error = False
+
         if now > _redis_down_until:
             try:
                 redis = get_redis_client()
@@ -145,8 +160,22 @@ class RateLimiter:
                     return False, max(ttl, 1)
 
                 return True, 0
-            except Exception:
+            except Exception as e:
                 _redis_down_until = now + 10.0
+                redis_error = True
+                logger.warning("Redis rate limiter connection error (%s). Engaging outage policy.", e)
+        else:
+            redis_error = True
+
+        # Redis outage handling (Deliverable 3):
+        # 1. Explicit fail-closed policy
+        if fail_closed_on_redis_error:
+            logger.warning("Redis outage: failing closed for sensitive route '%s'", key)
+            return False, 60
+
+        # 2. Sensitive endpoints (auth, OTP, link codes, re-auth) enforce strict in-process rate limit (max 3)
+        is_sensitive = any(act in key.lower() for act in SENSITIVE_RATE_LIMIT_ACTIONS)
+        effective_max = min(max_requests, 3) if is_sensitive else max_requests
 
         # Resilient in-memory fallback when Redis is offline or unreachable
         if key in _mem_lockouts:
@@ -161,7 +190,7 @@ class RateLimiter:
             expires_at = now + window_seconds
         count += 1
         _mem_counters[key] = (count, expires_at)
-        if count > max_requests:
+        if count > effective_max:
             return False, max(int(expires_at - now), 1)
         return True, 0
 
