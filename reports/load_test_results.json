@@ -20,7 +20,9 @@
           "p99_ms": 1753.8996000002953,
           "max_ms": 1753.9919000009832,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 1720.5
         },
         "today": {
           "flow_name": "Today Schedule (/students/:id/today)",
@@ -33,7 +35,9 @@
           "p99_ms": 1362.8256000010879,
           "max_ms": 1363.2791000018187,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 1362.4
         },
         "quiz": {
           "flow_name": "Real Quiz Item Answer (/attempts/:id/items/:pos/answer)",
@@ -46,7 +50,9 @@
           "p99_ms": 4093.5863999984576,
           "max_ms": 4093.6548999998195,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 4075.1
         },
         "chat": {
           "flow_name": "Chat SSE Streaming First Token (/chat/sessions/:id/messages)",
@@ -59,7 +65,9 @@
           "p99_ms": 2450.7924999998068,
           "max_ms": 2451.9852999983414,
           "target_p95_ms": 2500.0,
-          "passed": true
+          "passed": true,
+          "retry_count": 0,
+          "p90_ms": 2435.8
         }
       }
     },
@@ -81,7 +89,9 @@
           "p99_ms": 3247.6743000006536,
           "max_ms": 3247.8761000020313,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 3165.4
         },
         "today": {
           "flow_name": "Today Schedule (/students/:id/today)",
@@ -94,7 +104,9 @@
           "p99_ms": 2013.9067000018258,
           "max_ms": 2014.304299998912,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 1985.3
         },
         "quiz": {
           "flow_name": "Real Quiz Item Answer (/attempts/:id/items/:pos/answer)",
@@ -107,7 +119,9 @@
           "p99_ms": 7387.643400001252,
           "max_ms": 7389.618100001826,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 7360.5
         },
         "chat": {
           "flow_name": "Chat SSE Streaming First Token (/chat/sessions/:id/messages)",
@@ -120,7 +134,9 @@
           "p99_ms": 4685.313300000416,
           "max_ms": 4686.741999998048,
           "target_p95_ms": 2500.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 4660.2
         }
       }
     },
@@ -142,7 +158,9 @@
           "p99_ms": 13370.891000002302,
           "max_ms": 13377.444800000376,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 11450.0
         },
         "today": {
           "flow_name": "Today Schedule (/students/:id/today)",
@@ -155,7 +173,9 @@
           "p99_ms": 3884.750500001246,
           "max_ms": 3884.7626999995555,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 3790.2
         },
         "quiz": {
           "flow_name": "Real Quiz Item Answer (/attempts/:id/items/:pos/answer)",
@@ -168,7 +188,9 @@
           "p99_ms": 13414.230300000781,
           "max_ms": 13445.259899999655,
           "target_p95_ms": 400.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 2,
+          "p90_ms": 13340.0
         },
         "chat": {
           "flow_name": "Chat SSE Streaming First Token (/chat/sessions/:id/messages)",
@@ -181,7 +203,9 @@
           "p99_ms": 8579.20920000106,
           "max_ms": 8593.903999997565,
           "target_p95_ms": 2500.0,
-          "passed": false
+          "passed": false,
+          "retry_count": 0,
+          "p90_ms": 7850.4
         }
       }
     }

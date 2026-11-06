@@ -62,21 +62,26 @@ def decrypt_backup_file(input_enc_path: Path, output_path: Path, key: bytes) -> 
         f_out.write(plaintext)
 
 
-def download_from_offsite_bucket(object_name: str, dest_path: Path, bucket_name: str = "thinkbuddy-backups-offsite") -> Path:
+def download_from_offsite_bucket(object_name: str, dest_path: Path, bucket_name: str | None = None) -> Path:
     """Download encrypted backup archive from offsite S3/MinIO bucket."""
     import minio
     from core.common.config import settings
 
-    endpoint = settings.S3_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+    target_bucket = bucket_name or settings.OFFSITE_BACKUP_BUCKET_NAME
+    endpoint = settings.OFFSITE_BACKUP_ENDPOINT_URL.replace("http://", "").replace("https://", "")
     client = minio.Minio(
         endpoint=endpoint,
-        access_key=settings.S3_ACCESS_KEY_ID,
-        secret_key=settings.S3_SECRET_ACCESS_KEY,
-        secure=settings.S3_USE_SSL,
+        access_key=settings.OFFSITE_BACKUP_ACCESS_KEY_ID,
+        secret_key=settings.OFFSITE_BACKUP_SECRET_ACCESS_KEY,
+        region=settings.OFFSITE_BACKUP_REGION,
+        secure=settings.OFFSITE_BACKUP_USE_SSL,
     )
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Downloading s3://{bucket_name}/{object_name} -> {dest_path}...")
-    client.fget_object(bucket_name, object_name, str(dest_path))
+    logger.info(
+        f"Downloading {settings.OFFSITE_BACKUP_PROVIDER}://{target_bucket}/{object_name} -> {dest_path} "
+        f"(region: {settings.OFFSITE_BACKUP_REGION}, endpoint: {settings.OFFSITE_BACKUP_ENDPOINT_URL})..."
+    )
+    client.fget_object(target_bucket, object_name, str(dest_path))
     logger.info(f"Successfully downloaded {object_name} from offsite bucket.")
     return dest_path
 

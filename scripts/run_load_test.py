@@ -43,8 +43,10 @@ class FlowStats:
     total_requests: int
     successful_requests: int
     failed_requests: int
+    retry_count: int
     error_rate_pct: float
     p50_ms: float
+    p90_ms: float
     p95_ms: float
     p99_ms: float
     max_ms: float
@@ -189,7 +191,7 @@ async def setup_bench_user(client: httpx.AsyncClient, idx: int, run_id: str) -> 
     return s_token, student_id, s_headers
 
 
-async def bench_auth_exchange(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[float, bool]:
+async def bench_auth_exchange(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[float, bool, int]:
     phone = f"+88017{run_id[:2]}{idx:04d}"
     sim_ip = f"198.51.101.{(idx % 250) + 1}"
     t0 = time.perf_counter()
@@ -200,19 +202,19 @@ async def bench_auth_exchange(client: httpx.AsyncClient, idx: int, run_id: str) 
             headers={**CLIENT_HEADERS, "X-Device-Id": f"dev-auth-{run_id}-{idx:04d}", "X-Forwarded-For": sim_ip},
         )
         duration_ms = (time.perf_counter() - t0) * 1000
-        return duration_ms, res.status_code == 200
+        return duration_ms, res.status_code == 200, 0
     except Exception:
-        return (time.perf_counter() - t0) * 1000, False
+        return (time.perf_counter() - t0) * 1000, False, 0
 
 
-async def bench_today_payload(client: httpx.AsyncClient, student_id: str, headers: dict[str, str]) -> tuple[float, bool]:
+async def bench_today_payload(client: httpx.AsyncClient, student_id: str, headers: dict[str, str]) -> tuple[float, bool, int]:
     t0 = time.perf_counter()
     try:
         res = await client.get(f"/v1/students/{student_id}/today", headers=headers)
         duration_ms = (time.perf_counter() - t0) * 1000
-        return duration_ms, res.status_code == 200
+        return duration_ms, res.status_code == 200, 0
     except Exception:
-        return (time.perf_counter() - t0) * 1000, False
+        return (time.perf_counter() - t0) * 1000, False, 0
 
 
 async def bench_real_quiz_answer(
@@ -220,9 +222,10 @@ async def bench_real_quiz_answer(
     student_id: str,
     headers: dict[str, str],
     chapter_id: str,
-) -> tuple[float, bool]:
+) -> tuple[float, bool, int]:
     """Flow 3: Real quiz start and item answer submission (/v1/attempts/{aid}/items/{pos}/answer)."""
     t0 = time.perf_counter()
+    retries = 0
     try:
         # 1. Create or get student quiz (with brief retry on congestion)
         quiz_id = None
@@ -237,16 +240,18 @@ async def bench_real_quiz_answer(
                     quiz_id = res_q.json()["id"]
                     break
                 if res_q.status_code in (503, 429, 502, 504) or "retryable" in res_q.text.lower():
+                    retries += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
+                retries += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
         if not quiz_id:
             logger.warning(f"[QUIZ FAIL 1] Student {student_id} failed to create quiz: {res_q.status_code if 'res_q' in locals() else 'no_resp'} {res_q.text[:200] if 'res_q' in locals() else ''}")
-            return (time.perf_counter() - t0) * 1000, False
+            return (time.perf_counter() - t0) * 1000, False, retries
 
         # 2. Start attempt (with brief retry on congestion)
         attempt_id = None
@@ -266,16 +271,18 @@ async def bench_real_quiz_answer(
                     current_item = att_data["current_item"]
                     break
                 if res_att.status_code in (503, 429, 502, 504) or "retryable" in res_att.text.lower():
+                    retries += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
+                retries += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
         if not attempt_id or not current_item:
             logger.warning(f"[QUIZ FAIL 2] Quiz {quiz_id} failed to start attempt: {res_att.status_code if 'res_att' in locals() else 'no_resp'} {res_att.text[:200] if 'res_att' in locals() else ''}")
-            return (time.perf_counter() - t0) * 1000, False
+            return (time.perf_counter() - t0) * 1000, False, retries
 
         # 3. Submit real answer to position 1 (idempotent submission with backoff retry on transient pool congestion)
         item_headers = {**headers, "X-Attempt-Token": attempt_token}
@@ -302,10 +309,12 @@ async def bench_real_quiz_answer(
                     break
                 # Retry on clear retryable server congestion error (503 / 429)
                 if res_ans.status_code in (503, 429, 502, 504) or "retryable" in res_ans.text.lower():
+                    retries += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
+                retries += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
@@ -313,10 +322,10 @@ async def bench_real_quiz_answer(
             logger.warning(f"[QUIZ FAIL 3] Attempt {attempt_id} failed to answer item: {res_ans.status_code if 'res_ans' in locals() else 'no_resp'} {res_ans.text[:200] if 'res_ans' in locals() else ''}")
 
         duration_ms = (time.perf_counter() - t0) * 1000
-        return duration_ms, success
+        return duration_ms, success, retries
     except Exception as exc:
         logger.error(f"[QUIZ UNHANDLED EXCEPTION] {exc}", exc_info=True)
-        return (time.perf_counter() - t0) * 1000, False
+        return (time.perf_counter() - t0) * 1000, False, retries
 
 
 async def bench_chat_streaming(
@@ -326,7 +335,7 @@ async def bench_chat_streaming(
     chapter_id: str,
     printed_page: int,
     query_text: str,
-) -> tuple[float, bool]:
+) -> tuple[float, bool, int]:
     """Flow 4: Concurrent SSE Chat Streaming with realistic token arrival pacing."""
     t0 = time.perf_counter()
     first_token_ms: float | None = None
@@ -336,7 +345,7 @@ async def bench_chat_streaming(
         # Create session
         res_sess = await client.post("/v1/chat/sessions", json={"title": "Load Session"}, headers=headers)
         if res_sess.status_code not in (200, 201):
-            return (time.perf_counter() - t0) * 1000, False
+            return (time.perf_counter() - t0) * 1000, False, 0
         session_id = res_sess.json()["id"]
 
         t_stream = time.perf_counter()
@@ -368,26 +377,46 @@ async def bench_chat_streaming(
         success = False
 
     elapsed = first_token_ms if first_token_ms is not None else ((time.perf_counter() - t0) * 1000)
-    return elapsed, (success and first_token_ms is not None)
+    return elapsed, (success and first_token_ms is not None), 0
 
 
-def compute_flow_stats(name: str, results: list[tuple[float, bool]], target_p95: float) -> FlowStats:
+def compute_flow_stats(
+    name: str,
+    results: list[tuple[float, bool] | tuple[float, bool, int]],
+    target_p95: float,
+) -> FlowStats:
     total = len(results)
     if total == 0:
-        return FlowStats(name, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, target_p95, True)
-    successful = sum(1 for _, ok in results if ok)
+        return FlowStats(name, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, target_p95, True)
+    successful = sum(1 for r in results if r[1])
     failed = total - successful
     error_rate = (failed / total) * 100.0
+    retry_count = sum(r[2] if len(r) > 2 else 0 for r in results)
 
-    latencies = sorted([d for d, _ in results])
+    latencies = sorted([r[0] for r in results])
     n = len(latencies)
     p50 = latencies[max(0, int(0.50 * n) - 1)]
+    p90 = latencies[max(0, int(0.90 * n) - 1)]
     p95 = latencies[max(0, int(0.95 * n) - 1)]
     p99 = latencies[max(0, int(0.99 * n) - 1)]
     max_lat = latencies[-1]
 
     passed = (p95 <= target_p95) and (error_rate == 0.0)
-    return FlowStats(name, total, successful, failed, error_rate, p50, p95, p99, max_lat, target_p95, passed)
+    return FlowStats(
+        flow_name=name,
+        total_requests=total,
+        successful_requests=successful,
+        failed_requests=failed,
+        retry_count=retry_count,
+        error_rate_pct=error_rate,
+        p50_ms=p50,
+        p90_ms=p90,
+        p95_ms=p95,
+        p99_ms=p99,
+        max_ms=max_lat,
+        target_p95_ms=target_p95,
+        passed=passed,
+    )
 
 
 async def execute_concurrency_tier(
@@ -501,15 +530,15 @@ async def main_async(concurrency_target: int = 100, base_url: str = "http://loca
             "flows": {k: asdict(v) for k, v in stats_map.items()},
         }
 
-        print("\n" + "=" * 90)
+        print("\n" + "=" * 115)
         print(f"TIER {c} CONCURRENT WORKERS (Duration: {duration:.2f}s | CPU: {cpu:.1f}% | Memory: {mem:.1f}%)")
-        print("=" * 90)
-        print(f"{'User Flow / Endpoint':<45} | {'p50(ms)':<8} | {'p95(ms)':<8} | {'Target':<9} | {'Err%':<5} | {'Status'}")
-        print("-" * 90)
+        print("=" * 115)
+        print(f"{'User Flow / Endpoint':<42} | {'p50':<7} | {'p90':<7} | {'p95':<7} | {'p99':<7} | {'Max':<7} | {'Retries':<7} | {'Err%':<5} | {'Status'}")
+        print("-" * 115)
         for s in stats_map.values():
             status = "PASS" if s.passed else "FAIL"
-            print(f"{s.flow_name:<45} | {s.p50_ms:<8.1f} | {s.p95_ms:<8.1f} | <{s.target_p95_ms:<7.0f} | {s.error_rate_pct:<5.1f} | {status}")
-        print("=" * 90)
+            print(f"{s.flow_name:<42} | {s.p50_ms:<7.1f} | {s.p90_ms:<7.1f} | {s.p95_ms:<7.1f} | {s.p99_ms:<7.1f} | {s.max_ms:<7.1f} | {s.retry_count:<7} | {s.error_rate_pct:<5.1f} | {status}")
+        print("=" * 115)
 
         if not tier_passed and saturation_point == "Beyond 100 concurrent workers":
             saturation_point = f"{c} concurrent workers (latency or errors degraded)"

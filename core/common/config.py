@@ -103,6 +103,36 @@ class CoreSettings(BaseSettings):
         description="Whether to use SSL for S3 connection",
     )
 
+    # Offsite Disaster Recovery Storage (Different provider or region, separate least-privilege credentials)
+    OFFSITE_BACKUP_PROVIDER: str = Field(
+        default="minio",
+        description="Offsite backup storage provider (e.g., s3, cloudflare_r2, backblaze_b2, minio)",
+    )
+    OFFSITE_BACKUP_ENDPOINT_URL: str = Field(
+        default="http://localhost:9000",
+        description="Offsite S3/R2 endpoint URL (different host/provider from primary S3)",
+    )
+    OFFSITE_BACKUP_ACCESS_KEY_ID: str = Field(
+        default="minio_dev_access_key",
+        description="Offsite backup access key ID (separate least-privilege credentials)",
+    )
+    OFFSITE_BACKUP_SECRET_ACCESS_KEY: str = Field(
+        default="minio_dev_secret_key",
+        description="Offsite backup secret access key (separate least-privilege credentials)",
+    )
+    OFFSITE_BACKUP_BUCKET_NAME: str = Field(
+        default="thinkbuddy-backups-offsite",
+        description="Offsite backup destination bucket name",
+    )
+    OFFSITE_BACKUP_REGION: str = Field(
+        default="eu-central-1",
+        description="Offsite backup region (separate geographical region from primary, e.g. eu-central-1 vs ap-southeast-1)",
+    )
+    OFFSITE_BACKUP_USE_SSL: bool = Field(
+        default=False,
+        description="Whether to use SSL for offsite backup storage connection",
+    )
+
     # Observability
     OTEL_SERVICE_NAME: str = Field(default="thinkbuddy-core", description="OTel service name")
     OTEL_EXPORTER_OTLP_ENDPOINT: str = Field(

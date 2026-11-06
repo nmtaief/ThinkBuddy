@@ -90,3 +90,17 @@ This document defines the import manifest specification for ingesting validated 
 3. **Idempotency & Resumability:**
    - The importer uses `(book_id, chunk_index)` or chunk UUID for upsert operations.
    - If an import process terminates unexpectedly, re-running the importer resumes at the unimported chunks without creating duplicate records or corrupting the vector index.
+
+---
+
+## 3. NCTB Curriculum Content Licensing (Open Item)
+
+> [!WARNING]
+> **Open Legal & Regulatory Item: NCTB Curriculum Content Licensing**
+>
+> 1. **Copyright Ownership:** All official national curriculum textbooks, diagrams, exercises, tables, and syllabi are the intellectual property of the **National Curriculum and Textbook Board (NCTB)** under the Ministry of Education, Government of the People's Republic of Bangladesh, governed by the Bangladesh Copyright Act, 2000 (as amended in 2023).
+> 2. **Educational Research vs. Commercial Rollout:** Ingestion of textbook content, vector chunking, and student retrieval during private alpha/beta testing and educational research operate under non-commercial fair use principles. However, public deployment, app store publication, and any commercial subscription monetization require formal written authorization, licensing, or public-private partnership (PPP) accreditation from the NCTB / Ministry of Education.
+> 3. **Action Required Prior to Public Launch:**
+>    - Execute formal copyright clearance or partnership MOU with NCTB for digital textbook distribution and AI tutoring adaptations.
+>    - Maintain a digital registry of licensed editions (e.g. 2024–2025 curriculum editions) and establish content update / takedown procedures if syllabi or textbook revisions are mandated by NCTB.
+>    - Ensure strict adherence to NCTB curriculum guidelines without unauthorized modifications to national educational standards.

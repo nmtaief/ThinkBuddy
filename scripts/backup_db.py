@@ -137,23 +137,30 @@ def encrypt_backup_file(input_path: Path, output_enc_path: Path, key: bytes) -> 
     return compute_sha256(output_enc_path)
 
 
-def upload_offsite_copy(enc_path: Path, bucket_name: str = "thinkbuddy-backups-offsite") -> bool:
+def upload_offsite_copy(enc_path: Path, bucket_name: str | None = None) -> bool:
     """Transfer encrypted backup archive to offsite disaster recovery storage."""
-    logger.info(f"Uploading encrypted backup offsite -> s3://{bucket_name}/{enc_path.name}")
+    from core.common.config import settings
+
+    target_bucket = bucket_name or settings.OFFSITE_BACKUP_BUCKET_NAME
+    logger.info(
+        f"Uploading encrypted backup offsite -> {settings.OFFSITE_BACKUP_PROVIDER}://{target_bucket}/{enc_path.name} "
+        f"(region: {settings.OFFSITE_BACKUP_REGION}, endpoint: {settings.OFFSITE_BACKUP_ENDPOINT_URL})"
+    )
     try:
         import minio
-        from core.common.config import settings
-        endpoint = settings.S3_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+
+        endpoint = settings.OFFSITE_BACKUP_ENDPOINT_URL.replace("http://", "").replace("https://", "")
         client = minio.Minio(
             endpoint=endpoint,
-            access_key=settings.S3_ACCESS_KEY_ID,
-            secret_key=settings.S3_SECRET_ACCESS_KEY,
-            secure=settings.S3_USE_SSL,
+            access_key=settings.OFFSITE_BACKUP_ACCESS_KEY_ID,
+            secret_key=settings.OFFSITE_BACKUP_SECRET_ACCESS_KEY,
+            region=settings.OFFSITE_BACKUP_REGION,
+            secure=settings.OFFSITE_BACKUP_USE_SSL,
         )
-        if not client.bucket_exists(bucket_name):
-            client.make_bucket(bucket_name)
-        client.fput_object(bucket_name, enc_path.name, str(enc_path))
-        logger.info(f"Successfully uploaded {enc_path.name} to offsite bucket '{bucket_name}'.")
+        if not client.bucket_exists(target_bucket):
+            client.make_bucket(target_bucket)
+        client.fput_object(target_bucket, enc_path.name, str(enc_path))
+        logger.info(f"Successfully uploaded {enc_path.name} to offsite bucket '{target_bucket}'.")
         return True
     except Exception as e:
         logger.warning(f"Offsite backup upload failed: {e}")
