@@ -67,6 +67,7 @@ from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
 from core.privacy.schemas import (
     AccountDeletionResponse,
     CancelDeletionResponse,
+    ConsentVersionDetailResponse,
     FamilyDataExportResponse,
     ParentalConsentRequest,
     ParentalConsentResponse,
@@ -1334,6 +1335,16 @@ async def gateway_record_parental_consent(request: Request) -> Response:
 )
 async def gateway_get_parental_consent_status(request: Request) -> Response:
     """Forward parental consent status GET request downstream to Core Service."""
+    return await forward_to_core(request)
+
+@router.get(
+    "/parents/consent/current",
+    response_model=ConsentVersionDetailResponse,
+    tags=["Privacy & Data Management"],
+    operation_id="gateway_get_current_consent_version",
+)
+async def gateway_get_current_consent_version(request: Request) -> Response:
+    """Forward active parental consent version terms GET request downstream to Core Service."""
     return await forward_to_core(request)
 
 @router.post(

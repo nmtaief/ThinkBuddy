@@ -18,6 +18,7 @@ from core.privacy.purge import execute_data_purge
 from core.privacy.schemas import (
     AccountDeletionResponse,
     CancelDeletionResponse,
+    ConsentVersionDetailResponse,
     FamilyDataExportResponse,
     ParentalConsentRequest,
     ParentalConsentResponse,
@@ -83,6 +84,18 @@ async def get_parental_consent_status(
 ) -> ParentalConsentStatusResponse:
     """Fetch current recorded parental consent status and check for terms updates."""
     return await PrivacyService.get_parent_consent_status(db, current_user)
+
+
+@router.get(
+    "/parents/consent/current",
+    response_model=ConsentVersionDetailResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_current_consent_version(
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ConsentVersionDetailResponse:
+    """Fetch active parental consent terms and full Bengali and English legal text."""
+    return await PrivacyService.get_active_consent_version_details(db)
 
 
 @router.post(

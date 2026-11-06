@@ -153,16 +153,19 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
   - System Triggers: `daily_reminder`, `task_missed`, `quiz_ready`, `plan_changed`, `integrity_flag`, and scheduled bilingual `weekly_parent_summary`.
 
 ### Privacy, Parental Consent & Data Lifecycle (P07b)
-- `POST /v1/auth/reauthenticate` – dedicated re-authentication endpoint validating fresh third-party provider credentials (`auth_time` within 300 seconds / 5 minutes). Issues a short-lived signed JWT re-authentication token (`reauth_token`, TTL 10 minutes). Required for sensitive lifecycle operations: account/family deletion, family data export, and parental consent withdrawal.
+- `POST /v1/auth/reauthenticate` – dedicated re-authentication endpoint validating fresh third-party provider credentials (`auth_time` within 300 seconds / 5 minutes). Issues a short-lived signed JWT re-authentication token (`reauth_token`, TTL 10 minutes) cryptographically bound to a single action (`account_delete`, `family_delete`, `family_export`, `consent_withdraw`) and caller, enforced single-use.
+- `GET /v1/parents/consent/current` – fetch active parental consent version terms and full legal disclosure text in Bengali (`text_bn`) and English (`text_en`), with composite SHA-256 fingerprint (`terms_hash`).
 - `POST /v1/parents/consent` – record verified parental consent (version, terms hash, timestamp, client IP, user agent). Required before any minor child profile or study data may be processed. Returns `{ "status": "granted", "version": "1.0", "terms_hash": "...", "consented_at": "..." }`.
 - `GET /v1/parents/consent` – fetch current recorded parental consent status and version. Detects if terms text has changed by comparing `terms_hash` against `CURRENT_CONSENT_TEXT_HASH`; returns `reconsent_required: true` when terms update, which blocks child data processing until affirmative re-consent is granted.
-- `POST /v1/parents/consent/withdraw` – withdraw parental consent. Requires `X-Reauth-Token`. Suspends all minor child study data processing.
+- `POST /v1/parents/consent/withdraw` – withdraw parental consent. Requires `X-Reauth-Token` bound to `consent_withdraw`. Suspends all minor child study data processing (chat, quizzes, and planner blocked with 403 `CONSENT_WITHDRAWN`).
 - `GET /v1/parents/me/export` & `POST /v1/parents/me/export` – trigger and retrieve family data export. Enforces:
   1. Authorization: Restricted to authenticated parent/family guardian (Rule 9).
-  2. Re-authentication: Requires valid `X-Reauth-Token`.
-  3. Rate Limiting: Strictly limited to 1 export request per parent per 24 hours (HTTP 429 `EXPORT_RATE_LIMITED`).
-  4. Short-Lived Signed Download Link: Generates a signed download URL (`download_url`, TTL 15 minutes) for secure delivery.
-  5. Retention: Export archives retained for 7 days before automated cleanup.
+  2. Re-authentication: Requires valid `X-Reauth-Token` bound to `family_export`.
+  3. Encryption At Rest: Export payloads are stored encrypted using AES-256-GCM (`encrypted_payload`).
+  4. Dual-Auth Download: `GET /v1/parents/me/export/{id}/download` requires both active parent session (Bearer JWT) and short-lived download token.
+  5. Rate Limiting: Strictly limited to 1 export request per parent per 24 hours (HTTP 429 `EXPORT_RATE_LIMITED`).
+  6. Short-Lived Signed Download Link: Generates a signed download URL (`download_url`, TTL 15 minutes) for secure delivery.
+  7. Retention: Export archives retained for 7 days before automated cleanup.
   6. Non-Leakage (Rule 15 & Decision 9): Raw chat messages, prompts, and tokens are strictly excluded. Student chat activity is exported as curriculum topic-level summaries only (book, chapter, message count, timestamp).
 - `GET /v1/parents/me/export/{export_id}/download` – download family export JSON archive using signed download token. Enforces Rule 9 cross-parent isolation: Parent B requesting Parent A's export gets HTTP 403 `FORBIDDEN_EXPORT_ACCESS`.
 - `POST /v1/users/me/delete` – schedule self account deletion. Requires `X-Reauth-Token`. Enters 14-day grace period with scheduled purge timestamp.

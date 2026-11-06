@@ -53,11 +53,43 @@ class DataExport(Base):
     status: Mapped[str] = mapped_column(String(20), default="completed", nullable=False)
     format: Mapped[str] = mapped_column(String(10), default="json", nullable=False)
     data_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    encrypted_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     download_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     download_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class ParentalConsentVersion(Base):
+    """Canonical legal consent disclosure text per version in Bengali and English."""
+
+    __tablename__ = "parental_consent_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    text_bn: Mapped[str] = mapped_column(Text, nullable=False)
+    text_en: Mapped[str] = mapped_column(Text, nullable=False)
+    terms_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class DeletionLedger(Base):
+    """Minimal immutable deletion ledger containing hashed user IDs replayed after database restores."""
+
+    __tablename__ = "deletion_ledger"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "user" or "family"
+    purged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False, index=True
     )
 
 

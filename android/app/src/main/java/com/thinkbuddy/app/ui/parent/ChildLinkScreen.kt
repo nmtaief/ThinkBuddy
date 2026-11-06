@@ -43,11 +43,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -97,6 +98,7 @@ import kotlinx.coroutines.launch
  * - 1-tap copy button and share button.
  * - Student onboarding form with Class (6-12), group, medium, and daily target minutes.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChildLinkScreen(
     repository: ParentRepository? = null,
@@ -172,16 +174,10 @@ fun ChildLinkScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             // Tabs: Generate vs Enter
-            TabRow(
+            PrimaryTabRow(
                 selectedTabIndex = activeTab,
                 containerColor = SurfaceDark,
                 contentColor = TealPrimary,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[activeTab]),
-                        color = TealPrimary
-                    )
-                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))

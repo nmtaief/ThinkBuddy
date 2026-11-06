@@ -51,6 +51,10 @@ class CoreSettings(BaseSettings):
         default="dev_question_key_aes_gcm_32bytes_secret_key!",
         description="AES-GCM key for encrypting question keys at rest",
     )
+    EXPORT_ENCRYPTION_KEY: str = Field(
+        default="dev_export_aes_gcm_32bytes_encryption_key!",
+        description="AES-GCM key for encrypting exported family archives at rest",
+    )
 
     # Database
     DATABASE_URL: str = Field(
@@ -335,6 +339,26 @@ class CoreSettings(BaseSettings):
                 )
                 raise ValueError(msg)
 
+            # 7. Export Encryption Key
+            export_key_lower = self.EXPORT_ENCRYPTION_KEY.lower()
+            if (
+                "change_in_production" in export_key_lower
+                or "dev_" in export_key_lower
+                or "placeholder" in export_key_lower
+                or self.EXPORT_ENCRYPTION_KEY in known_defaults
+            ):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}' "
+                    "with placeholder EXPORT_ENCRYPTION_KEY."
+                )
+                raise ValueError(msg)
+            if len(self.EXPORT_ENCRYPTION_KEY) < 32:
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "EXPORT_ENCRYPTION_KEY must have at least 32 characters."
+                )
+                raise ValueError(msg)
+
             # 3. Require distinct secrets across all keys
             secrets_set = {
                 self.JWT_SECRET_KEY,
@@ -342,12 +366,13 @@ class CoreSettings(BaseSettings):
                 self.INTERNAL_SERVICE_TOKEN,
                 self.INTERNAL_SERVICE_SECRET,
                 self.QUESTION_KEY_ENCRYPTION_KEY,
+                self.EXPORT_ENCRYPTION_KEY,
             }
-            if len(secrets_set) < 5:
+            if len(secrets_set) < 6:
                 msg = (
                     f"Refusing to start in environment '{self.ENV}': "
                     "JWT_SECRET_KEY, LINK_CODE_SECRET, INTERNAL_SERVICE_TOKEN, "
-                    "INTERNAL_SERVICE_SECRET, and QUESTION_KEY_ENCRYPTION_KEY must be distinct."
+                    "INTERNAL_SERVICE_SECRET, QUESTION_KEY_ENCRYPTION_KEY, and EXPORT_ENCRYPTION_KEY must be distinct."
                 )
                 raise ValueError(msg)
 

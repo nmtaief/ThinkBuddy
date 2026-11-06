@@ -33,6 +33,14 @@ class ParentalConsentStatusResponse(BaseModel):
     withdrawn_at: datetime | None = Field(default=None, description="Timestamp of consent withdrawal if applicable")
 
 
+class ConsentVersionDetailResponse(BaseModel):
+    version: str = Field(..., description="Consent legal terms version (e.g. 'v1.0')")
+    text_bn: str = Field(..., description="Full legal disclosure text in Bengali")
+    text_en: str = Field(..., description="Full legal disclosure text in English")
+    terms_hash: str = Field(..., description="Cryptographic SHA-256 fingerprint of full composite terms")
+    effective_at: datetime = Field(..., description="Timestamp when version became effective")
+
+
 class WithdrawConsentRequest(BaseModel):
     reason: str | None = Field(default=None, description="Optional explanation for withdrawing consent")
 

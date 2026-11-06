@@ -687,3 +687,306 @@ def test_migration_0021_reversibility() -> None:
     )
     assert res_down.returncode == 0, f"Alembic downgrade 0020 failed: {res_down.stderr}"
     assert res_up.returncode == 0, f"Alembic upgrade 0021 failed: {res_up.stderr}"
+    # Ensure always restored to head
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], capture_output=True, text=True)
+
+
+def test_migration_0022_reversibility() -> None:
+    """Verify migration 0022 (consent versions and deletion ledger) can be cleanly downgraded and upgraded."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config("alembic.ini")
+    script = ScriptDirectory.from_config(config)
+
+    rev_0021 = script.get_revision("0021_p07b_parent_consent_export_deletion")
+    rev_0022 = script.get_revision("0022_p07b_consent_versions_and_deletion_ledger")
+
+    assert rev_0021 is not None
+    assert rev_0022 is not None
+    assert rev_0022.down_revision == "0021_p07b_parent_consent_export_deletion"
+
+    # Downgrade to 0021
+    res_down = subprocess.run(
+        [sys.executable, "-m", "alembic", "downgrade", "0021_p07b_parent_consent_export_deletion"],
+        capture_output=True,
+        text=True,
+    )
+    # Upgrade to 0022
+    res_up = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "0022_p07b_consent_versions_and_deletion_ledger"],
+        capture_output=True,
+        text=True,
+    )
+    # Restore to head
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], capture_output=True, text=True)
+
+    assert res_down.returncode == 0, f"Alembic downgrade 0021 failed: {res_down.stderr}"
+    assert res_up.returncode == 0, f"Alembic upgrade 0022 failed: {res_up.stderr}"
+
+
+def test_schema_driven_purge_coverage_and_retention_allowlist() -> None:
+    """Automated schema-driven test ensuring every table referencing users or students is purged or on documented retention allowlist."""
+    import importlib
+    import inspect
+    from core.common.database import Base
+    from core.privacy import purge
+
+    # Ensure all modules with SQLAlchemy models are loaded
+    modules = [
+        "core.audit.models", "core.auth.models", "core.chat.models",
+        "core.curriculum.models", "core.devices.models", "core.entitlements.models",
+        "core.families.models", "core.notifications.models", "core.planner.models",
+        "core.privacy.models", "core.progress.models", "core.quiz.models"
+    ]
+    for m in modules:
+        importlib.import_module(m)
+
+    handled_tables = {obj.__tablename__ for name, obj in inspect.getmembers(purge) if hasattr(obj, "__tablename__")}
+    
+    # Documented retention allowlist:
+    # - audit_log: actor_id is anonymized to NULL and metadata scrubbed, but entry retained for regulatory compliance
+    # - admin_policies: platform-wide admin policy limits (not student-owned data)
+    # - parental_consent_versions: immutable legal consent text versions
+    # - deletion_ledger: cryptographic SHA-256 hash ledger replayed after disaster recovery restores
+    DOCUMENTED_RETENTION_ALLOWLIST = {
+        "audit_log",
+        "admin_policies",
+        "parental_consent_versions",
+        "deletion_ledger",
+    }
+
+    user_student_tables = set()
+    for t_name, table in Base.metadata.tables.items():
+        cols = [c.name for c in table.columns]
+        fks = [fk.target_fullname for fk in table.foreign_keys]
+        has_user_col = any(c in (
+            "user_id", "student_id", "parent_id", "requester_id",
+            "owner_parent_id", "actor_id", "set_by_user_id", "updated_by_user_id"
+        ) for c in cols)
+        has_user_fk = any("users." in fk for fk in fks)
+        if has_user_col or has_user_fk or t_name in ("users", "audit_log", "account_deletions"):
+            user_student_tables.add(t_name)
+
+    unaccounted_tables = user_student_tables - handled_tables - DOCUMENTED_RETENTION_ALLOWLIST
+    assert not unaccounted_tables, (
+        f"Schema test failed: The following user/student referencing tables are neither "
+        f"handled in core.privacy.purge nor listed in the DOCUMENTED_RETENTION_ALLOWLIST: {unaccounted_tables}. "
+        f"Every user-referencing table must be either completely purged or explicitly documented."
+    )
+
+
+@pytest.mark.asyncio
+async def test_reauth_token_action_binding_and_single_use(gateway_client: AsyncClient) -> None:
+    """Verify that re-auth tokens are cryptographically bound to a single action and single-use."""
+    from core.privacy.service import PrivacyService
+    from core.auth.tokens import create_reauth_jwt
+    from fastapi import HTTPException
+
+    user_id = uuid.uuid4()
+
+    # 1. Action binding check: Token created for 'account_delete' cannot be used for 'family_delete'
+    token_account_delete = create_reauth_jwt(user_id=user_id, action="account_delete")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await PrivacyService.verify_reauth_token(
+            reauth_token=token_account_delete,
+            caller_id=user_id,
+            expected_action="family_delete",
+        )
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "REAUTH_ACTION_MISMATCH"
+
+    # 2. Single-use enforcement: Token can only be verified once
+    token_single_use = create_reauth_jwt(user_id=user_id, action="consent_withdraw")
+
+    # First consumption succeeds
+    await PrivacyService.verify_reauth_token(
+        reauth_token=token_single_use,
+        caller_id=user_id,
+        expected_action="consent_withdraw",
+    )
+
+    # Second consumption of identical token must fail with 403 REAUTH_ALREADY_USED
+    with pytest.raises(HTTPException) as exc_reused:
+        await PrivacyService.verify_reauth_token(
+            reauth_token=token_single_use,
+            caller_id=user_id,
+            expected_action="consent_withdraw",
+        )
+    assert exc_reused.value.status_code == 403
+    assert exc_reused.value.detail["code"] == "REAUTH_ALREADY_USED"
+
+
+@pytest.mark.asyncio
+async def test_consent_withdrawal_suspends_child_processing(gateway_client: AsyncClient) -> None:
+    """Withdrawing parental consent immediately suspends child chat and quiz attempts with 403 CONSENT_WITHDRAWN."""
+    phone_p = f"+880174{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone_p}", "role": "parent", "display_name": "Parent For Suspension", "locale": "bn"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    p_token = res_p.json()["access_token"]
+    p_id = uuid.UUID(res_p.json()["user"]["id"])
+    p_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {p_token}"}
+
+    # Grant initial consent
+    await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=p_headers)
+
+    # Create link code & register child
+    res_code = await gateway_client.post(
+        "/v1/parents/students/link-code",
+        json={"child_name": "Child Consent Test", "class_level": 9, "medium": "bn", "daily_minutes": 90},
+        headers=p_headers,
+    )
+    link_code = res_code.json()["link_code"]
+
+    res_child = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:+880175{uuid.uuid4().hex[:6]}", "role": "student", "display_name": "Child A", "link_code": link_code},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_child.status_code == 200
+    child_token = res_child.json()["access_token"]
+    child_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {child_token}"}
+
+    # Child can initially access chat
+    res_chat = await gateway_client.post("/v1/chat/sessions", json={"title": "Math Help"}, headers=child_headers)
+    assert res_chat.status_code == 200
+
+    # Parent withdraws consent (fresh sign-in re-auth)
+    res_withdraw = await gateway_client.post(
+        "/v1/parents/consent/withdraw",
+        json={"reason": "Revoking consent for minor"},
+        headers=p_headers,
+    )
+    assert res_withdraw.status_code == 200
+    assert res_withdraw.json()["status"] == "withdrawn"
+
+    # Child is immediately blocked from creating new chat sessions
+    res_blocked_chat = await gateway_client.post("/v1/chat/sessions", json={"title": "Blocked Chat"}, headers=child_headers)
+    assert res_blocked_chat.status_code == 403
+    assert res_blocked_chat.json()["detail"]["code"] == "CONSENT_WITHDRAWN"
+
+    # Child is immediately blocked from starting quizzes
+    res_blocked_quiz = await gateway_client.post(
+        f"/v1/quiz/{uuid.uuid4()}/attempt",
+        json={"device_id": "test-device"},
+        headers=child_headers,
+    )
+    assert res_blocked_quiz.status_code == 403
+    assert res_blocked_quiz.json()["detail"]["code"] == "CONSENT_WITHDRAWN"
+
+
+@pytest.mark.asyncio
+async def test_export_encryption_at_rest_and_dual_auth_download(gateway_client: AsyncClient) -> None:
+    """Verify family data export files are encrypted at rest (AES-256-GCM) and require session plus token on download."""
+    phone = f"+880176{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone}", "role": "parent", "display_name": "Export Parent", "locale": "bn"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    token = res_p.json()["access_token"]
+    headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    # Grant consent and trigger export
+    await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=headers)
+    res_export = await gateway_client.post("/v1/parents/me/export", headers=headers)
+    assert res_export.status_code == 200
+    export_id = uuid.UUID(res_export.json()["export_id"])
+    download_url = res_export.json()["download_url"]
+    dl_token = download_url.split("token=")[1]
+
+    # Verify database state: Plain payload is null, encrypted payload is AES-256 string starting with 'v1:'
+    async with AsyncSessionLocal() as session:
+        exp_row = await session.get(DataExport, export_id)
+        assert exp_row is not None
+        assert exp_row.data_payload is None, "Plain JSON data_payload must be NULL in database to ensure at-rest encryption"
+        assert exp_row.encrypted_payload is not None
+        assert exp_row.encrypted_payload.startswith("v1:")
+
+    # 1. Download without session returns 401
+    res_no_session = await gateway_client.get(download_url, headers=CLIENT_HEADERS_ANDROID)
+    assert res_no_session.status_code == 401
+
+    # 2. Download without valid download token returns 403
+    res_bad_token = await gateway_client.get(f"/v1/parents/me/export/{export_id}/download?token=invalid_tok", headers=headers)
+    assert res_bad_token.status_code == 403
+
+    # 3. Dual Auth: Valid session + valid token decrypts and streams complete JSON export archive
+    res_download = await gateway_client.get(download_url, headers=headers)
+    assert res_download.status_code == 200
+    decrypted_data = res_download.json()
+    assert "family_id" in decrypted_data
+    assert "students" in decrypted_data
+
+
+@pytest.mark.asyncio
+async def test_consent_versions_current_text_endpoint(gateway_client: AsyncClient) -> None:
+    """Verify GET /v1/parents/consent/current returns full Bengali and English legal text with matching terms hash."""
+    from core.privacy.constants import PARENTAL_CONSENT_TEXT_BN, PARENTAL_CONSENT_TEXT_EN, CURRENT_CONSENT_TEXT_HASH
+
+    res = await gateway_client.get("/v1/parents/consent/current", headers=CLIENT_HEADERS_ANDROID)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["version"] == "v1.0"
+    assert data["text_bn"] == PARENTAL_CONSENT_TEXT_BN
+    assert data["text_en"] == PARENTAL_CONSENT_TEXT_EN
+    assert data["terms_hash"] == CURRENT_CONSENT_TEXT_HASH
+
+
+@pytest.mark.asyncio
+async def test_deletion_ledger_recorded_on_purge_and_replayed() -> None:
+    """Verify SHA-256 hash is inserted into deletion_ledger during purge, and replay_ledger re-purges resurrected accounts."""
+    import hashlib
+    from core.privacy.models import DeletionLedger
+    from core.privacy.replay_ledger import replay_deletion_ledger
+
+    async with AsyncSessionLocal() as session:
+        # 1. Create a user
+        user = User(
+            id=uuid.uuid4(),
+            role="student",
+            auth_provider="phone",
+            auth_uid=f"fake:phone:+880177{uuid.uuid4().hex[:6]}",
+            display_name="Resurrection Test User",
+            status="active",
+        )
+        session.add(user)
+        deletion = AccountDeletion(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            target_type="user",
+            status="pending_grace_period",
+            scheduled_purge_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        session.add(deletion)
+        await session.commit()
+
+        # 2. Execute purge
+        report = await execute_data_purge(session)
+        assert report.purged_accounts >= 1
+
+        # 3. Verify ledger entry was created
+        u_hash = hashlib.sha256(str(user.id).encode("utf-8")).hexdigest()
+        stmt_dl = select(DeletionLedger).where(DeletionLedger.user_id_hash == u_hash)
+        ledger_entry = (await session.execute(stmt_dl)).scalar_one_or_none()
+        assert ledger_entry is not None
+        assert ledger_entry.target_type == "user"
+
+        # 4. Simulate restore resurrecting the user: user status set back to active
+        user.status = "active"
+        user.display_name = "Resurrected User"
+        await session.commit()
+
+        # 5. Replay deletion ledger
+        replay_res = await replay_deletion_ledger(session)
+        assert replay_res["repurged_users"] >= 1
+
+        # 6. Verify user is purged again
+        await session.refresh(user)
+        assert user.status == "purged"
+        assert user.display_name == "Deleted User"
+

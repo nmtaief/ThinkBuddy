@@ -18,11 +18,19 @@ from core.common.config import settings
 from core.devices.models import Device
 from core.families.models import Family, FamilyMember, ParentStudentLink, StudentProfile
 from core.notifications.models import Notification, NotificationDelivery, NotificationPreference
-from core.planner.models import AiPlannerShadowRun as AIPlannerShadowRun, Plan, PlanDay, StudentChangeRequest, StudySetup, Task
-from core.privacy.models import AccountDeletion, DataExport, ParentalConsent
+from core.planner.models import (
+    AiPlannerShadowRun as AIPlannerShadowRun,
+    Plan,
+    PlanDay,
+    StudentChangeRequest,
+    StudentStudySettings,
+    StudySetup,
+    Task,
+)
+from core.privacy.models import AccountDeletion, DataExport, DeletionLedger, ParentalConsent
 from core.privacy.schemas import PurgeJobReport
 from core.progress.models import Mastery, ProgressDaily, RevisionItem
-from core.quiz.models import AttemptEvent, AttemptItem, BroadSubmission, LearningSignal, QuizAttempt
+from core.quiz.models import AttemptEvent, AttemptItem, BroadSubmission, LearningSignal, Quiz, QuizAttempt
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +151,9 @@ async def execute_data_purge(
                             await db.execute(delete(AttemptItem).where(AttemptItem.id.in_(item_ids)))
                         await db.execute(delete(AttemptEvent).where(AttemptEvent.attempt_id.in_(att_ids)))
                         await db.execute(delete(QuizAttempt).where(QuizAttempt.id.in_(att_ids)))
+                    await db.execute(delete(Quiz).where(Quiz.student_id == u_id))
 
-                    # 4. Planner tasks, plan days, plans, study setups, student change requests
+                    # 4. Planner tasks, plan days, plans, study setups, student change requests, study settings
                     await db.execute(delete(Task).where(Task.student_id == u_id))
                     stmt_plans = select(Plan.id).where(Plan.student_id == u_id)
                     plan_ids = (await db.execute(stmt_plans)).scalars().all()
@@ -153,6 +162,7 @@ async def execute_data_purge(
                     await db.execute(delete(Plan).where(Plan.student_id == u_id))
                     await db.execute(delete(StudySetup).where(StudySetup.student_id == u_id))
                     await db.execute(delete(StudentChangeRequest).where(StudentChangeRequest.student_id == u_id))
+                    await db.execute(delete(StudentStudySettings).where(StudentStudySettings.student_id == u_id))
 
                     # 5. Progress, mastery, and revision items
                     await db.execute(delete(ProgressDaily).where(ProgressDaily.student_id == u_id))
@@ -229,6 +239,17 @@ async def execute_data_purge(
                             consent_terms_hash=None,
                         )
                     )
+
+                    # 12. Minimal Deletion Ledger (hashed ID for restore replay)
+                    u_hash = hashlib.sha256(str(u_id).encode("utf-8")).hexdigest()
+                    db.add(
+                        DeletionLedger(
+                            id=uuid.uuid4(),
+                            user_id_hash=u_hash,
+                            target_type="user",
+                            purged_at=now,
+                        )
+                    )
             except Exception as user_err:
                 logger.error(f"Error purging user {u_id}: {user_err}", exc_info=True)
                 report.failed_user_ids.append(str(u_id))
@@ -237,6 +258,15 @@ async def execute_data_purge(
         if deletion.target_type == "family" and deletion.family_id:
             await db.execute(delete(FamilyMember).where(FamilyMember.family_id == deletion.family_id))
             await db.execute(delete(Family).where(Family.id == deletion.family_id))
+            fam_hash = hashlib.sha256(str(deletion.family_id).encode("utf-8")).hexdigest()
+            db.add(
+                DeletionLedger(
+                    id=uuid.uuid4(),
+                    user_id_hash=fam_hash,
+                    target_type="family",
+                    purged_at=now,
+                )
+            )
 
         deletion.status = "purged"
         deletion.purged_at = now

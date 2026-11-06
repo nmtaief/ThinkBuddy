@@ -420,10 +420,15 @@ async def auth_status() -> dict[str, str]:
 
 class ReauthenticateRequest(BaseModel):
     provider_token: str
+    action: str = Field(
+        default="general",
+        description="Target action: 'account_delete', 'family_delete', 'family_export', or 'consent_withdraw'",
+    )
 
 
 class ReauthenticateResponse(BaseModel):
     reauth_token: str
+    action: str = "general"
     expires_in: int = 600
     reauthenticated_at: datetime
 
@@ -476,10 +481,11 @@ async def reauthenticate_user(
                 detail={"code": "REAUTH_STALE", "message": "Authentication is too old. Fresh sign-in required within 5 minutes."},
             )
 
-    # 3. Mint short-lived re-auth JWT (10 min TTL)
-    token = create_reauth_jwt(current_user.id)
+    # 3. Mint short-lived re-auth JWT (10 min TTL) bound to requested action
+    token = create_reauth_jwt(current_user.id, action=payload.action)
     return ReauthenticateResponse(
         reauth_token=token,
+        action=payload.action,
         expires_in=600,
         reauthenticated_at=datetime.now(UTC),
     )

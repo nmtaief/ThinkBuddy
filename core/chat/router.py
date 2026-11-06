@@ -48,6 +48,11 @@ async def create_chat_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Chat processing is suspended during the grace period."},
         )
+    if not current_user.has_parental_consent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+        )
     orchestrator = ChatOrchestrator(db)
     await orchestrator.assert_no_active_assessed_quiz(current_user.id)
 
@@ -128,6 +133,11 @@ async def send_chat_message(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Chat processing is suspended during the grace period."},
+        )
+    if not current_user.has_parental_consent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
         )
     orchestrator = ChatOrchestrator(db)
 

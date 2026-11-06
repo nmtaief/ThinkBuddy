@@ -20,12 +20,19 @@ from core.devices.models import Device
 from core.families.models import Family, FamilyMember, ParentStudentLink, StudentProfile
 from core.notifications.models import Notification
 from core.planner.models import Plan, StudySetup, Task
-from core.privacy.constants import CURRENT_CONSENT_TEXT_HASH
-from core.privacy.models import AccountDeletion, DataExport, ParentalConsent
+from core.privacy.constants import (
+    CURRENT_CONSENT_TEXT_HASH,
+    CURRENT_CONSENT_VERSION,
+    PARENTAL_CONSENT_TEXT_BN,
+    PARENTAL_CONSENT_TEXT_EN,
+)
+from core.privacy.crypto import decrypt_export_payload, encrypt_export_payload
+from core.privacy.models import AccountDeletion, DataExport, ParentalConsent, ParentalConsentVersion
 from core.privacy.schemas import (
     AccountDeletionResponse,
     CancelDeletionResponse,
     ChatTopicSummaryItem,
+    ConsentVersionDetailResponse,
     FamilyDataExportPayload,
     FamilyDataExportResponse,
     ParentalConsentRequest,
@@ -44,12 +51,21 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+_USED_REAUTH_JTIS: set[str] = set()
+
+
 class PrivacyService:
     """Service handling parental consent, family exports, deletion grace periods, and purge jobs."""
 
-    @staticmethod
-    def verify_reauth_token(reauth_token: str | None, caller_id: uuid.UUID) -> None:
-        """Verify that a valid, fresh re-authentication token was provided."""
+    @classmethod
+    async def verify_reauth_token(
+        cls,
+        reauth_token: str | None,
+        caller_id: uuid.UUID,
+        expected_action: str | None = None,
+        redis_client: Any = None,
+    ) -> None:
+        """Verify that a valid, single-use re-authentication token bound to user and action was provided."""
         if not reauth_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -65,6 +81,40 @@ class PrivacyService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={"code": "REAUTH_MISMATCH", "message": "Re-authentication token does not match active user."},
                 )
+
+            # Action binding check
+            if expected_action is not None:
+                token_action = payload.get("action", "general")
+                if token_action != expected_action and token_action != "general":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "REAUTH_ACTION_MISMATCH",
+                            "message": f"Re-authentication token was issued for '{token_action}', but '{expected_action}' is required.",
+                        },
+                    )
+
+            # Single-use enforcement
+            jti = payload.get("jti")
+            if jti:
+                if redis_client:
+                    now_ts = int(utcnow().timestamp())
+                    exp = payload.get("exp", now_ts + 600)
+                    ttl = max(1, exp - now_ts)
+                    key = f"thinkbuddy:reauth_used:{jti}"
+                    is_set = await redis_client.set(key, "1", ex=ttl, nx=True)
+                    if not is_set:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "REAUTH_ALREADY_USED", "message": "Re-authentication token has already been consumed."},
+                        )
+                else:
+                    if jti in _USED_REAUTH_JTIS:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "REAUTH_ALREADY_USED", "message": "Re-authentication token has already been consumed."},
+                        )
+                    _USED_REAUTH_JTIS.add(jti)
         except HTTPException:
             raise
         except Exception as e:
@@ -214,6 +264,35 @@ class PrivacyService:
         )
 
     @classmethod
+    async def get_active_consent_version_details(
+        cls,
+        db: AsyncSession,
+    ) -> ConsentVersionDetailResponse:
+        """Fetch active consent version terms with complete Bengali and English legal text."""
+        stmt = (
+            select(ParentalConsentVersion)
+            .order_by(ParentalConsentVersion.effective_at.desc())
+            .limit(1)
+        )
+        record = (await db.execute(stmt)).scalar_one_or_none()
+        if record:
+            return ConsentVersionDetailResponse(
+                version=record.version,
+                text_bn=record.text_bn,
+                text_en=record.text_en,
+                terms_hash=record.terms_hash,
+                effective_at=record.effective_at,
+            )
+        # Fallback to canonical constants
+        return ConsentVersionDetailResponse(
+            version=CURRENT_CONSENT_VERSION,
+            text_bn=PARENTAL_CONSENT_TEXT_BN,
+            text_en=PARENTAL_CONSENT_TEXT_EN,
+            terms_hash=CURRENT_CONSENT_TEXT_HASH,
+            effective_at=utcnow(),
+        )
+
+    @classmethod
     async def withdraw_parent_consent(
         cls,
         db: AsyncSession,
@@ -230,7 +309,7 @@ class PrivacyService:
             )
 
         if reauth_token:
-            cls.verify_reauth_token(reauth_token, parent.id)
+            await cls.verify_reauth_token(reauth_token, parent.id, expected_action="consent_withdraw")
         else:
             cls.verify_recent_reauthentication(auth_iat)
 
@@ -250,6 +329,17 @@ class PrivacyService:
 
         parent.has_parental_consent = False
         parent.consent_terms_hash = None
+
+        # Suspend linked students' active status and parental consent flag
+        stmt_links = select(ParentStudentLink).where(ParentStudentLink.parent_id == parent.id)
+        links = (await db.execute(stmt_links)).scalars().all()
+        for link in links:
+            link.status = "consent_suspended"
+            link.revoked_at = now_dt
+            stmt_s = select(User).where(User.id == link.student_id)
+            student_u = (await db.execute(stmt_s)).scalar_one_or_none()
+            if student_u:
+                student_u.has_parental_consent = False
 
         db.add(
             AuditLog(
@@ -314,7 +404,7 @@ class PrivacyService:
 
         # Re-auth verification
         if reauth_token:
-            cls.verify_reauth_token(reauth_token, caller.id)
+            await cls.verify_reauth_token(reauth_token, caller.id, expected_action="family_export")
         else:
             cls.verify_recent_reauthentication(auth_iat)
 
@@ -544,13 +634,17 @@ class PrivacyService:
         download_url = f"/v1/parents/me/export/{export_id}/download?token={raw_download_token}"
         expires_at = now_dt + timedelta(days=7)
 
+        payload_dict = payload.model_dump(mode="json")
+        encrypted_export = encrypt_export_payload(payload_dict)
+
         export_record = DataExport(
             id=export_id,
             family_id=family.id,
             requester_id=caller.id,
             status="completed",
             format="json",
-            data_payload=payload.model_dump(mode="json"),
+            data_payload=None,
+            encrypted_payload=encrypted_export,
             download_token_hash=download_token_hash,
             download_url=download_url,
             expires_at=expires_at,
@@ -619,6 +713,8 @@ class PrivacyService:
                 detail={"code": "INVALID_DOWNLOAD_TOKEN", "message": "Invalid download token."},
             )
 
+        if export.encrypted_payload:
+            return decrypt_export_payload(export.encrypted_payload)
         return export.data_payload or {}
 
     @classmethod
@@ -633,7 +729,7 @@ class PrivacyService:
     ) -> AccountDeletionResponse:
         """Schedule individual account deletion with a 14-day grace period."""
         if reauth_token:
-            cls.verify_reauth_token(reauth_token, caller.id)
+            await cls.verify_reauth_token(reauth_token, caller.id, expected_action="account_delete")
         else:
             cls.verify_recent_reauthentication(auth_iat)
 
@@ -762,7 +858,7 @@ class PrivacyService:
 
         # 2. Re-authentication verification
         if reauth_token:
-            cls.verify_reauth_token(reauth_token, caller.id)
+            await cls.verify_reauth_token(reauth_token, caller.id, expected_action="family_delete")
         else:
             cls.verify_recent_reauthentication(auth_iat)
 

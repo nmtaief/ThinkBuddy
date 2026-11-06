@@ -161,6 +161,11 @@ async def start_quiz_attempt(
     - One-active-assessed-attempt limit per student
     - Sequential question serving (Rule 6: answer keys withheld)
     """
+    if not current_user.has_parental_consent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+        )
     service = QuizService(db)
     return await service.start_attempt(
         quiz_id=quiz_id,
@@ -200,6 +205,11 @@ async def attest_quiz_attempt(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
+        )
+    if not current_user.has_parental_consent:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
         )
     return await service.start_attempt(
         quiz_id=attempt.quiz_id,

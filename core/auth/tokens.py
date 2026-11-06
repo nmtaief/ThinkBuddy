@@ -74,15 +74,17 @@ def decode_access_jwt(token: str) -> dict[str, Any]:
 
 def create_reauth_jwt(
     user_id: uuid.UUID,
+    action: str = "general",
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Create short-lived signed JWT re-authentication token (TTL 10 minutes)."""
+    """Create short-lived signed JWT re-authentication token bound to user and action (TTL 10 minutes)."""
     delta = expires_delta or timedelta(minutes=10)
     expire = utcnow() + delta
 
     payload = {
         "jti": uuid.uuid4().hex,
         "sub": str(user_id),
+        "action": action,
         "exp": int(expire.timestamp()),
         "iat": int(utcnow().timestamp()),
         "type": "reauth",
