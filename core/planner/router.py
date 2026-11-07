@@ -1163,11 +1163,9 @@ async def get_today_payload(
         )
 
     # 1. Resolve student timezone
-    stmt_profile = select(StudentProfile).where(StudentProfile.user_id == student_id)
-    res_prof = await db.execute(stmt_profile)
-    profile = res_prof.scalar_one_or_none()
-
-    tz_name = profile.time_zone if profile else "Asia/Dhaka"
+    stmt_tz = select(StudentProfile.time_zone).where(StudentProfile.user_id == student_id)
+    tz_res = await db.execute(stmt_tz)
+    tz_name = tz_res.scalar_one_or_none() or "Asia/Dhaka"
     try:
         user_tz = ZoneInfo(tz_name)
     except Exception:
@@ -1224,33 +1222,47 @@ async def get_today_payload(
         elif task.type in {"quiz", "review_quiz"}:
             quiz_tasks.append(t_resp)
 
-    # 3. Calculate exam countdowns
-    stmt_setups = select(StudySetup).where(StudySetup.student_id == student_id)
-    res_setups = await db.execute(stmt_setups)
-    setups = res_setups.scalars().all()
+    # 3. Calculate exam countdowns and resolve active plan provenance in a single query
+    stmt_setups_plan = (
+        select(
+            StudySetup.subject,
+            StudySetup.exam_date,
+            Plan.provider,
+            Plan.generation_reason,
+            Plan.params,
+        )
+        .outerjoin(
+            Plan,
+            (Plan.setup_id == StudySetup.id) & (Plan.status == "active"),
+        )
+        .where(StudySetup.student_id == student_id)
+        .order_by(Plan.version.desc().nullslast())
+    )
+    res_sp = await db.execute(stmt_setups_plan)
+    sp_rows = res_sp.fetchall()
+
     countdowns: dict[str, int] = {}
-    for s in setups:
-        diff = (s.exam_date - today_date).days
-        countdowns[s.subject] = max(0, diff)
+    prov = "deterministic"
+    gen_reason = "deterministic_baseline"
+    reason_for_parents = "Study plan optimized for syllabus coverage, priority appearance, and spaced retention."
+    first_plan_found = False
+
+    for s_subject, s_exam_date, p_prov, p_gen_reason, p_params in sp_rows:
+        diff = (s_exam_date - today_date).days
+        countdowns[s_subject] = max(0, diff)
+
+        if not first_plan_found and p_prov is not None:
+            first_plan_found = True
+            prov = p_prov or "deterministic"
+            gen_reason = p_gen_reason or "deterministic_baseline"
+            rationale_map = (p_params or {}).get("rationale", {})
+            if rationale_map:
+                reason_for_parents = next(
+                    iter(rationale_map.values()),
+                    reason_for_parents,
+                )
 
     completion_pct = (completed_mins / total_planned * 100.0) if total_planned > 0 else 0.0
-
-    # 4. Resolve active plan provenance and parent rationale
-    stmt_act_plan = (
-        select(Plan)
-        .where(Plan.student_id == student_id, Plan.status == "active")
-        .order_by(Plan.version.desc())
-    )
-    res_act = await db.execute(stmt_act_plan)
-    act_plan = res_act.scalars().first()
-
-    prov = getattr(act_plan, "provider", "deterministic") if act_plan else "deterministic"
-    gen_reason = getattr(act_plan, "generation_reason", "deterministic_baseline") if act_plan else "deterministic_baseline"
-    rationale_map = act_plan.params.get("rationale", {}) if act_plan and act_plan.params else {}
-    reason_for_parents = next(
-        iter(rationale_map.values()),
-        "Study plan optimized for syllabus coverage, priority appearance, and spaced retention.",
-    )
 
     return TodayHomePayloadResponse(
         date=today_date,
