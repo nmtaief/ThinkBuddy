@@ -169,9 +169,10 @@ async def execute_student_plan_regeneration(
         # 4b. Load student chapter mastery for adaptive input (P06)
         from core.progress.models import Mastery
 
-        stmt_m = select(Mastery.chapter_id, Mastery.score).where(Mastery.student_id == student_id)
+        stmt_m = select(Mastery).where(Mastery.student_id == student_id)
         res_m = await db.execute(stmt_m)
-        student_mastery_map = dict(res_m.all())
+        all_mastery_rows = res_m.scalars().all()
+        student_mastery_map = {m.chapter_id: m.score for m in all_mastery_rows}
 
         # 5. Prepare engine inputs
         engine_setups: list[SubjectSetupInput] = []
@@ -261,8 +262,6 @@ async def execute_student_plan_regeneration(
         )
 
         # Load real learning signals, mastery, and spaced revision (docs/07_AI_PLANNER_API.md §5)
-        stmt_m = select(Mastery).where(Mastery.student_id == student_id)
-        res_m = await db.execute(stmt_m)
         mastery_records = [
             {
                 "chapter_id": str(m.chapter_id),
@@ -271,7 +270,7 @@ async def execute_student_plan_regeneration(
                 "confidence": m.confidence,
                 "last_seen": m.last_signal_at.isoformat() if m.last_signal_at else None,
             }
-            for m in res_m.scalars().all()
+            for m in all_mastery_rows
         ]
 
         stmt_r = select(RevisionItem).where(RevisionItem.student_id == student_id)
