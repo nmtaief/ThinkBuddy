@@ -151,7 +151,7 @@ class QuizBuilderService:
             recycled_pool: list[Question] = []
 
             # Prefer unseen variants first for each variant group
-            for grp_id, group_questions in variant_groups.items():
+            for group_questions in variant_groups.values():
                 unseen_in_group = [q for q in group_questions if q.id not in answered_q_ids]
                 if unseen_in_group:
                     # Prefer unseen variant!
@@ -208,7 +208,7 @@ class QuizBuilderService:
                     standalones_list.append(q)
 
             selected_pool = list(standalones_list)
-            for grp_id, group_questions in variant_groups_dict.items():
+            for group_questions in variant_groups_dict.values():
                 chosen = rng.choice(group_questions)
                 selected_pool.append(chosen)
 

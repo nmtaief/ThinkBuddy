@@ -110,22 +110,21 @@ def build_pseudonymous_snapshot(
                 "weightage": 1.0,
             }
         )
-        ch_list = []
-        for c in s.chapters:
-            ch_list.append(
-                {
-                    "chapter_id": str(c.id),
-                    "number": c.number,
-                    "title": c.title,
-                    "book_title": c.book_title,
-                    "printed_page_start": c.printed_page_start,
-                    "printed_page_end": c.printed_page_end,
-                    "total_pages": c.total_pages,
-                    "difficulty_factor": c.difficulty_factor,
-                    "effective_mastery": c.effective_mastery,
-                    "custom_order": c.custom_order,
-                }
-            )
+        ch_list = [
+            {
+                "chapter_id": str(c.id),
+                "number": c.number,
+                "title": c.title,
+                "book_title": c.book_title,
+                "printed_page_start": c.printed_page_start,
+                "printed_page_end": c.printed_page_end,
+                "total_pages": c.total_pages,
+                "difficulty_factor": c.difficulty_factor,
+                "effective_mastery": c.effective_mastery,
+                "custom_order": c.custom_order,
+            }
+            for c in s.chapters
+        ]
         syllabus_block.append(
             {
                 "subject": s.subject,
@@ -152,18 +151,16 @@ def build_pseudonymous_snapshot(
                 )
 
     # Real Mastery & Learning Signals (docs/07_AI_PLANNER_API.md §5)
-    mastery_block: list[dict[str, Any]] = []
-    if mastery_records:
-        for m in mastery_records:
-            mastery_block.append(
-                {
-                    "chapter_id": str(m.get("chapter_id", "")),
-                    "concept_id": str(m.get("concept_id", "")) if m.get("concept_id") else None,
-                    "score": float(m.get("score", 0.0)),
-                    "confidence": float(m.get("confidence", 0.0)),
-                    "last_seen": m.get("last_seen"),
-                }
-            )
+    mastery_block: list[dict[str, Any]] = [
+        {
+            "chapter_id": str(m.get("chapter_id", "")),
+            "concept_id": str(m.get("concept_id", "")) if m.get("concept_id") else None,
+            "score": float(m.get("score", 0.0)),
+            "confidence": float(m.get("confidence", 0.0)),
+            "last_seen": m.get("last_seen"),
+        }
+        for m in (mastery_records or [])
+    ]
 
     signals_block: dict[str, Any] = {}
     if learning_signals:
@@ -175,17 +172,15 @@ def build_pseudonymous_snapshot(
             "self_rated_difficulty": learning_signals.get("self_rated_difficulty"),
         }
 
-    revision_block: list[dict[str, Any]] = []
-    if revision_items:
-        for r in revision_items:
-            revision_block.append(
-                {
-                    "chapter_id": str(r.get("chapter_id", "")),
-                    "concept_id": str(r.get("concept_id", "")) if r.get("concept_id") else None,
-                    "box": int(r.get("box", 1)),
-                    "due_at": r.get("due_at"),
-                }
-            )
+    revision_block: list[dict[str, Any]] = [
+        {
+            "chapter_id": str(r.get("chapter_id", "")),
+            "concept_id": str(r.get("concept_id", "")) if r.get("concept_id") else None,
+            "box": int(r.get("box", 1)),
+            "due_at": r.get("due_at"),
+        }
+        for r in (revision_items or [])
+    ]
 
     return {
         "contract_version": "ai-planner/v1.0",

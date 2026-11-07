@@ -418,18 +418,18 @@ class ParentService:
         adaptive_mode = settings_obj.adaptive_mode if settings_obj else "suggest"
         if settings_obj and settings_obj.ai_adjustments:
             raw_adj = settings_obj.ai_adjustments.get("recent_adjustments", [])
-            for a in raw_adj:
-                if not a.get("undone", False):
-                    recent_adjustments.append(
-                        ParentAiAdjustmentView(
-                            adjustment_id=a.get("adjustment_id", ""),
-                            type=a.get("type", "ai_minute_adjustment"),
-                            summary=a.get("summary", "Automated plan pacing adjustment"),
-                            summary_bn=a.get("summary_bn", "স্বয়ংক্রিয় রুটিন সমন্বয়"),
-                            applied_at=a.get("applied_at", ""),
-                            can_undo=True,
-                        )
-                    )
+            recent_adjustments.extend(
+                ParentAiAdjustmentView(
+                    adjustment_id=a.get("adjustment_id", ""),
+                    type=a.get("type", "ai_minute_adjustment"),
+                    summary=a.get("summary", "Automated plan pacing adjustment"),
+                    summary_bn=a.get("summary_bn", "স্বয়ংক্রিয় রুটিন সমন্বয়"),
+                    applied_at=a.get("applied_at", ""),
+                    can_undo=True,
+                )
+                for a in raw_adj
+                if not a.get("undone", False)
+            )
 
         # 8. Topic-Level AI Chat Summaries (Deliverable 12: strictly no raw transcripts)
         stmt_chat = (

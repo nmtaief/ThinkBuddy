@@ -94,10 +94,11 @@ async def forward_to_core(request: Request, json_body: Any = None) -> Response:
         headers=headers,
     )
 
-    response_headers: dict[str, str] = {}
-    for k, v in core_res.headers.items():
-        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}:
-            response_headers[k] = v
+    response_headers = {
+        k: v
+        for k, v in core_res.headers.items()
+        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}
+    }
 
     return Response(
         content=core_res.content,
@@ -127,10 +128,11 @@ async def forward_stream_to_core(request: Request, json_body: Any = None) -> Res
         headers=headers,
     )
 
-    clean_headers: dict[str, str] = {}
-    for k, v in resp_headers.items():
-        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}:
-            clean_headers[k] = v
+    clean_headers = {
+        k: v
+        for k, v in resp_headers.items()
+        if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}
+    }
 
     return StreamingResponse(
         stream_gen,

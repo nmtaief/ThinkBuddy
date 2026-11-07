@@ -551,9 +551,8 @@ class PrivacyService:
             # Quiz attempts summary (sanitized, no answer keys)
             stmt_att = select(QuizAttempt).where(QuizAttempt.student_id == s_id).order_by(QuizAttempt.started_at.desc())
             res_att = await db.execute(stmt_att)
-            attempts_list = []
-            for att in res_att.scalars().all():
-                attempts_list.append({
+            attempts_list = [
+                {
                     "attempt_id": str(att.id),
                     "quiz_id": str(att.quiz_id),
                     "mode": att.mode,
@@ -562,7 +561,9 @@ class PrivacyService:
                     "passed": att.passed,
                     "started_at": att.started_at.isoformat(),
                     "submitted_at": att.submitted_at.isoformat() if att.submitted_at else None,
-                })
+                }
+                for att in res_att.scalars().all()
+            ]
 
             # AI Chat topic summaries ONLY (Rule 15: Zero raw messages, prompts, or tokens)
             from core.chat.models import ChatCitation, ChatMessage, ChatSession
