@@ -8,7 +8,10 @@ import {
 import { Navbar } from "./components/Navbar";
 import { AuthView } from "./components/AuthView";
 import { ParentDashboard } from "./components/ParentDashboard";
-import { ParentProfileDrawer } from "./components/ParentProfileDrawer";
+
+const ParentProfileDrawer = React.lazy(() =>
+  import("./components/ParentProfileDrawer").then((m) => ({ default: m.ParentProfileDrawer }))
+);
 
 export const App: React.FC = () => {
   const [lang, setLang] = useState<Language>(() => {
@@ -94,16 +97,18 @@ export const App: React.FC = () => {
       </main>
 
       {/* Parent Profile Drawer (with hidden link to Student App) */}
-      <ParentProfileDrawer
-        isOpen={isProfileDrawerOpen}
-        onClose={() => setIsProfileDrawerOpen(false)}
-        user={user}
-        lang={lang}
-        onToggleLang={toggleLang}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onLogout={handleLogout}
-      />
+      <React.Suspense fallback={null}>
+        <ParentProfileDrawer
+          isOpen={isProfileDrawerOpen}
+          onClose={() => setIsProfileDrawerOpen(false)}
+          user={user}
+          lang={lang}
+          onToggleLang={toggleLang}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onLogout={handleLogout}
+        />
+      </React.Suspense>
 
       <footer
         style={{

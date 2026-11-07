@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Language, translations, ChatMessage } from "@thinkbuddy/shared";
-import { Sparkles, Send, BookOpen, Bot, User, AlertCircle } from "lucide-react";
+import { Sparkles, Send, BookOpen, Bot, User } from "lucide-react";
 import { MathRenderer } from "./MathRenderer";
 
 interface AIChatViewProps {

@@ -15,14 +15,25 @@ import { Navbar } from "./components/Navbar";
 import { Sidebar } from "./components/Sidebar";
 import { BottomNav } from "./components/BottomNav";
 import { TodayMergedView } from "./components/TodayMergedView";
-import { PracticeQuizRunner } from "./components/PracticeQuizRunner";
-import { AIChatView } from "./components/AIChatView";
-import { ProgressView } from "./components/ProgressView";
-import { BroadAnswerView } from "./components/BroadAnswerView";
-import { StudentChangeRequestView } from "./components/StudentChangeRequestView";
 import { AuthView } from "./components/AuthView";
 import { ExamSettingsModal } from "./components/ExamSettingsModal";
 import { ProfileDrawer } from "./components/ProfileDrawer";
+
+const PracticeQuizRunner = React.lazy(() =>
+  import("./components/PracticeQuizRunner").then((m) => ({ default: m.PracticeQuizRunner }))
+);
+const AIChatView = React.lazy(() =>
+  import("./components/AIChatView").then((m) => ({ default: m.AIChatView }))
+);
+const ProgressView = React.lazy(() =>
+  import("./components/ProgressView").then((m) => ({ default: m.ProgressView }))
+);
+const BroadAnswerView = React.lazy(() =>
+  import("./components/BroadAnswerView").then((m) => ({ default: m.BroadAnswerView }))
+);
+const StudentChangeRequestView = React.lazy(() =>
+  import("./components/StudentChangeRequestView").then((m) => ({ default: m.StudentChangeRequestView }))
+);
 
 export const App: React.FC = () => {
   const [lang, setLang] = useState<Language>(() => {
@@ -137,26 +148,28 @@ export const App: React.FC = () => {
         <Sidebar currentTab={currentTab} onSelectTab={setCurrentTab} lang={lang} />
 
         <main className="student-main-content">
-          {currentTab === "today" && (
-            <TodayMergedView
-              user={user}
-              lang={lang}
-              routineSlots={routineSlots}
-              onUpdateRoutineSlots={(updated) => {
-                setRoutineSlots(updated);
-                saveStoredRoutineSlots(updated);
-              }}
-              examSettings={examSettings}
-              onOpenExamSettings={() => setIsExamModalOpen(true)}
-            />
-          )}
+          <React.Suspense fallback={<div style={{ padding: "var(--space-4)", color: "var(--color-text-muted)" }}>Loading...</div>}>
+            {currentTab === "today" && (
+              <TodayMergedView
+                user={user}
+                lang={lang}
+                routineSlots={routineSlots}
+                onUpdateRoutineSlots={(updated) => {
+                  setRoutineSlots(updated);
+                  saveStoredRoutineSlots(updated);
+                }}
+                examSettings={examSettings}
+                onOpenExamSettings={() => setIsExamModalOpen(true)}
+              />
+            )}
 
-          {currentTab === "quiz" && <PracticeQuizRunner lang={lang} />}
-          {currentTab === "revision" && <ProgressView lang={lang} />}
-          {currentTab === "chat" && <AIChatView lang={lang} />}
-          {currentTab === "broad-answer" && <BroadAnswerView lang={lang} />}
-          {currentTab === "progress" && <ProgressView lang={lang} />}
-          {currentTab === "change-request" && <StudentChangeRequestView lang={lang} />}
+            {currentTab === "quiz" && <PracticeQuizRunner lang={lang} />}
+            {currentTab === "revision" && <ProgressView lang={lang} />}
+            {currentTab === "chat" && <AIChatView lang={lang} />}
+            {currentTab === "broad-answer" && <BroadAnswerView lang={lang} />}
+            {currentTab === "progress" && <ProgressView lang={lang} />}
+            {currentTab === "change-request" && <StudentChangeRequestView lang={lang} />}
+          </React.Suspense>
         </main>
       </div>
 
