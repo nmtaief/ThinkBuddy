@@ -195,7 +195,8 @@ button {
 @media (max-width: 599px) {
   .content-area {
     padding: var(--space-3);
-    padding-bottom: 72px; /* space for bottom navigation */
+    /* Reserve space for fixed bottom nav + iOS home indicator */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   }
   .sidebar-container {
     display: none !important;
@@ -203,11 +204,30 @@ button {
   .bottom-nav-mobile {
     z-index: 9999 !important;
   }
+
+  /* Cards flush-left on tiny screens */
+  .card {
+    border-radius: var(--radius-md);
+  }
 }
 
 @media (min-width: 600px) {
   .bottom-nav-mobile {
     display: none !important;
+  }
+}
+
+/* Safe-area-aware bottom nav for iOS */
+.bottom-nav-mobile {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: calc(64px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Prevent text overflow in tight mobile containers */
+@media (max-width: 400px) {
+  .content-area {
+    padding: var(--space-2);
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   }
 }
 

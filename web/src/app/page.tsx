@@ -222,45 +222,6 @@ export default function Home() {
         onLogout={handleLogout}
       />
 
-      {/* Dev role switcher banner */}
-      <nav
-        aria-label="Role selector"
-        style={{
-          backgroundColor: "var(--color-surface)",
-          borderBottom: "1px solid var(--color-border)",
-          padding: "var(--space-2) var(--space-6)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: "var(--text-xs)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <span style={{ fontWeight: 600, color: "var(--color-text-muted)" }}>রোল নির্বাচন:</span>
-          <button
-            onClick={() => handleLogin("student", "তাহমিদ আলিম")}
-            className={user?.role === "student" ? "btn-primary touch-target" : "btn-secondary touch-target"}
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            শিক্ষার্থী (Student)
-          </button>
-          <button
-            onClick={() => handleLogin("parent", "রফিকুল ইসলাম")}
-            className={user?.role === "parent" ? "btn-primary touch-target" : "btn-secondary touch-target"}
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            অভিভাবক (Parent)
-          </button>
-          <button
-            onClick={() => setFirebaseModalOpen(true)}
-            className="btn-outline touch-target"
-            style={{ fontSize: "var(--text-xs)", height: 32, padding: "0 12px" }}
-          >
-            Firebase Auth
-          </button>
-        </div>
-        <span style={{ color: "var(--color-text-muted)" }}>ThinkBuddy Web Client v1.0</span>
-      </nav>
 
       <div className="app-container">
         {user && (
