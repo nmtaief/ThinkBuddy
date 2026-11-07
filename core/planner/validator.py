@@ -27,13 +27,12 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from core.contracts.ai_planner import (
     ALLOWED_CONTRACT_VERSIONS,
     CONTRACT_VERSION_V1_0,
-    PrioritySuggestion,
 )
 from core.planner.engine import (
     GeneratedPlanDay,

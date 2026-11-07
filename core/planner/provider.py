@@ -46,7 +46,7 @@ from core.planner.pseudonymizer import build_pseudonymous_snapshot
 from core.planner.validator import AiProposalValidator
 
 if TYPE_CHECKING:
-    from core.planner.engine import ChapterPlanInput, SubjectSetupInput
+    from core.planner.engine import SubjectSetupInput
     from core.planner.models import Task
     from core.planner.settings_resolver import DayScheduleInfo, ResolvedPlannerSettings
 

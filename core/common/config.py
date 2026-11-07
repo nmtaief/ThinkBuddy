@@ -1,6 +1,6 @@
 """Core application configuration via pydantic-settings."""
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

@@ -462,11 +462,7 @@ async def reauthenticate_user(
 
     # 1. Identity match check: Provider identity must match authenticated user
     identity_matched = False
-    if current_user.auth_uid and auth_user.uid == current_user.auth_uid:
-        identity_matched = True
-    elif current_user.phone and auth_user.phone and auth_user.phone == current_user.phone:
-        identity_matched = True
-    elif current_user.email and auth_user.email and auth_user.email == current_user.email:
+    if current_user.auth_uid and auth_user.uid == current_user.auth_uid or current_user.phone and auth_user.phone and auth_user.phone == current_user.phone or current_user.email and auth_user.email and auth_user.email == current_user.email:
         identity_matched = True
 
     if not identity_matched:

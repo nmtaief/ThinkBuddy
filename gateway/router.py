@@ -65,16 +65,7 @@ from core.planner.schemas import (
 )
 from core.reviews.router import FlagTopicRequest, ReviewSubmissionRequest
 from core.privacy.schemas import (
-    AccountDeletionResponse,
-    CancelDeletionResponse,
     ConsentVersionDetailResponse,
-    FamilyDataExportResponse,
-    ParentalConsentRequest,
-    ParentalConsentResponse,
-    ParentalConsentStatusResponse,
-    PurgeJobReport,
-    RequestAccountDeletionBody,
-    WithdrawConsentRequest,
     WithdrawConsentResponse,
 )
 from core.auth.router import ReauthenticateRequest, ReauthenticateResponse

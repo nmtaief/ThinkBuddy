@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import text
 
 from core.common.config import settings as app_settings
 from core.common.database import AsyncSessionLocal

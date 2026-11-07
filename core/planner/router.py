@@ -28,9 +28,7 @@ from core.planner.engine import (
     CompletedTaskRecord,
     MultiSubjectPlanOutput,
     SubjectSetupInput,
-    generate_student_plan,
 )
-from core.families.models import StudentProfile
 from core.planner.provider import (
     AiPlannerProvider,
     PlanProviderContext,
@@ -45,7 +43,7 @@ from core.planner.models import (
     SyllabusItem,
     Task,
 )
-from core.progress.models import Mastery, ProgressDaily, RevisionItem
+from core.progress.models import ProgressDaily, RevisionItem
 from core.planner.schemas import (
     AiSuggestionResponse,
     DailyMinutesResponse,

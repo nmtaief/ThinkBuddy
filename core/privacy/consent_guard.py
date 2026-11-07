@@ -12,13 +12,9 @@ Enforces parental consent gating across:
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.models import User
 from core.privacy.constants import CONSENT_SUSPENSION_RETENTION_DAYS

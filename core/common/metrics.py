@@ -119,9 +119,7 @@ async def metrics_middleware(request: Request, call_next: Callable) -> Response:
             # Normalize variable UUIDs or numeric IDs in endpoint path to avoid metric cardinality explosion
             norm_parts = []
             for part in endpoint.split("/"):
-                if len(part) in (32, 36) and ("-" in part or any(c.isdigit() for c in part)):
-                    norm_parts.append(":id")
-                elif part.isdigit():
+                if len(part) in (32, 36) and ("-" in part or any(c.isdigit() for c in part)) or part.isdigit():
                     norm_parts.append(":id")
                 else:
                     norm_parts.append(part)

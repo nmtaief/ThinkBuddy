@@ -1024,9 +1024,7 @@ def generate_student_plan(
 
             # 1. Mock quiz capped at 1 per subject per 2 days (placeholder until P04)
             can_schedule_mock = False
-            if tracker.last_mock_quiz_date is None:
-                can_schedule_mock = True
-            elif (cur_date - tracker.last_mock_quiz_date).days >= mock_quiz_max_frequency_days:
+            if tracker.last_mock_quiz_date is None or (cur_date - tracker.last_mock_quiz_date).days >= mock_quiz_max_frequency_days:
                 can_schedule_mock = True
 
             if can_schedule_mock and rem_fill >= min_study_block_minutes:

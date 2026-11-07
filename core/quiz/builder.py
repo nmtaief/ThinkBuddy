@@ -17,7 +17,7 @@ import logging
 import random
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -11,15 +11,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit.models import AuditLog
-from core.auth.models import Session as UserSession, User
-from core.auth.tokens import decode_access_jwt, decode_reauth_jwt, generate_secure_token, hash_token
-from core.common.database import get_db_session
+from core.auth.models import User
+from core.auth.tokens import decode_reauth_jwt, generate_secure_token, hash_token
 import logging
 logger = logging.getLogger(__name__)
-from core.devices.models import Device
 from core.families.models import Family, FamilyMember, ParentStudentLink, StudentProfile
 from core.notifications.models import Notification
-from core.planner.models import Plan, StudySetup, Task
+from core.planner.models import StudySetup
 from core.privacy.constants import (
     CURRENT_CONSENT_TEXT_HASH,
     CURRENT_CONSENT_VERSION,
@@ -43,7 +41,7 @@ from core.privacy.schemas import (
     WithdrawConsentRequest,
     WithdrawConsentResponse,
 )
-from core.progress.models import Mastery, ProgressDaily, RevisionItem
+from core.progress.models import Mastery, RevisionItem
 from core.quiz.models import QuizAttempt
 
 

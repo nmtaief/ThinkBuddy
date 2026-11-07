@@ -85,9 +85,7 @@ class QuizGradingService:
             selected_opt = str(response.get("selected_option_id", "")).strip()
             # Must match correct_option_id (or correct_text if option was text-based)
             is_correct = False
-            if q_key.correct_option_id and selected_opt == str(q_key.correct_option_id).strip():
-                is_correct = True
-            elif q_key.correct_text and selected_opt == str(q_key.correct_text).strip():
+            if q_key.correct_option_id and selected_opt == str(q_key.correct_option_id).strip() or q_key.correct_text and selected_opt == str(q_key.correct_text).strip():
                 is_correct = True
         elif q_type == "short":
             norm_student = normalize_bangla_text(response.get("text"))

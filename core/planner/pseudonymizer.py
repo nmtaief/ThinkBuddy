@@ -16,7 +16,7 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from core.planner.engine import ChapterPlanInput, SubjectSetupInput
+    from core.planner.engine import SubjectSetupInput
     from core.planner.models import Task
     from core.planner.settings_resolver import DayScheduleInfo, ResolvedPlannerSettings
 
