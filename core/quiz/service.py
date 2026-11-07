@@ -96,14 +96,10 @@ class QuizService:
 
         Used by chat and assistant endpoints to enforce anti-cheat lockout.
         """
-        stmt = (
-            select(QuizAttempt)
-            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
-            .where(
-                QuizAttempt.student_id == student_id,
-                QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
-                Quiz.mode == "assessed",
-            )
+        stmt = select(QuizAttempt).where(
+            QuizAttempt.student_id == student_id,
+            QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
+            QuizAttempt.mode == "assessed",
         )
         res = await self.db.execute(stmt)
         active_attempt = res.scalar_one_or_none()
@@ -623,9 +619,7 @@ class QuizService:
                         nonce=next_item.nonce,
                         question=_format_attempt_question_public(q_next, attempt.id),
                     )
-                quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == attempt.quiz_id))
-                quiz = quiz_res.scalar_one()
-                feedback_correct = item.is_correct if quiz.mode == "practice" else None
+                feedback_correct = item.is_correct if attempt.mode == "practice" else None
                 return AnswerItemResponse(
                     position=position,
                     answered=True,
@@ -686,9 +680,7 @@ class QuizService:
             )
 
         # Check quiz mode for feedback: Assessed mode strictly withholds correctness until submit
-        quiz_res = await self.db.execute(select(Quiz).where(Quiz.id == attempt.quiz_id))
-        quiz = quiz_res.scalar_one()
-        feedback_correct = is_correct if quiz.mode == "practice" else None
+        feedback_correct = is_correct if attempt.mode == "practice" else None
 
         await self.db.commit()
 
