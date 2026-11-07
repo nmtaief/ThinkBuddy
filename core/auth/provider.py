@@ -160,11 +160,20 @@ class FirebaseAuthProvider:
             raise ValueError(msg) from None
 
 
+_fake_provider: FakeAuthProvider | None = None
+_firebase_provider: FirebaseAuthProvider | None = None
+
+
 def get_auth_provider() -> AuthProvider:
     """Factory returning appropriate provider for current environment.
 
     Enforces that FakeAuthProvider cannot load unless ENV=local.
     """
+    global _fake_provider, _firebase_provider
     if settings.is_local:
-        return FakeAuthProvider()
-    return FirebaseAuthProvider()
+        if _fake_provider is None:
+            _fake_provider = FakeAuthProvider()
+        return _fake_provider
+    if _firebase_provider is None:
+        _firebase_provider = FirebaseAuthProvider()
+    return _firebase_provider
