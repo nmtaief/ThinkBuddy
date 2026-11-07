@@ -1,6 +1,13 @@
+"""Consolidated test suite: test_privacy_security.py."""
+from __future__ import annotations
+
+
+# ========================================================================
+# Consolidated from: tests/test_p07b_privacy_consent_export_deletion.py
+# ========================================================================
+
 """Comprehensive Tests for Parental Consent, Family Data Export, Account Deletion Grace Period, and Purge Job (P07b)."""
 
-from __future__ import annotations
 
 import json
 import subprocess
@@ -1303,3 +1310,887 @@ async def test_central_consent_guard_and_suspended_retention_purge() -> None:
         assert suspended_student.status == "purged"
 
 
+
+# ========================================================================
+# Consolidated from: tests/test_p08_ip_rate_limit.py
+# ========================================================================
+
+"""Test real client IP propagation and rate limit isolation for web BFF proxy (P08 Follow-up).
+
+Verifies that:
+1. Trusted proxies are strictly restricted to the web container dedicated address/network and gateway (no hostnames, no whole private ranges).
+2. Forwarded IPs are parsed from the right (stepping back through trusted proxies).
+3. Browser-supplied X-Forwarded-For headers from untrusted peers are strictly ignored.
+4. In the Compose stack, different client IPs hit different rate-limit keys.
+"""
+
+from unittest.mock import MagicMock
+import pytest
+from httpx import AsyncClient
+
+from core.common.config import settings
+from gateway.config import settings as gw_settings
+from core.common.rate_limit import RateLimiter, build_rate_limit_key, get_trusted_client_ip, is_peer_trusted_proxy
+
+
+def make_mock_request(peer_ip: str, headers: dict[str, str]) -> MagicMock:
+    req = MagicMock()
+    req.client.host = peer_ip
+    req.headers = {k.lower(): v for k, v in headers.items()}
+    return req
+
+
+def test_trusted_proxy_configuration_restricted() -> None:
+    """Ensure trusted proxies only contain explicit fixed addresses/dedicated network, with no hostnames or whole private ranges."""
+    # Core trusts strictly the Gateway's specific fixed IP or loopback
+    assert "172.29.0.2" in settings.TRUSTED_PROXIES
+    assert "127.0.0.1" in settings.TRUSTED_PROXIES
+    assert "web" not in settings.TRUSTED_PROXIES
+    assert "gateway" not in settings.TRUSTED_PROXIES
+
+    # Gateway trusts strictly the Web container's fixed IP and dedicated edge network
+    assert "172.28.0.3" in gw_settings.GATEWAY_TRUSTED_PROXIES
+    assert "172.28.0.0/29" in gw_settings.GATEWAY_TRUSTED_PROXIES
+    assert "127.0.0.1" in gw_settings.GATEWAY_TRUSTED_PROXIES
+    assert "web" not in gw_settings.GATEWAY_TRUSTED_PROXIES
+
+    # Whole private ranges MUST NOT be trusted
+    assert "10.0.0.0/8" not in settings.TRUSTED_PROXIES
+    assert "172.16.0.0/12" not in settings.TRUSTED_PROXIES
+    assert "192.168.0.0/16" not in settings.TRUSTED_PROXIES
+    assert "10.0.0.0/8" not in gw_settings.GATEWAY_TRUSTED_PROXIES
+    assert "172.16.0.0/12" not in gw_settings.GATEWAY_TRUSTED_PROXIES
+    assert "192.168.0.0/16" not in gw_settings.GATEWAY_TRUSTED_PROXIES
+
+    # Arbitrary private network addresses not in the list are untrusted
+    assert not is_peer_trusted_proxy("10.10.10.10")
+    assert not is_peer_trusted_proxy("172.25.0.4")
+    assert not is_peer_trusted_proxy("192.168.1.50")
+    assert not is_peer_trusted_proxy("web")
+
+
+def test_browser_supplied_x_forwarded_for_is_ignored() -> None:
+    """A browser-supplied X-Forwarded-For or X-Real-IP from an untrusted peer MUST be ignored."""
+    # Direct browser client connecting to gateway
+    req_browser = make_mock_request(
+        peer_ip="198.51.100.77",
+        headers={
+            "x-forwarded-for": "8.8.8.8, 1.1.1.1",
+            "x-real-ip": "9.9.9.9",
+        },
+    )
+    # Must return direct peer host, ignoring spoofed headers
+    assert get_trusted_client_ip(req_browser) == "198.51.100.77"
+
+
+def test_forwarded_ips_parsed_from_the_right() -> None:
+    """When request arrives from trusted proxy, X-Forwarded-For is parsed from the right."""
+    # Case 1: Browser client (203.0.113.55) connects to Web BFF (fixed IP '172.28.0.3'),
+    # and browser attempted to spoof X-Forwarded-For: 100.100.100.100.
+    # The chain forwarded by Web container is "100.100.100.100, 203.0.113.55".
+    req_spoof_attempt = make_mock_request(
+        peer_ip="172.28.0.3",
+        headers={"x-forwarded-for": "100.100.100.100, 203.0.113.55"},
+    )
+    # Parsing from the right extracts the actual client IP (203.0.113.55), ignoring the spoofed 100.100.100.100
+    assert get_trusted_client_ip(req_spoof_attempt) == "203.0.113.55"
+
+    # Case 2: Chain containing an intermediate trusted proxy (127.0.0.1)
+    req_multi_proxy = make_mock_request(
+        peer_ip="172.28.0.3",
+        headers={"x-forwarded-for": "1.2.3.4, 203.0.113.99, 127.0.0.1"},
+    )
+    # Steps over trusted 127.0.0.1 from the right, finding 203.0.113.99, ignoring 1.2.3.4
+    assert get_trusted_client_ip(req_multi_proxy) == "203.0.113.99"
+
+
+def test_compose_stack_different_client_ips_hit_different_rate_limit_keys() -> None:
+    """In the Compose stack, different client IPs routed through the web container hit different rate-limit keys."""
+    # User 1 and User 2 routed through the dedicated web container fixed IP
+    req_user1 = make_mock_request(
+        peer_ip="172.28.0.3",
+        headers={"x-forwarded-for": "203.0.113.10, 172.28.0.3"},
+    )
+    req_user2 = make_mock_request(
+        peer_ip="172.28.0.3",
+        headers={"x-forwarded-for": "198.51.100.20, 172.28.0.3"},
+    )
+
+    ip1 = get_trusted_client_ip(req_user1)
+    ip2 = get_trusted_client_ip(req_user2)
+
+    assert ip1 == "203.0.113.10"
+    assert ip2 == "198.51.100.20"
+
+    key1 = build_rate_limit_key("auth_exchange", ip1, "user_1")
+    key2 = build_rate_limit_key("auth_exchange", ip2, "user_2")
+
+    assert key1 == "rl:auth_exchange:203.0.113.10:user_1"
+    assert key2 == "rl:auth_exchange:198.51.100.20:user_2"
+    assert key1 != key2
+
+
+@pytest.mark.asyncio
+async def test_per_ip_rate_limits_apply_per_user_not_per_web_server(gateway_client: AsyncClient) -> None:
+    """Verify that when requests arrive via the web server proxy, rate limits apply per user IP.
+
+    If User A from IP 203.0.113.10 exceeds rate limits, User B from IP 198.51.100.20
+    through the same web server proxy must NOT be rate limited.
+    """
+    await RateLimiter.reset()
+
+    user_a_ip = "203.0.113.10"
+    user_b_ip = "198.51.100.20"
+
+    headers_user_a = {
+        "X-Client-Platform": "web",
+        "X-Client-Form-Factor": "desktop",
+        "X-App-Version": "1.0.0",
+        "X-Device-Id": "web_dev_user_a",
+        "Accept-Language": "bn",
+        "X-Real-IP": user_a_ip,
+        "X-Forwarded-For": f"{user_a_ip}, 127.0.0.1",
+    }
+
+    headers_user_b = {
+        "X-Client-Platform": "web",
+        "X-Client-Form-Factor": "desktop",
+        "X-App-Version": "1.0.0",
+        "X-Device-Id": "web_dev_user_b",
+        "Accept-Language": "bn",
+        "X-Real-IP": user_b_ip,
+        "X-Forwarded-For": f"{user_b_ip}, 127.0.0.1",
+    }
+
+    from unittest.mock import AsyncMock, patch
+    import httpx
+
+    mock_core_response = httpx.Response(
+        200,
+        json={"access_token": "mock_token", "refresh_token": "mock_rt", "token_type": "bearer", "expires_in": 3600},
+    )
+
+    with patch("gateway.router.core_client.request", new_callable=AsyncMock, return_value=mock_core_response):
+        # Simulate 10 exchange attempts for User A (rate limit ceiling is 10/min)
+        for _ in range(10):
+            res = await gateway_client.post(
+                "/v1/auth/exchange",
+                json={"provider_token": "fake:phone:+8801711111111", "role": "parent"},
+                headers=headers_user_a,
+            )
+            assert res.status_code == 200
+
+        # 11th attempt for User A must trigger rate limit (429)
+        res_a_blocked = await gateway_client.post(
+            "/v1/auth/exchange",
+            json={"provider_token": "fake:phone:+8801711111111", "role": "parent"},
+            headers=headers_user_a,
+        )
+        assert res_a_blocked.status_code == 429
+        assert res_a_blocked.json()["error"]["code"] in ("RATE_LIMIT_EXCEEDED", "LOCKED_OUT")
+
+        # User B arrives from the SAME web server, but with their own IP
+        # User B must NOT be blocked by User A's lockout!
+        res_b = await gateway_client.post(
+            "/v1/auth/exchange",
+            json={"provider_token": "fake:phone:+8801722222222", "role": "parent"},
+            headers=headers_user_b,
+        )
+        assert res_b.status_code == 200
+
+# ========================================================================
+# Consolidated from: tests/test_p08_e2e_journeys.py
+# ========================================================================
+
+"""E2E Journey tests for P08 Web App against real backend services (P08 Task 4).
+
+Validates the full lifecycles:
+1. Parent onboarding & child link code creation
+2. Student link code redemption
+3. Student daily learning loop (today payload & task status updates)
+4. AI suggestions review and 1-tap undo of auto-adjustments
+5. Student study settings change request and parent approval
+6. Practice quiz runner, answering, submission, and review unlock (Rule 5 & 6)
+7. Assessed quiz guard enforcement (Rule 4 & 18)
+"""
+
+import uuid
+import pytest
+from httpx import AsyncClient
+
+from core.common.rate_limit import RateLimiter
+
+CLIENT_HEADERS_WEB = {
+    "X-Client-Platform": "web",
+    "X-Client-Form-Factor": "desktop",
+    "Accept-Language": "bn",
+    "X-App-Version": "1.0.0",
+    "X-Device-Id": "web_test_device_01",
+    "X-Forwarded-For": "203.0.113.100, 127.0.0.1",
+    "X-Real-IP": "203.0.113.100",
+}
+
+
+@pytest.mark.asyncio
+async def test_p08_e2e_parent_and_student_journeys(gateway_client: AsyncClient) -> None:
+    """Run all primary parent and student journeys against the real backend gateway."""
+    await RateLimiter.reset()
+
+    # -------------------------------------------------------------------------
+    # 1. Parent Sign-In & Onboarding Journey
+    # -------------------------------------------------------------------------
+    phone_p = f"+880171{uuid.uuid4().hex[:6]}"
+    res_p_auth = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone_p}", "role": "parent"},
+        headers=CLIENT_HEADERS_WEB,
+    )
+    assert res_p_auth.status_code == 200, res_p_auth.text
+    parent_token = res_p_auth.json()["access_token"]
+    parent_headers = {**CLIENT_HEADERS_WEB, "Authorization": f"Bearer {parent_token}"}
+
+    # Parent creates family
+    res_fam = await gateway_client.post(
+        "/v1/families",
+        json={"name": "আলিম পরিবার (Alim Family)"},
+        headers=parent_headers,
+    )
+    assert res_fam.status_code == 201, res_fam.text
+    family_id = res_fam.json()["id"]
+
+    # Parent adds child and generates expiring link code
+    res_child = await gateway_client.post(
+        f"/v1/families/{family_id}/students",
+        json={
+            "display_name": "তাহমিদ আলিম (Tahmid Alim)",
+            "class_level": 7,
+            "medium": "bn",
+            "group": "general",
+            "daily_minutes": 150,
+        },
+        headers=parent_headers,
+    )
+    assert res_child.status_code == 201, res_child.text
+    link_code = res_child.json()["link_code"]
+    student_id = res_child.json()["student_id"]
+    assert len(link_code) >= 6
+
+    # -------------------------------------------------------------------------
+    # 2. Student Sign-In & Link Code Redemption Journey
+    # -------------------------------------------------------------------------
+    phone_s = f"+880172{uuid.uuid4().hex[:6]}"
+    res_s_auth = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone_s}", "role": "student", "link_code": link_code},
+        headers=CLIENT_HEADERS_WEB,
+    )
+    assert res_s_auth.status_code == 200, res_s_auth.text
+    student_token = res_s_auth.json()["access_token"]
+    student_id = res_s_auth.json().get("user", {}).get("id") or student_id
+    student_headers = {**CLIENT_HEADERS_WEB, "Authorization": f"Bearer {student_token}"}
+
+    # Student redeems link code directly
+    res_redeem = await gateway_client.post(
+        "/v1/links/redeem",
+        json={"link_code": link_code},
+        headers=student_headers,
+    )
+    # Status can be 200 or 400 if already bound during auth exchange
+    assert res_redeem.status_code in (200, 400), res_redeem.text
+
+    # -------------------------------------------------------------------------
+    # 3. Student Daily Learning Loop (Today & Plan)
+    # -------------------------------------------------------------------------
+    res_today = await gateway_client.get(
+        f"/v1/students/{student_id}/today",
+        headers=student_headers,
+    )
+    assert res_today.status_code == 200, res_today.text
+    today_data = res_today.json()
+    assert "date" in today_data
+    assert "study_tasks" in today_data
+
+    # If tasks exist, student marks one as completed
+    if today_data.get("study_tasks"):
+        first_task_id = today_data["study_tasks"][0]["id"]
+        res_task = await gateway_client.patch(
+            f"/v1/tasks/{first_task_id}",
+            json={"status": "completed"},
+            headers=student_headers,
+        )
+        assert res_task.status_code == 200, res_task.text
+
+    # -------------------------------------------------------------------------
+    # 4. Student Change Request & Parent Review Journey
+    # -------------------------------------------------------------------------
+    res_cr = await gateway_client.post(
+        f"/v1/students/{student_id}/study-settings/change-requests",
+        json={
+            "requested_changes": {
+                "requested_school_day_minutes": 120,
+                "reason": "বিদ্যালয়ের বার্ষিক ক্রীড়া প্রতিযোগিতা অনুশীলনের জন্য সাময়িক কমানোর অনুরোধ।",
+            }
+        },
+        headers=student_headers,
+    )
+    assert res_cr.status_code == 201, res_cr.text
+    change_request_id = res_cr.json()["id"]
+
+    # Parent approves the student's change request
+    res_approve = await gateway_client.post(
+        f"/v1/parents/me/students/{student_id}/change-requests/{change_request_id}/approve",
+        headers=parent_headers,
+    )
+    assert res_approve.status_code == 200, res_approve.text
+
+    # -------------------------------------------------------------------------
+    # 5. Assessed Quiz Guard on Web Client (Rule 4 / Rule 18)
+    # -------------------------------------------------------------------------
+    # Attempting to start an assessed quiz on web MUST be rejected
+    dummy_quiz_id = str(uuid.uuid4())
+    res_assessed_blocked = await gateway_client.post(
+        f"/v1/quizzes/{dummy_quiz_id}/attempts",
+        json={"mode": "assessed"},
+        headers=student_headers,
+    )
+    assert res_assessed_blocked.status_code in (400, 403, 404, 422)
+
+# ========================================================================
+# Consolidated from: tests/test_p10_security_and_authz.py
+# ========================================================================
+
+"""P10 Security, Authorization, and Leakage Invariant Tests.
+
+Deliverables 4 & Acceptance:
+- Authorization on every route (Rule 9).
+- Platform isolation for assessments (Rule 18: web client restricted to practice mode).
+- Never send answer keys before attempt item is submitted (Rule 6).
+- Log, don't leak (Rule 15: no tokens, passwords, raw transcripts).
+- CORS and rate-limit security invariants.
+"""
+
+import uuid
+import pytest
+from httpx import AsyncClient
+
+CLIENT_HEADERS_ANDROID = {
+    "X-Client-Platform": "android",
+    "X-Client-Form-Factor": "phone",
+    "X-App-Version": "1.0.0",
+    "X-Device-Id": "device-sec-android-001",
+    "Accept-Language": "bn",
+}
+
+CLIENT_HEADERS_WEB = {
+    "X-Client-Platform": "web",
+    "X-Client-Form-Factor": "desktop",
+    "X-App-Version": "1.0.0",
+    "X-Device-Id": "device-sec-web-001",
+    "Accept-Language": "en",
+}
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_requests_fail_on_all_protected_routes(gateway_client: AsyncClient) -> None:
+    """Verify that unauthenticated calls to protected routes return 401 Unauthorized."""
+    protected_paths = [
+        ("GET", "/v1/parents/me/dashboard", None),
+        ("GET", f"/v1/students/{uuid.uuid4()}/today", None),
+        ("GET", f"/v1/students/{uuid.uuid4()}/plan", None),
+        ("POST", "/v1/chat/sessions", {"title": "Test Chat"}),
+        ("POST", "/v1/families", {"name": "Test Family"}),
+        ("POST", "/v1/parents/me/export", {}),
+        ("POST", "/v1/parents/consent", {"version": "1.0", "consented": True}),
+        ("POST", "/v1/users/me/delete", {}),
+    ]
+
+    for method, path, body in protected_paths:
+        if method == "GET":
+            res = await gateway_client.get(path, headers=CLIENT_HEADERS_ANDROID)
+        else:
+            res = await gateway_client.post(path, json=body or {}, headers=CLIENT_HEADERS_ANDROID)
+
+        assert res.status_code == 401, f"Path {path} returned {res.status_code} instead of 401: {res.text}"
+        err_body = res.json()
+        assert "error" in err_body
+        assert err_body["error"]["code"] in (
+            "AUTH_REQUIRED",
+            "UNAUTHORIZED",
+            "TOKEN_MISSING",
+            "MISSING_OR_INVALID_TOKEN",
+        )
+
+
+@pytest.mark.asyncio
+async def test_role_based_access_control_rule_9(gateway_client: AsyncClient) -> None:
+    """Students cannot access parent routes, and parents cannot access unlinked students (Rule 9)."""
+    # 1. Register parent 1 and link student
+    p_phone1 = f"+880170{uuid.uuid4().hex[:6]}"
+    res_p1 = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone1}", "role": "parent", "display_name": "Parent 1"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_p1.status_code == 200
+    token_p1 = res_p1.json()["access_token"]
+    headers_p1 = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p1}"}
+
+    # Record consent & create family
+    await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=headers_p1)
+    res_fam = await gateway_client.post("/v1/families", json={"name": "Family Sec"}, headers=headers_p1)
+    fam_id = res_fam.json()["id"]
+
+    # Add child
+    res_child = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "Sec Student", "class_level": 7, "medium": "bn", "daily_minutes": 45},
+        headers=headers_p1,
+    )
+    assert res_child.status_code == 201
+    link_code = res_child.json()["link_code"]
+
+    # Student redeems link code
+    s_phone = f"+880171{uuid.uuid4().hex[:6]}"
+    res_s = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{s_phone}", "role": "student", "link_code": link_code},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_s.status_code == 200
+    token_s = res_s.json()["access_token"]
+    student_id = res_s.json()["user"]["id"]
+    headers_s = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_s}"}
+
+    # Student trying parent routes -> 403 FORBIDDEN
+    res_s_parent = await gateway_client.get("/v1/parents/me/dashboard", headers=headers_s)
+    assert res_s_parent.status_code == 403
+
+    res_s_export = await gateway_client.post("/v1/parents/me/export", headers=headers_s)
+    assert res_s_export.status_code == 403
+
+    # 2. Register unlinked Parent 2
+    p_phone2 = f"+880172{uuid.uuid4().hex[:6]}"
+    res_p2 = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone2}", "role": "parent", "display_name": "Parent 2"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_p2.status_code == 200
+    token_p2 = res_p2.json()["access_token"]
+    headers_p2 = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p2}"}
+
+    # Unlinked parent accessing student data -> 403 FORBIDDEN
+    res_unlinked = await gateway_client.get(f"/v1/students/{student_id}/today", headers=headers_p2)
+    assert res_unlinked.status_code == 403
+    assert res_unlinked.json()["error"]["code"] in ("FORBIDDEN_STUDENT_ACCESS", "PARENTAL_CONSENT_REQUIRED")
+
+
+@pytest.mark.asyncio
+async def test_platform_isolation_rule_18_web_practice_only(gateway_client: AsyncClient) -> None:
+    """Rule 18: Assessed quizzes are restricted to native platforms; web clients are rejected."""
+    # Parent creates family and student with web headers
+    p_phone = f"+880173{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone}", "role": "parent", "display_name": "Web Parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    token_p = res_p.json()["access_token"]
+    headers_p = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p}"}
+    await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=headers_p)
+    res_fam = await gateway_client.post("/v1/families", json={"name": "Web Family"}, headers=headers_p)
+    fam_id = res_fam.json()["id"]
+
+    res_c = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "Web Child", "class_level": 8, "medium": "bn", "daily_minutes": 45},
+        headers=headers_p,
+    )
+    link_code = res_c.json()["link_code"]
+
+    w_phone = f"+880174{uuid.uuid4().hex[:6]}"
+    res_auth = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{w_phone}", "role": "student", "link_code": link_code},
+        headers=CLIENT_HEADERS_WEB,
+    )
+    assert res_auth.status_code == 200
+    token = res_auth.json()["access_token"]
+    headers_w = {**CLIENT_HEADERS_WEB, "Authorization": f"Bearer {token}"}
+
+    # Fetch or create a valid quiz for the student
+    from core.common.database import AsyncSessionLocal
+    from core.quiz.models import Quiz
+    from sqlalchemy import select
+
+    student_uuid = uuid.UUID(res_auth.json()["user"]["id"])
+    async with AsyncSessionLocal() as session:
+        quiz = (await session.execute(select(Quiz).where(Quiz.student_id == student_uuid).limit(1))).scalar_one_or_none()
+        if not quiz:
+            quiz = Quiz(id=uuid.uuid4(), student_id=student_uuid, title="Web Test Quiz", kind="daily", mode="assessed")
+            session.add(quiz)
+            await session.commit()
+        target_quiz_id = str(quiz.id)
+
+    # Attempting to start an assessed quiz on web -> 403 WEB_PLATFORM_PRACTICE_ONLY
+    res_assessed = await gateway_client.post(
+        f"/v1/quizzes/{target_quiz_id}/attempts",
+        json={"mode": "assessed"},
+        headers=headers_w,
+    )
+    assert res_assessed.status_code == 403
+    assert res_assessed.json()["error"]["code"] in ("WEB_PLATFORM_PRACTICE_ONLY", "ASSESSED_QUIZZES_REQUIRE_NATIVE_APP")
+
+
+@pytest.mark.asyncio
+async def test_answer_key_leakage_rule_6(gateway_client: AsyncClient) -> None:
+    """Rule 6: Never send answer keys to clients before attempt item is submitted."""
+    p_phone = f"+880175{uuid.uuid4().hex[:6]}"
+    res_p = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{p_phone}", "role": "parent", "display_name": "Quiz Parent"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    token_p = res_p.json()["access_token"]
+    headers_p = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_p}"}
+    await gateway_client.post("/v1/parents/consent", json={"version": "1.0", "consented": True}, headers=headers_p)
+    res_fam = await gateway_client.post("/v1/families", json={"name": "Quiz Family"}, headers=headers_p)
+    fam_id = res_fam.json()["id"]
+
+    res_c = await gateway_client.post(
+        f"/v1/families/{fam_id}/students",
+        json={"display_name": "Quiz Child", "class_level": 7, "medium": "bn", "daily_minutes": 45},
+        headers=headers_p,
+    )
+    link_code = res_c.json()["link_code"]
+
+    phone = f"+880176{uuid.uuid4().hex[:6]}"
+    res_auth = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": f"fake:phone:{phone}", "role": "student", "link_code": link_code},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_auth.status_code == 200
+    token = res_auth.json()["access_token"]
+    headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    # Fetch active or practice quiz questions
+    res_quizzes = await gateway_client.get("/v1/quizzes?kind=daily", headers=headers)
+    if res_quizzes.status_code == 200 and res_quizzes.json().get("items"):
+        quiz = res_quizzes.json()["items"][0]
+        quiz_id = quiz["id"]
+        res_start = await gateway_client.post(
+            f"/v1/quizzes/{quiz_id}/attempts",
+            json={"mode": "practice"},
+            headers=headers,
+        )
+        if res_start.status_code in (200, 201):
+            body_text = res_start.text.lower()
+            # Invariant: correct answer indices or keys must NEVER appear before submission
+            assert "correct_option" not in body_text
+            assert "is_correct" not in body_text
+            assert "answer_key" not in body_text
+            assert "explanation" not in body_text
+
+
+@pytest.mark.asyncio
+async def test_rule_15_pii_and_token_scrubbing(gateway_client: AsyncClient) -> None:
+    """Rule 15: Error responses and public payloads must never echo raw provider tokens or passwords."""
+    res_bad = await gateway_client.post(
+        "/v1/auth/exchange",
+        json={"provider_token": "secret_very_sensitive_auth_token_xyz987", "role": "unknown_role"},
+        headers=CLIENT_HEADERS_ANDROID,
+    )
+    assert res_bad.status_code in (400, 401, 422)
+    # The secret token must NOT be reflected in plain text in the error response
+    assert "secret_very_sensitive_auth_token_xyz987" not in res_bad.text
+
+
+@pytest.mark.asyncio
+async def test_route_inventory_requires_auth_on_every_route() -> None:
+    """Rule 9: Dynamic route-inventory test asserting auth on every non-public endpoint."""
+    from fastapi.routing import APIRoute
+    from core.main import app as core_app
+
+    public_allowlist = {
+        "/metrics",
+        "/healthz",
+        "/readyz",
+        "/v1/auth/exchange",
+        "/v1/auth/refresh",
+        "/v1/auth/status",
+        "/v1/internal/auth/status",
+        "/auth/exchange",
+        "/auth/refresh",
+        "/auth/status",
+        "/internal/auth/status",
+        "/v1/parents/consent/current",
+        "/parents/consent/current",
+    }
+
+    auth_dependency_names = {
+        "get_current_user",
+        "get_current_user_profile",
+        "role_checker",
+        "check_student_access",
+        "verify_parent_student_link",
+        "require_reauth",
+        "require_internal_service_token",
+        "logout_session",
+    }
+
+    def get_all_dep_names(dependant) -> set[str]:
+        names = set()
+        if hasattr(dependant.call, "__name__"):
+            names.add(dependant.call.__name__)
+        for sub in getattr(dependant, "dependencies", []):
+            names.update(get_all_dep_names(sub))
+        return names
+
+    unprotected_routes = []
+    for route in core_app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        path = route.path
+        if path in public_allowlist:
+            continue
+        dep_names = get_all_dep_names(route.dependant)
+        if path.startswith("/internal") or "/internal/" in path:
+            if "verify_internal_service_token" in dep_names or "require_internal_service_token" in dep_names:
+                continue
+        if not (dep_names & auth_dependency_names):
+            unprotected_routes.append(f"{route.methods} {path} (deps: {dep_names})")
+
+    assert not unprotected_routes, f"Found unprotected routes in core_app: {unprotected_routes}"
+
+
+@pytest.mark.asyncio
+async def test_redis_outage_rate_limit_fails_closed() -> None:
+    """Item 3: Sensitive endpoints (auth, reauth, OTP) fail closed or apply strict in-process limits during Redis outage."""
+    from unittest.mock import patch
+    from core.common.rate_limit import RateLimiter, _mem_counters
+
+    _mem_counters.clear()
+
+    # 1. Test fail-closed on explicit flag
+    with patch("core.common.rate_limit.get_redis_client", side_effect=ConnectionError("Redis down")):
+        allowed, retry_after = await RateLimiter.check_rate_limit(
+            key="rl:reauth:ip:10.0.0.1",
+            max_requests=5,
+            window_seconds=60,
+            fail_closed_on_redis_error=True,
+        )
+        assert allowed is False
+        assert retry_after == 60
+
+    # 2. Test strict in-process rate limit for sensitive keys (max 3 requests)
+    key = f"rl:reauth:test_ip:{uuid.uuid4().hex[:6]}"
+    with patch("core.common.rate_limit.get_redis_client", side_effect=ConnectionError("Redis down")):
+        for attempt in range(1, 4):
+            allowed, retry_after = await RateLimiter.check_rate_limit(
+                key=key,
+                max_requests=10,
+                window_seconds=60,
+                fail_closed_on_redis_error=False,
+            )
+            assert allowed is True, f"Attempt {attempt} should be allowed under strict in-process limit"
+
+        # 4th request must be rejected
+        allowed4, retry_after4 = await RateLimiter.check_rate_limit(
+            key=key,
+            max_requests=10,
+            window_seconds=60,
+            fail_closed_on_redis_error=False,
+        )
+        assert allowed4 is False
+        assert retry_after4 > 0
+
+
+@pytest.mark.asyncio
+async def test_consent_guard_background_jobs_and_dashboards() -> None:
+    """Item 8: Background planner tasks and parent dashboards block access when student parental consent is withdrawn."""
+    from datetime import UTC, datetime
+    from core.common.database import AsyncSessionLocal
+    from core.auth.models import User
+    from core.families.models import Family, ParentStudentLink
+    from core.parent.service import ParentService
+    from workers.planner_tasks import _async_regenerate_plan
+    from fastapi import HTTPException
+
+    async with AsyncSessionLocal() as session:
+        # Create parent and student with valid auth_provider/auth_uid
+        p_id = uuid.uuid4()
+        s_id = uuid.uuid4()
+        fam_id = uuid.uuid4()
+
+        parent = User(
+            id=p_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{p_id.hex[:8]}",
+            phone=f"+880179{uuid.uuid4().hex[:6]}",
+            role="parent",
+            display_name="Consent Parent",
+            has_parental_consent=True,
+        )
+        student = User(
+            id=s_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{s_id.hex[:8]}",
+            phone=f"+880178{uuid.uuid4().hex[:6]}",
+            role="student",
+            display_name="Consent Child",
+            has_parental_consent=False,  # Consent withdrawn
+        )
+        fam = Family(id=fam_id, owner_parent_id=p_id, name="Consent Family")
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            family_id=fam_id,
+            parent_id=p_id,
+            student_id=s_id,
+            status="consent_suspended",
+            revoked_at=datetime.now(UTC),
+        )
+
+        session.add_all([parent, student, fam, link])
+        await session.commit()
+
+        # 1. Background plan regeneration must skip for student without consent
+        res_regen = await _async_regenerate_plan(str(s_id), str(uuid.uuid4()), version=1)
+        assert res_regen["status"] == "skipped"
+        assert res_regen["reason"] == "consent_withdrawn"
+
+        # 2. Parent dashboard check must fail with 403 CONSENT_WITHDRAWN for suspended link
+        with pytest.raises(HTTPException) as exc_info:
+            await ParentService.verify_parent_student_link(session, p_id, s_id)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail.get("code") == "CONSENT_WITHDRAWN"
+
+
+@pytest.mark.asyncio
+async def test_day23_warning_task_before_day30_purge() -> None:
+    """Item 8: Day-23 warning task sends notification to parents before day-30 permanent purge."""
+    from datetime import UTC, datetime, timedelta
+    from sqlalchemy import select
+    from core.common.database import AsyncSessionLocal
+    from core.auth.models import User
+    from core.families.models import Family, ParentStudentLink
+    from core.notifications.models import Notification
+    from core.privacy.purge import dispatch_consent_suspension_warnings
+
+    async with AsyncSessionLocal() as session:
+        p_id = uuid.uuid4()
+        s_id = uuid.uuid4()
+        fam_id = uuid.uuid4()
+
+        parent = User(
+            id=p_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{p_id.hex[:8]}",
+            phone=f"+880177{uuid.uuid4().hex[:6]}",
+            role="parent",
+            display_name="Warning Parent",
+            has_parental_consent=True,
+        )
+        student = User(
+            id=s_id,
+            auth_provider="phone",
+            auth_uid=f"phone_{s_id.hex[:8]}",
+            phone=f"+880175{uuid.uuid4().hex[:6]}",
+            role="student",
+            display_name="Warning Child",
+            has_parental_consent=False,
+        )
+        fam = Family(id=fam_id, owner_parent_id=p_id, name="Warning Family")
+
+        # Suspended 24 days ago (between 23 and 30 days)
+        revoked_at = datetime.now(UTC) - timedelta(days=24)
+        link = ParentStudentLink(
+            id=uuid.uuid4(),
+            family_id=fam_id,
+            parent_id=p_id,
+            student_id=s_id,
+            status="consent_suspended",
+            revoked_at=revoked_at,
+        )
+
+        session.add_all([parent, student, fam, link])
+        await session.commit()
+
+        # First run: should dispatch 1 warning notification
+        count1 = await dispatch_consent_suspension_warnings(session)
+        assert count1 >= 1
+
+        # Check notification content
+        stmt_n = select(Notification).where(
+            Notification.user_id == p_id,
+            Notification.type == "consent_suspension_warning",
+        )
+        res_n = await session.execute(stmt_n)
+        notif = res_n.scalars().first()
+        assert notif is not None
+        assert "7 days" in notif.body
+        assert "৭ দিনের" in notif.body_bn
+        assert notif.data["student_id"] == str(s_id)
+
+        # Second run (idempotency): should dispatch 0 new notifications
+        count2 = await dispatch_consent_suspension_warnings(session)
+        assert count2 == 0
+
+
+# ========================================================================
+# Consolidated from: tests/test_logging_security.py
+# ========================================================================
+
+"""Tests for structured JSON logging and sensitive data masking."""
+
+import json
+import logging
+
+from core.common.logging import JSONFormatter, mask_sensitive_data
+
+
+def test_mask_sensitive_data_keys() -> None:
+    """Verify that credentials, tokens, OTPs, and answer keys are masked."""
+    sample = {
+        "user_id": 123,
+        "password": "secret_password",
+        "access_token": "jwt.secret.token",
+        "otp": "123456",
+        "answer_key": {"q1": "A", "q2": "B"},
+        "nested": {
+            "token": "inner_token",
+            "safe_field": "visible",
+        },
+    }
+
+    masked = mask_sensitive_data(sample)
+    assert masked["user_id"] == 123
+    assert masked["password"] == "***MASKED***"
+    assert masked["access_token"] == "***MASKED***"
+    assert masked["otp"] == "***MASKED***"
+    assert masked["answer_key"] == "***MASKED***"
+    assert masked["nested"]["token"] == "***MASKED***"
+    assert masked["nested"]["safe_field"] == "visible"
+
+
+def test_json_formatter_output() -> None:
+    """Verify JSONFormatter creates valid structured JSON with request correlation."""
+    formatter = JSONFormatter()
+    record = logging.LogRecord(
+        name="test_logger",
+        level=logging.INFO,
+        pathname="test.py",
+        lineno=10,
+        msg="Test event logged",
+        args=(),
+        exc_info=None,
+    )
+    record.request_id = "req-12345"
+
+    output = formatter.format(record)
+    parsed = json.loads(output)
+
+    assert parsed["level"] == "INFO"
+    assert parsed["logger"] == "test_logger"
+    assert parsed["message"] == "Test event logged"
+    assert parsed["request_id"] == "req-12345"

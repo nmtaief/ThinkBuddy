@@ -1,3 +1,11 @@
+"""Consolidated test suite: test_parent_notifications.py."""
+from __future__ import annotations
+
+
+# ========================================================================
+# Consolidated from: tests/test_p07_parent_notifications.py
+# ========================================================================
+
 """Comprehensive tests for Milestone P07 (Parent Dashboard & Notifications) and Tail Hardening.
 
 Verifies:
@@ -23,7 +31,6 @@ Verifies:
    - Rule 9 family linkage authorization enforced on all parent routes.
 """
 
-from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime, timedelta

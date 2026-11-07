@@ -137,16 +137,19 @@ def build_pseudonymous_snapshot(
     pinned_block: list[str] = []
     if completed_tasks:
         for t in completed_tasks:
-            pinned_block.append(str(t.id))
-            if t.refs and "printed_page_start" in t.refs and "printed_page_end" in t.refs:
+            task_identifier = getattr(t, "task_id", getattr(t, "id", None))
+            if task_identifier is not None:
+                pinned_block.append(str(task_identifier))
+            if getattr(t, "refs", None) and "printed_page_start" in t.refs and "printed_page_end" in t.refs:
+                completed_at = getattr(t, "completed_at", None)
                 progress_block.append(
                     {
-                        "task_id": str(t.id),
-                        "type": t.type,
-                        "chapter_id": str(t.chapter_id) if t.chapter_id else None,
+                        "task_id": str(task_identifier) if task_identifier else None,
+                        "type": getattr(t, "type", "study"),
+                        "chapter_id": str(t.chapter_id) if getattr(t, "chapter_id", None) else None,
                         "printed_page_start": t.refs.get("printed_page_start"),
                         "printed_page_end": t.refs.get("printed_page_end"),
-                        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                        "completed_at": completed_at.isoformat() if completed_at else None,
                     }
                 )
 
