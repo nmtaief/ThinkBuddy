@@ -185,6 +185,7 @@ async def add_child_to_family(
         display_name=payload.display_name,
         locale="bn" if payload.medium == "bn" else "en",
         status="active",
+        has_parental_consent=True,
     )
     db.add(student_user)
     await db.flush()

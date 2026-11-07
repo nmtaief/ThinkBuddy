@@ -4230,6 +4230,18 @@
             ],
             "title": "Language",
             "description": "Preferred language code ('bn' or 'en'); defaults to student preference"
+          },
+          "client_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Turn Id",
+            "description": "Optional client-generated turn ID for idempotent retries"
           }
         },
         "type": "object",

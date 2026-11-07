@@ -21,7 +21,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -94,6 +94,92 @@ class ChatOrchestrator:
         self.llm_gateway = llm_gateway or MockLLMGateway()
         self.chat_service = chat_service or ChatService(db)
 
+    async def get_cached_turn(
+        self,
+        student_id: uuid.UUID,
+        session_id: uuid.UUID,
+        key: str,
+    ) -> dict[str, Any] | None:
+        """Retrieve completed chat turn by idempotency key: Redis L1, PostgreSQL database L2."""
+        cache_k = f"chat:idemp:{student_id}:{session_id}:{key}"
+        try:
+            from core.common.redis import get_redis_client
+            r = get_redis_client()
+            data = await r.get(cache_k)
+            if data:
+                return json.loads(data)
+        except Exception as exc:
+            logger.debug("Redis chat idempotency cache miss: %s", exc)
+
+        # Database lookup backed by unique constraint uq_chat_idempotency_key and non-expired check
+        from core.chat.models import ChatIdempotencyRecord
+        now = datetime.now(UTC)
+        stmt = select(ChatIdempotencyRecord).where(
+            ChatIdempotencyRecord.student_id == student_id,
+            ChatIdempotencyRecord.session_id == session_id,
+            ChatIdempotencyRecord.idempotency_key == key,
+            ChatIdempotencyRecord.expires_at > now,
+        )
+        res = await self.db.execute(stmt)
+        record = res.scalar_one_or_none()
+        if record:
+            ttl_remaining = max(1, int((record.expires_at - now).total_seconds()))
+            try:
+                from core.common.redis import get_redis_client
+                r = get_redis_client()
+                await r.set(cache_k, json.dumps(record.response_payload), ex=min(ttl_remaining, 86400))
+            except Exception:
+                pass
+            return record.response_payload
+        return None
+
+    async def set_cached_turn(
+        self,
+        student_id: uuid.UUID,
+        session_id: uuid.UUID,
+        key: str,
+        turn_data: dict[str, Any],
+        ttl_seconds: int = 86400,
+    ) -> None:
+        """Store completed chat turn backed by database unique constraint with Redis L1 cache."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from core.chat.models import ChatIdempotencyRecord
+
+        cache_k = f"chat:idemp:{student_id}:{session_id}:{key}"
+        try:
+            from core.common.redis import get_redis_client
+            r = get_redis_client()
+            await r.set(cache_k, json.dumps(turn_data), ex=ttl_seconds)
+        except Exception as exc:
+            logger.debug("Redis chat idempotency cache set error: %s", exc)
+
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        stmt = (
+            pg_insert(ChatIdempotencyRecord)
+            .values(
+                id=uuid.uuid4(),
+                student_id=student_id,
+                session_id=session_id,
+                idempotency_key=key,
+                response_payload=turn_data,
+                created_at=now,
+                expires_at=expires_at,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_chat_idempotency_key"
+            )
+        )
+        await self.db.execute(stmt)
+        await self.db.commit()
+
+        try:
+            from core.common.redis import get_redis_client
+            r = get_redis_client()
+            await r.set(cache_k, json.dumps(turn_data), ex=ttl_seconds)
+        except Exception as exc:
+            logger.debug("Redis chat idempotency cache store failure: %s", exc)
+
     async def assert_no_active_assessed_quiz(self, student_id: uuid.UUID) -> None:
         """Lockout chat during active assessed quiz attempts per docs/05_SECURE_QUIZ.md §2."""
         quiz_service = QuizService(self.db)
@@ -155,6 +241,7 @@ class ChatOrchestrator:
         payload: ChatMessageCreateRequest,
         request: Request | None = None,
         student_profile: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> AsyncIterator[str]:
         """Generate and stream SSE events for a chat message.
 
@@ -209,6 +296,18 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=25)
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "meta": {"message_id": str(message_id), "retrieval_confidence": 0.0},
+                        "content": refusal_text,
+                        "citations": [],
+                        "done": {"tokens_in": 10, "tokens_out": 15, "latency_ms": 30},
+                    },
+                )
             return
 
         if intent == "prompt_injection":
@@ -236,6 +335,18 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=25)
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "meta": {"message_id": str(message_id), "retrieval_confidence": 0.0},
+                        "content": defense_text,
+                        "citations": [],
+                        "done": {"tokens_in": 10, "tokens_out": 15, "latency_ms": 30},
+                    },
+                )
             return
 
         if intent in ["unsafe", "off_topic"]:
@@ -263,6 +374,18 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=25)
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "meta": {"message_id": str(message_id), "retrieval_confidence": 0.0},
+                        "content": guidance_text,
+                        "citations": [],
+                        "done": {"tokens_in": 10, "tokens_out": 15, "latency_ms": 30},
+                    },
+                )
             return
 
         # 5. Hybrid Retrieval with Boosting & Reranking
@@ -300,6 +423,18 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=45)
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "meta": {"message_id": str(message_id), "retrieval_confidence": confidence},
+                        "content": fallback_text,
+                        "citations": [],
+                        "done": {"tokens_in": 20, "tokens_out": 25, "latency_ms": 45},
+                    },
+                )
             return
 
         # 7. Confident Generation with Authoritative Citations
@@ -382,12 +517,36 @@ class ChatOrchestrator:
         total_toks = tokens_in_count + tokens_out_count
         await self.chat_service.record_usage(student_id, tokens=total_toks)
 
+        if idempotency_key:
+            await self.set_cached_turn(
+                student_id=student_id,
+                session_id=session.id,
+                key=idempotency_key,
+                turn_data={
+                    "type": "sse",
+                    "meta": {"message_id": str(message_id), "retrieval_confidence": confidence},
+                    "content": full_assistant_text,
+                    "citations": [
+                        {
+                            "chunk_id": str(chunk.chunk_id),
+                            "book_title": chunk.book_title,
+                            "chapter_title": chunk.chapter_title,
+                            "chapter_number": chunk.chapter_number,
+                            "printed_page": chunk.printed_page,
+                        }
+                        for chunk in chunks
+                    ],
+                    "done": done_payload,
+                },
+            )
+
     async def handle_message_json(
         self,
         student_id: uuid.UUID,
         session_id: uuid.UUID,
         payload: ChatMessageCreateRequest,
         student_profile: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> ChatMessageResponse:
         """Non-streaming fallback returning full JSON answer per docs/04_API_CONTRACT.md §2."""
         start_time = time.perf_counter()
@@ -443,7 +602,7 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=20)
-            return ChatMessageResponse(
+            resp = ChatMessageResponse(
                 id=asst_msg.id,
                 session_id=session.id,
                 role="assistant",
@@ -456,6 +615,17 @@ class ChatOrchestrator:
                 latency_ms=25,
                 created_at=asst_msg.created_at,
             )
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "type": "json",
+                        "response": resp.model_dump(mode="json"),
+                    },
+                )
+            return resp
 
         # 3. Retrieval
         chunks, confidence = await self.retriever.retrieve(
@@ -485,7 +655,7 @@ class ChatOrchestrator:
                 language=language,
             )
             await self.chat_service.record_usage(student_id, tokens=35)
-            return ChatMessageResponse(
+            resp = ChatMessageResponse(
                 id=asst_msg.id,
                 session_id=session.id,
                 role="assistant",
@@ -498,6 +668,17 @@ class ChatOrchestrator:
                 latency_ms=35,
                 created_at=asst_msg.created_at,
             )
+            if idempotency_key:
+                await self.set_cached_turn(
+                    student_id=student_id,
+                    session_id=session.id,
+                    key=idempotency_key,
+                    turn_data={
+                        "type": "json",
+                        "response": resp.model_dump(mode="json"),
+                    },
+                )
+            return resp
 
         # 5. Confident generation
         prompt_messages = [
@@ -549,7 +730,7 @@ class ChatOrchestrator:
             for c in chunks
         ]
 
-        return ChatMessageResponse(
+        response_obj = ChatMessageResponse(
             id=asst_msg.id,
             session_id=session.id,
             role="assistant",
@@ -563,3 +744,16 @@ class ChatOrchestrator:
             citations=citation_items,
             created_at=asst_msg.created_at,
         )
+
+        if idempotency_key:
+            await self.set_cached_turn(
+                student_id=student_id,
+                session_id=session.id,
+                key=idempotency_key,
+                turn_data={
+                    "type": "json",
+                    "response": response_obj.model_dump(mode="json"),
+                },
+            )
+
+        return response_obj

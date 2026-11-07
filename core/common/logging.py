@@ -81,21 +81,32 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """FastAPI / Starlette middleware for request correlation ID tracking and request logging."""
+    """FastAPI / Starlette middleware for request correlation ID tracking, DB query counting, and server-side timing."""
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Any]) -> Response:
+        from core.common.database import get_db_query_stats, reset_db_query_stats
+
         req_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
         token = request_id_ctx.set(req_id)
+        reset_db_query_stats()
         start_time = time.perf_counter()
 
         logger = logging.getLogger("http_access")
         try:
             response: Response = await call_next(request)
-            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            server_duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            query_count, db_time_s = get_db_query_stats()
+            db_time_ms = round(db_time_s * 1000, 2)
+
             response.headers["X-Request-Id"] = req_id
+            response.headers["Server-Timing"] = f"app;dur={server_duration_ms}, db;dur={db_time_ms}"
+            response.headers["X-DB-Query-Count"] = str(query_count)
+            response.headers["X-DB-Time-Ms"] = str(db_time_ms)
+            response.headers["X-Server-Time-Ms"] = str(server_duration_ms)
 
             logger.info(
-                f"{request.method} {request.url.path} - {response.status_code} ({duration_ms}ms)",
+                f"{request.method} {request.url.path} - {response.status_code} "
+                f"({server_duration_ms}ms, {query_count} queries, {db_time_ms}ms DB)",
                 extra={"request_id": req_id},
             )
             return response

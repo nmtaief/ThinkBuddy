@@ -80,9 +80,10 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           "X-Client-Platform": "web",
-          "X-Client-Form-Factor": "expanded",
+          "X-Client-Form-Factor": "desktop",
           "X-App-Version": "1.0.0",
           "X-Device-Id": deviceId,
+          "Accept-Language": "bn",
           "X-Real-IP": clientIp,
           "X-Forwarded-For": rawXff ? `${rawXff}, 127.0.0.1` : clientIp,
         },
@@ -119,9 +120,10 @@ export async function POST(req: NextRequest) {
           headers: {
             "Content-Type": "application/json",
             "X-Client-Platform": "web",
-            "X-Client-Form-Factor": "expanded",
+            "X-Client-Form-Factor": "desktop",
             "X-App-Version": "1.0.0",
             "X-Device-Id": deviceId,
+            "Accept-Language": "bn",
           },
           body: JSON.stringify({
             auth_provider: "fake",

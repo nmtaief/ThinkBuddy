@@ -151,7 +151,7 @@ async def seed_curriculum_and_questions() -> tuple[str, str, int, str, str]:
 
 async def setup_bench_user(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[str, str, dict[str, str]]:
     """Helper creating a test parent, consent, family, and linked student."""
-    phone_p = f"+88015{run_id[:2]}{idx:04d}"
+    phone_p = f"+88015{run_id[:4]}{idx:03d}"
     dev_id = f"dev-bench-{run_id}-{idx:04d}"
     sim_ip = f"198.51.{(idx // 200) + 100}.{(idx % 200) + 1}"
     headers_base = {**CLIENT_HEADERS, "X-Device-Id": dev_id, "X-Forwarded-For": sim_ip}
@@ -177,7 +177,7 @@ async def setup_bench_user(client: httpx.AsyncClient, idx: int, run_id: str) -> 
     )
     link_code = res_c.json()["link_code"]
 
-    phone_s = f"+88016{run_id[:2]}{idx:04d}"
+    phone_s = f"+88016{run_id[:4]}{idx:03d}"
     res_s = await client.post(
         "/v1/auth/exchange",
         json={"provider_token": f"fake:phone:{phone_s}", "role": "student", "link_code": link_code},
@@ -192,7 +192,7 @@ async def setup_bench_user(client: httpx.AsyncClient, idx: int, run_id: str) -> 
 
 
 async def bench_auth_exchange(client: httpx.AsyncClient, idx: int, run_id: str) -> tuple[float, bool, int]:
-    phone = f"+88017{run_id[:2]}{idx:04d}"
+    phone = f"+88017{run_id[:4]}{idx:03d}"
     sim_ip = f"198.51.101.{(idx % 250) + 1}"
     t0 = time.perf_counter()
     try:
@@ -222,12 +222,19 @@ async def bench_real_quiz_answer(
     student_id: str,
     headers: dict[str, str],
     chapter_id: str,
-) -> tuple[float, bool, int]:
-    """Flow 3: Real quiz start and item answer submission (/v1/attempts/{aid}/items/{pos}/answer)."""
-    t0 = time.perf_counter()
-    retries = 0
+    think_time_s: float = 0.0,
+) -> dict[str, tuple[float, bool, int]]:
+    """Flow 3: Real quiz flow measuring Quiz Create, Attempt Start, and Item Answer separately."""
+    res_map: dict[str, tuple[float, bool, int]] = {
+        "quiz_create": (0.0, False, 0),
+        "attempt_start": (0.0, False, 0),
+        "quiz_answer": (0.0, False, 0),
+    }
+
     try:
-        # 1. Create or get student quiz (with brief retry on congestion)
+        # 1. Create or get student quiz
+        t0_c = time.perf_counter()
+        retries_c = 0
         quiz_id = None
         for attempt in range(4):
             try:
@@ -240,20 +247,24 @@ async def bench_real_quiz_answer(
                     quiz_id = res_q.json()["id"]
                     break
                 if res_q.status_code in (503, 429, 502, 504) or "retryable" in res_q.text.lower():
-                    retries += 1
+                    retries_c += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
-                retries += 1
+                retries_c += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
+        dur_c = (time.perf_counter() - t0_c) * 1000
+        res_map["quiz_create"] = (dur_c, bool(quiz_id), retries_c)
         if not quiz_id:
-            logger.warning(f"[QUIZ FAIL 1] Student {student_id} failed to create quiz: {res_q.status_code if 'res_q' in locals() else 'no_resp'} {res_q.text[:200] if 'res_q' in locals() else ''}")
-            return (time.perf_counter() - t0) * 1000, False, retries
+            logger.warning(f"[QUIZ FAIL 1] Student {student_id} failed to create quiz")
+            return res_map
 
-        # 2. Start attempt (with brief retry on congestion)
+        # 2. Start attempt
+        t0_s = time.perf_counter()
+        retries_s = 0
         attempt_id = None
         attempt_token = None
         current_item = None
@@ -271,28 +282,33 @@ async def bench_real_quiz_answer(
                     current_item = att_data["current_item"]
                     break
                 if res_att.status_code in (503, 429, 502, 504) or "retryable" in res_att.text.lower():
-                    retries += 1
+                    retries_s += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
-                retries += 1
+                retries_s += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
+        dur_s = (time.perf_counter() - t0_s) * 1000
+        res_map["attempt_start"] = (dur_s, bool(attempt_id and current_item), retries_s)
         if not attempt_id or not current_item:
-            logger.warning(f"[QUIZ FAIL 2] Quiz {quiz_id} failed to start attempt: {res_att.status_code if 'res_att' in locals() else 'no_resp'} {res_att.text[:200] if 'res_att' in locals() else ''}")
-            return (time.perf_counter() - t0) * 1000, False, retries
+            logger.warning(f"[QUIZ FAIL 2] Quiz {quiz_id} failed to start attempt")
+            return res_map
 
-        # 3. Submit real answer to position 1 (idempotent submission with backoff retry on transient pool congestion)
+        # Realistic student think time (reading stem and considering choices)
+        if think_time_s > 0:
+            await asyncio.sleep(think_time_s)
+
+        # 3. Submit real answer to position 1
+        t0_a = time.perf_counter()
+        retries_a = 0
         item_headers = {**headers, "X-Attempt-Token": attempt_token}
         opts = current_item["question"].get("options") or []
-        if opts:
-            ans_payload = {"selected_option_id": opts[0]["id"]}
-        else:
-            ans_payload = {"text": "সালোকসংশ্লেষণ"}
+        ans_payload = {"selected_option_id": opts[0]["id"]} if opts else {"text": "সালোকসংশ্লেষণ"}
 
-        success = False
+        ans_success = False
         for attempt in range(4):
             try:
                 res_ans = await client.post(
@@ -305,27 +321,27 @@ async def bench_real_quiz_answer(
                     headers=item_headers,
                 )
                 if res_ans.status_code == 200:
-                    success = True
+                    ans_success = True
                     break
-                # Retry on clear retryable server congestion error (503 / 429)
                 if res_ans.status_code in (503, 429, 502, 504) or "retryable" in res_ans.text.lower():
-                    retries += 1
+                    retries_a += 1
                     await asyncio.sleep(0.05 * (2 ** attempt))
                     continue
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
-                retries += 1
+                retries_a += 1
                 await asyncio.sleep(0.05 * (2 ** attempt))
                 continue
 
-        if not success:
-            logger.warning(f"[QUIZ FAIL 3] Attempt {attempt_id} failed to answer item: {res_ans.status_code if 'res_ans' in locals() else 'no_resp'} {res_ans.text[:200] if 'res_ans' in locals() else ''}")
+        dur_a = (time.perf_counter() - t0_a) * 1000
+        res_map["quiz_answer"] = (dur_a, ans_success, retries_a)
+        if not ans_success:
+            logger.warning(f"[QUIZ FAIL 3] Attempt {attempt_id} failed to answer item")
 
-        duration_ms = (time.perf_counter() - t0) * 1000
-        return duration_ms, success, retries
+        return res_map
     except Exception as exc:
         logger.error(f"[QUIZ UNHANDLED EXCEPTION] {exc}", exc_info=True)
-        return (time.perf_counter() - t0) * 1000, False, retries
+        return res_map
 
 
 async def bench_chat_streaming(
@@ -419,6 +435,49 @@ def compute_flow_stats(
     )
 
 
+async def sample_db_telemetry(stop_event: asyncio.Event, samples: list[dict[str, Any]]) -> None:
+    from core.common.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    while not stop_event.is_set():
+        try:
+            async with AsyncSessionLocal() as session:
+                res_act = await session.execute(
+                    text(
+                        "SELECT pid, wait_event_type, wait_event, state, substr(query, 1, 80) as query "
+                        "FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid();"
+                    )
+                )
+                active = [dict(r._mapping) for r in res_act.fetchall()]
+
+                res_lck = await session.execute(
+                    text(
+                        "SELECT pid, locktype, mode, granted, relation::regclass::text as relname "
+                        "FROM pg_locks WHERE NOT granted;"
+                    )
+                )
+                ungranted = [dict(r._mapping) for r in res_lck.fetchall()]
+
+                res_summary = await session.execute(
+                    text(
+                        "SELECT locktype, mode, count(*) as count "
+                        "FROM pg_locks WHERE pid != pg_backend_pid() GROUP BY locktype, mode;"
+                    )
+                )
+                lock_counts = [dict(r._mapping) for r in res_summary.fetchall()]
+
+                if active or ungranted:
+                    samples.append({
+                        "time": time.time(),
+                        "active": active,
+                        "ungranted_locks": ungranted,
+                        "lock_counts": lock_counts,
+                    })
+        except Exception:
+            pass
+        await asyncio.sleep(0.08)
+
+
 async def execute_concurrency_tier(
     concurrency: int,
     base_url: str,
@@ -427,11 +486,21 @@ async def execute_concurrency_tier(
     chapter_id: str,
     printed_page: int,
     query_text: str,
-) -> tuple[dict[str, FlowStats], float, float, float]:
-    """Execute load test at specified concurrency level and monitor CPU/RAM."""
+    think_time_s: float = 0.0,
+) -> tuple[dict[str, FlowStats], float, float, float, dict[str, Any]]:
+    """Execute load test at specified concurrency level, capturing DB evidence & metrics."""
     from core.common.rate_limit import RateLimiter
+    from core.common.database import AsyncSessionLocal
+    from sqlalchemy import text
 
     await RateLimiter.reset()
+
+    # Reset pg_stat_statements before tier run
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT pg_stat_statements_reset();"))
+    except Exception:
+        pass
 
     if use_in_process:
         from core.main import app as core_app
@@ -447,7 +516,7 @@ async def execute_concurrency_tier(
         client = httpx.AsyncClient(base_url=base_url, limits=limits, timeout=30.0)
 
     async with client:
-        run_id = uuid.uuid4().hex[:4]
+        run_id = uuid.uuid4().hex[:6]
         # Pre-seed authenticated students
         logger.info(f"Setting up {concurrency} test student accounts (run {run_id})...")
         user_tasks = [setup_bench_user(client, i, run_id) for i in range(concurrency)]
@@ -457,14 +526,22 @@ async def execute_concurrency_tier(
         psutil.cpu_percent(interval=None)
         mem_before = psutil.virtual_memory().percent
 
+        # Background telemetry sampler for pg_stat_activity & pg_locks during concurrent surge
+        db_samples: list[dict[str, Any]] = []
+        stop_sampling = asyncio.Event()
+        sampler_task = asyncio.create_task(sample_db_telemetry(stop_sampling, db_samples))
+
         t_start = time.perf_counter()
 
-        # Run concurrent batches across all 4 flows simultaneously
-        logger.info(f"Dispatching {concurrency} concurrent requests per flow ({concurrency * 4} total requests)...")
+        # Run concurrent batches across all flows simultaneously
+        logger.info(f"Dispatching {concurrency} concurrent requests across all flows...")
 
         tasks_auth = [bench_auth_exchange(client, 1000 + i, run_id) for i in range(concurrency)]
         tasks_today = [bench_today_payload(client, users[i][1], users[i][2]) for i in range(concurrency)]
-        tasks_quiz = [bench_real_quiz_answer(client, users[i][1], users[i][2], chapter_id) for i in range(concurrency)]
+        tasks_quiz = [
+            bench_real_quiz_answer(client, users[i][1], users[i][2], chapter_id, think_time_s=think_time_s)
+            for i in range(concurrency)
+        ]
         tasks_chat = [
             bench_chat_streaming(client, users[i][2], book_id, chapter_id, printed_page, query_text)
             for i in range(concurrency)
@@ -479,69 +556,192 @@ async def execute_concurrency_tier(
         )
 
         test_duration = time.perf_counter() - t_start
+
+        # Stop DB sampler
+        stop_sampling.set()
+        await sampler_task
+
         cpu_usage = psutil.cpu_percent(interval=None)
         mem_usage = psutil.virtual_memory().percent
+
+        # Fetch pg_stat_statements post-run
+        pg_stats: list[dict[str, Any]] = []
+        try:
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(
+                    text(
+                        "SELECT substr(query, 1, 80) as query, calls, "
+                        "round(total_exec_time::numeric, 2) as total_ms, "
+                        "round(mean_exec_time::numeric, 2) as mean_ms, "
+                        "round(max_exec_time::numeric, 2) as max_ms, rows "
+                        "FROM pg_stat_statements WHERE query NOT LIKE '%pg_%' AND query NOT LIKE '%information_schema%' "
+                        "ORDER BY total_exec_time DESC LIMIT 10;"
+                    )
+                )
+                pg_stats = [
+                    {
+                        k: (float(v) if hasattr(v, "as_tuple") else v)
+                        for k, v in dict(r._mapping).items()
+                    }
+                    for r in res.fetchall()
+                ]
+        except Exception:
+            pass
+
+        telemetry = {
+            "db_samples_count": len(db_samples),
+            "db_samples": db_samples[:10],
+            "pg_stat_statements": pg_stats,
+            "lock_waits_detected": sum(len(s.get("ungranted_locks", [])) for s in db_samples),
+        }
+
+        # Unpack separate quiz flow measurements
+        r_quiz_create = [q["quiz_create"] for q in r_quiz]
+        r_attempt_start = [q["attempt_start"] for q in r_quiz]
+        r_quiz_answer = [q["quiz_answer"] for q in r_quiz]
 
         stats_map = {
             "auth": compute_flow_stats("Auth Exchange (/v1/auth/exchange)", r_auth, 400.0),
             "today": compute_flow_stats("Today Schedule (/students/:id/today)", r_today, 400.0),
-            "quiz": compute_flow_stats("Real Quiz Item Answer (/attempts/:id/items/:pos/answer)", r_quiz, 400.0),
+            "quiz_create": compute_flow_stats("Quiz Create (/v1/students/:id/quizzes)", r_quiz_create, 400.0),
+            "attempt_start": compute_flow_stats("Attempt Start (/v1/quizzes/:id/attempts)", r_attempt_start, 400.0),
+            "quiz_answer": compute_flow_stats("Quiz Item Answer (/attempts/:id/items/:pos/answer)", r_quiz_answer, 400.0),
             "chat": compute_flow_stats("Chat SSE Streaming First Token (/chat/sessions/:id/messages)", r_chat, 2500.0),
         }
-        return stats_map, test_duration, cpu_usage, mem_usage
+        return stats_map, test_duration, cpu_usage, mem_usage, telemetry
 
 
-async def main_async(concurrency_target: int = 100, base_url: str = "http://localhost:8000") -> None:
+async def run_single_worker_profiling(
+    base_url: str,
+    use_in_process: bool,
+    book_id: str,
+    chapter_id: str,
+    printed_page: int,
+    query_text: str,
+) -> None:
+    """Profile single worker execution flow: blocking calls, slow queries, event loop delays."""
+    import cProfile
+    import io
+    import pstats
+
+    logger.info("Profiling single worker execution flow with cProfile...")
+    profiler = cProfile.Profile()
+    profiler.enable()
+
+    stats_map, duration, cpu, mem, telemetry = await execute_concurrency_tier(
+        concurrency=10,
+        base_url=base_url,
+        use_in_process=use_in_process,
+        book_id=book_id,
+        chapter_id=chapter_id,
+        printed_page=printed_page,
+        query_text=query_text,
+    )
+
+    profiler.disable()
+    stream = io.StringIO()
+    ps = pstats.Stats(profiler, stream=stream).sort_stats(pstats.SortKey.CUMULATIVE)
+    ps.print_stats(30)
+
+    print("\n" + "=" * 100)
+    print("SINGLE WORKER PROFILING REPORT - TOP 30 FUNCTIONS BY CUMULATIVE TIME")
+    print("=" * 100)
+    print(stream.getvalue())
+
+    # Check for blocking calls or slow operations
+    stats_output = stream.getvalue()
+    has_blocking_sleep = "time.sleep" in stats_output
+    has_sync_requests = "requests" in stats_output
+    print("PROFILING ANALYSIS:")
+    print(f"  - Synchronous blocking time.sleep detected: {has_blocking_sleep}")
+    print(f"  - Synchronous blocking requests library detected: {has_sync_requests}")
+    print(f"  - Total execution duration for 10 users: {duration:.2f}s")
+    print("=" * 100 + "\n")
+
+
+async def main_async(
+    concurrency_target: int = 50,
+    base_url: str = "http://localhost:8000",
+    use_network: bool = False,
+    do_profile: bool = False,
+) -> None:
     logger.info("================================================================================")
     logger.info("THINKBUDDY COMPREHENSIVE LOAD & SATURATION BENCHMARK (REAL DB + PACING)")
     logger.info("================================================================================")
-    logger.info(f"Target Concurrency: {concurrency_target}+ concurrent workers")
+    mode_str = "Network HTTP (Multi-Worker Uvicorn)" if use_network else "In-Process Test Client"
+    logger.info(f"Target Concurrency: {concurrency_target}+ concurrent workers | Mode: {mode_str}")
 
     # Seed DB
     logger.info("Seeding realistic NCTB curriculum and questions in PostgreSQL...")
     book_id, chapter_id, printed_page, chunk_text, q_id = await seed_curriculum_and_questions()
 
-    tiers = [25, 50, 100]
-    if concurrency_target > 100:
-        tiers.append(concurrency_target)
-
-    results_by_tier: dict[int, Any] = {}
-    saturation_point = "Beyond 100 concurrent workers"
-
-    for c in tiers:
-        logger.info(f"\n--- Testing Concurrency Tier: {c} Concurrent Users ---")
-        stats_map, duration, cpu, mem = await execute_concurrency_tier(
-            concurrency=c,
+    if do_profile:
+        await run_single_worker_profiling(
             base_url=base_url,
-            use_in_process=True,
+            use_in_process=not use_network,
             book_id=book_id,
             chapter_id=chapter_id,
             printed_page=printed_page,
             query_text=chunk_text,
         )
 
+    # Tiers to test: Tier 25, Tier 50, and Mixed-Load with Think Time
+    run_configs = [
+        ("Tier 25 (Burst)", 25, 0.0),
+        ("Tier 50 (Burst)", 50, 0.0),
+        ("Mixed-Load (50 Users with Realistic Think Time)", 50, 1.5),
+    ]
+
+    results_by_tier: dict[str, Any] = {}
+    saturation_point = "Beyond 50 concurrent workers with realistic pacing"
+
+    for label, c, think_time in run_configs:
+        logger.info(f"\n--- Testing Concurrency: {label} ({c} Concurrent Users, Think Time: {think_time}s) ---")
+        stats_map, duration, cpu, mem, telemetry = await execute_concurrency_tier(
+            concurrency=c,
+            base_url=base_url,
+            use_in_process=not use_network,
+            book_id=book_id,
+            chapter_id=chapter_id,
+            printed_page=printed_page,
+            query_text=chunk_text,
+            think_time_s=think_time,
+        )
+
         tier_passed = all(s.passed for s in stats_map.values())
-        results_by_tier[c] = {
+        results_by_tier[label] = {
+            "label": label,
             "concurrency": c,
+            "think_time_s": think_time,
             "duration_s": round(duration, 2),
             "cpu_percent": cpu,
             "memory_percent": mem,
             "tier_passed": tier_passed,
             "flows": {k: asdict(v) for k, v in stats_map.items()},
+            "telemetry": telemetry,
         }
 
         print("\n" + "=" * 115)
-        print(f"TIER {c} CONCURRENT WORKERS (Duration: {duration:.2f}s | CPU: {cpu:.1f}% | Memory: {mem:.1f}%)")
+        print(f"{label.upper()} (Duration: {duration:.2f}s | CPU: {cpu:.1f}% | Memory: {mem:.1f}%)")
         print("=" * 115)
-        print(f"{'User Flow / Endpoint':<42} | {'p50':<7} | {'p90':<7} | {'p95':<7} | {'p99':<7} | {'Max':<7} | {'Retries':<7} | {'Err%':<5} | {'Status'}")
+        print(f"{'User Flow / Endpoint':<45} | {'p50':<7} | {'p90':<7} | {'p95':<7} | {'p99':<7} | {'Max':<7} | {'Retries':<7} | {'Err%':<5} | {'Status'}")
         print("-" * 115)
         for s in stats_map.values():
             status = "PASS" if s.passed else "FAIL"
-            print(f"{s.flow_name:<42} | {s.p50_ms:<7.1f} | {s.p90_ms:<7.1f} | {s.p95_ms:<7.1f} | {s.p99_ms:<7.1f} | {s.max_ms:<7.1f} | {s.retry_count:<7} | {s.error_rate_pct:<5.1f} | {status}")
+            print(f"{s.flow_name:<45} | {s.p50_ms:<7.1f} | {s.p90_ms:<7.1f} | {s.p95_ms:<7.1f} | {s.p99_ms:<7.1f} | {s.max_ms:<7.1f} | {s.retry_count:<7} | {s.error_rate_pct:<5.1f} | {status}")
         print("=" * 115)
 
-        if not tier_passed and saturation_point == "Beyond 100 concurrent workers":
-            saturation_point = f"{c} concurrent workers (latency or errors degraded)"
+        print("\n--- DATABASE EVIDENCE CAPTURED DURING RUN ---")
+        print(f"  Lock waits detected (ungranted locks): {telemetry.get('lock_waits_detected', 0)}")
+        print(f"  Activity snapshots captured: {telemetry.get('db_samples_count', 0)}")
+        if telemetry.get("pg_stat_statements"):
+            print("  Top 5 Slowest Queries by Total Execution Time (pg_stat_statements):")
+            for row in telemetry["pg_stat_statements"][:5]:
+                print(f"    - calls: {row['calls']:<4} | total: {row['total_ms']:<7.1f}ms | mean: {row['mean_ms']:<6.1f}ms | {row['query']}")
+        print("-" * 115 + "\n")
+
+        if not tier_passed and saturation_point == "Beyond 50 concurrent workers with realistic pacing":
+            saturation_point = f"{label} (latency or errors degraded)"
 
     # Save artifact
     out_dir = Path("reports")
@@ -556,6 +756,7 @@ async def main_async(concurrency_target: int = 100, base_url: str = "http://loca
             },
             f,
             indent=2,
+            default=str,
         )
     logger.info(f"Detailed benchmark metrics written to {report_file}")
 
@@ -564,9 +765,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ThinkBuddy Load Benchmark")
     parser.add_argument("--concurrency", type=int, default=100, help="Target concurrency")
     parser.add_argument("--base-url", default="http://localhost:8000", help="Gateway URL")
+    parser.add_argument(
+        "--network",
+        action="store_true",
+        help="Send requests over HTTP network to Uvicorn workers",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Profile single worker execution flow",
+    )
     args = parser.parse_args()
 
-    asyncio.run(main_async(args.concurrency, args.base_url))
+    asyncio.run(main_async(args.concurrency, args.base_url, args.network, args.profile))
 
 
 if __name__ == "__main__":

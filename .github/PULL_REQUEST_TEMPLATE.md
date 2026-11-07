@@ -23,3 +23,4 @@
 - **Backend Test Suite:** `pytest tests/`
 - **Android Tests:** `gradlew testDebugUnitTest` / `connectedDebugAndroidTest`
 - **Security Scanners:** `gitleaks dir .`, `bandit`, `semgrep`, `trivy`
+

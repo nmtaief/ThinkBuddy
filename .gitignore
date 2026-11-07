@@ -90,4 +90,11 @@ android/local.properties
 android_phone_*.png
 android_tablet_*.png
 
+# Node & JS Monorepo
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.wrangler/
+
 

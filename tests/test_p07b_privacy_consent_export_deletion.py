@@ -1045,7 +1045,7 @@ async def test_seeded_user_purge_fk_chains_zero_remaining_rows() -> None:
     from core.planner.models import AiPlannerShadowRun, StudentChangeRequest, StudentStudySettings, SyllabusItem
     from core.curriculum.models import Book, Chapter
     from core.quiz.models import Question, Quiz
-    from core.chat.models import ChatCitation, ChatMessage, ChatSession, UsageCounter
+    from core.chat.models import ChatCitation, ChatIdempotencyRecord, ChatMessage, ChatSession, UsageCounter
     from sqlalchemy import func
 
     async with AsyncSessionLocal() as session:
@@ -1140,7 +1140,8 @@ async def test_seeded_user_purge_fk_chains_zero_remaining_rows() -> None:
 
         cc = ChatCitation(id=uuid.uuid4(), message_id=cm.id, book_title="Math 8", chapter_title="Algebra", printed_page=42, pdf_page_index=44)
         uc = UsageCounter(student_id=s_id, date=datetime.now(UTC).date(), chat_messages=5, tokens=150)
-        session.add_all([cc, uc])
+        cir = ChatIdempotencyRecord(id=uuid.uuid4(), student_id=s_id, session_id=cs.id, idempotency_key="key_fk_test", response_payload={"text": "hello"})
+        session.add_all([cc, uc, cir])
 
         # LearningSignal, AIPlannerShadowRun, ProgressDaily, Mastery, RevisionItem
         ls = LearningSignal(id=uuid.uuid4(), student_id=s_id, source="quiz_wrong", weight=1.0)
@@ -1201,6 +1202,7 @@ async def test_seeded_user_purge_fk_chains_zero_remaining_rows() -> None:
         assert (await session.execute(select(func.count(ChatMessage.id)).where(ChatMessage.session_id == cs.id))).scalar() == 0
         assert (await session.execute(select(func.count(ChatCitation.id)).where(ChatCitation.message_id == cm.id))).scalar() == 0
         assert (await session.execute(select(func.count(UsageCounter.student_id)).where(UsageCounter.student_id == s_id))).scalar() == 0
+        assert (await session.execute(select(func.count(ChatIdempotencyRecord.id)).where(ChatIdempotencyRecord.student_id == s_id))).scalar() == 0
         assert (await session.execute(select(func.count(LearningSignal.id)).where(LearningSignal.student_id == s_id))).scalar() == 0
         assert (await session.execute(select(func.count(AiPlannerShadowRun.id)).where(AiPlannerShadowRun.student_id == s_id))).scalar() == 0
         assert (await session.execute(select(func.count(ProgressDaily.id)).where(ProgressDaily.student_id == s_id))).scalar() == 0

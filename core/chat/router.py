@@ -9,7 +9,9 @@ Per docs/04_API_CONTRACT.md §2, §3 and docs/05_SECURE_QUIZ.md §2:
 
 from __future__ import annotations
 
+import json
 import uuid
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -21,6 +23,7 @@ from core.auth.models import User
 from core.chat.orchestrator import ChatOrchestrator
 from core.chat.schemas import (
     ChatMessageCreateRequest,
+    ChatMessageResponse,
     ChatSessionCreateRequest,
     ChatSessionDetailResponse,
     ChatSessionResponse,
@@ -134,8 +137,9 @@ async def send_chat_message(
     db: Annotated[AsyncSession, Depends(get_db_session)],
     request: Request,
     accept: Annotated[str | None, Header()] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> Any:
-    """Send message to AI tutor.
+    """Send message to AI tutor with idempotency protection.
 
     Returns:
         - SSE StreamingResponse when Accept: text/event-stream or payload.stream == True
@@ -168,12 +172,47 @@ async def send_chat_message(
     # Determine streaming vs JSON fallback
     wants_sse = (accept is not None and "text/event-stream" in accept) or payload.stream
 
+    # Check for idempotent retry: if already processed, return cached turn
+    # without double-spending student message quota
+    eff_key = idempotency_key or payload.client_turn_id
+    if eff_key:
+        cached = await orchestrator.get_cached_turn(current_user.id, session_id, eff_key)
+        if cached:
+            if wants_sse:
+                async def cached_stream() -> AsyncIterator[str]:
+                    if cached.get("meta"):
+                        yield f"event: meta\ndata: {json.dumps(cached['meta'])}\n\n"
+                    if cached.get("content"):
+                        delta_json = json.dumps({"delta": cached["content"]})
+                        yield f"event: token\ndata: {delta_json}\n\n"
+                    for cit in cached.get("citations", []):
+                        yield f"event: citation\ndata: {json.dumps(cit)}\n\n"
+                    if cached.get("done"):
+                        yield f"event: done\ndata: {json.dumps(cached['done'])}\n\n"
+
+                return StreamingResponse(
+                    cached_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    },
+                )
+            if "response" in cached:
+                return ChatMessageResponse(**cached["response"])
+
+    # Active Quiz Lockout Check and Quota Check MUST run before stream opens
+    # to return real HTTP 403 and 429 status codes
+    await orchestrator.assert_no_active_assessed_quiz(current_user.id)
+    await orchestrator.check_quota(current_user.id)
+
     if wants_sse:
         generator = orchestrator.stream_chat_turn(
             student_id=current_user.id,
             session_id=session_id,
             payload=payload,
             request=request,
+            idempotency_key=eff_key,
         )
         return StreamingResponse(
             generator,
@@ -189,4 +228,5 @@ async def send_chat_message(
         student_id=current_user.id,
         session_id=session_id,
         payload=payload,
+        idempotency_key=eff_key,
     )

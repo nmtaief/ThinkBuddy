@@ -28,7 +28,7 @@ from sqlalchemy import select
 from core.auth.models import User
 from core.auth.tokens import create_access_jwt
 from core.chat.llm import MockLLMGateway
-from core.chat.models import ChatCitation, UsageCounter
+from core.chat.models import ChatCitation, ChatIdempotencyRecord, UsageCounter
 from core.chat.orchestrator import ChatOrchestrator
 from core.chat.retriever import ChatRetriever, RetrievedChunk
 from core.chat.schemas import ChatMessageCreateRequest
@@ -384,6 +384,16 @@ async def test_chat_lockout_during_active_assessed_quiz(gateway_client: AsyncCli
         events = list(res_events.scalars().all())
         assert len(events) >= 1, "chat_attempt telemetry event must be logged on active attempt"
 
+    # 3. Attempt to stream message during active quiz -> real HTTP 403 BEFORE stream opens
+    res_msg_stream = await gateway_client.post(
+        f"/v1/chat/sessions/{uuid.uuid4()}/messages",
+        json={"content": "আমাকে গণিত শেখাও", "stream": True},
+        headers={**auth_headers, "Accept": "text/event-stream"},
+    )
+    assert res_msg_stream.status_code == 403
+    assert "text/event-stream" not in res_msg_stream.headers.get("content-type", "")
+    assert res_msg_stream.json()["error"]["code"] == "QUIZ_IN_PROGRESS_CHAT_LOCKED"
+
 
 # =============================================================================
 # 6. Daily Quota Enforcement Test
@@ -393,6 +403,7 @@ async def test_per_student_daily_quota_exhaustion(gateway_client: AsyncClient) -
     """Per docs/04_API_CONTRACT.md §2 and prompts/P05:
 
     Daily quota exhaustion returns 429 with Retry-After header.
+    Both non-streaming and streaming requests receive real HTTP 429 status code.
     """
     student = await create_test_user(display_name="Quota Student")
     token = create_access_jwt(student.id, "student")
@@ -410,7 +421,7 @@ async def test_per_student_daily_quota_exhaustion(gateway_client: AsyncClient) -
         session.add(counter)
         await session.commit()
 
-    # Attempt to send message
+    # Attempt to send message (non-streaming) -> 429
     session_id = uuid.uuid4()
     res = await gateway_client.post(
         f"/v1/chat/sessions/{session_id}/messages",
@@ -421,6 +432,17 @@ async def test_per_student_daily_quota_exhaustion(gateway_client: AsyncClient) -
     err = res.json()["error"]
     assert err["code"] == "DAILY_CHAT_QUOTA_EXCEEDED"
     assert "Retry-After" in res.headers
+
+    # Attempt to stream message (streaming) -> real HTTP 429 BEFORE stream opens
+    res_stream = await gateway_client.post(
+        f"/v1/chat/sessions/{session_id}/messages",
+        json={"content": "আমাকে সাহায্য করো", "stream": True},
+        headers={**auth_headers, "Accept": "text/event-stream"},
+    )
+    assert res_stream.status_code == 429
+    assert "text/event-stream" not in res_stream.headers.get("content-type", "")
+    assert res_stream.json()["error"]["code"] == "DAILY_CHAT_QUOTA_EXCEEDED"
+    assert "Retry-After" in res_stream.headers
 
 
 # =============================================================================
@@ -991,3 +1013,180 @@ async def test_chunk_delimiter_escaping_prevents_context_breakout() -> None:
         # The malicious </context> tag inside the chunk was escaped
         assert "&lt;/context&gt;" in user_msg
         assert "&lt;context&gt;" in user_msg
+
+
+# =============================================================================
+# 22. Chat Idempotent Retry Does Not Double-Count Against Quota Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_chat_idempotent_retry_not_double_counted_against_quota(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P10 follow-up:
+    - Retrying a chat message with the same idempotency key (client_turn_id or Idempotency-Key)
+      returns the cached result.
+    - Quota is incremented on the initial request and NOT double-counted on the replay.
+    """
+    student = await create_test_user(display_name="Idempotent Chat Student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    # Create session
+    res_sess = await gateway_client.post("/v1/chat/sessions", headers=auth_headers)
+    assert res_sess.status_code in (200, 201)
+    session_id = res_sess.json()["id"]
+
+    turn_id = f"client-turn-{uuid.uuid4().hex[:8]}"
+
+    # 1. Send first message with client_turn_id
+    res_msg1 = await gateway_client.post(
+        f"/v1/chat/sessions/{session_id}/messages",
+        json={
+            "content": "আমাকে সালোকসংশ্লেষণ বোঝাও",
+            "stream": False,
+            "client_turn_id": turn_id,
+        },
+        headers=auth_headers,
+    )
+    assert res_msg1.status_code == 200
+    msg1_data = res_msg1.json()
+
+    # Verify quota counter is exactly 1
+    today = utcnow().date()
+    async with AsyncSessionLocal() as session:
+        stmt = select(UsageCounter).where(
+            UsageCounter.student_id == student.id,
+            UsageCounter.date == today,
+        )
+        res = await session.execute(stmt)
+        counter = res.scalar_one()
+        assert counter.chat_messages == 1, "Initial turn must increment quota counter by 1"
+
+    # 2. Replay with exact same client_turn_id -> returns cached response
+    res_msg2 = await gateway_client.post(
+        f"/v1/chat/sessions/{session_id}/messages",
+        json={
+            "content": "আমাকে সালোকসংশ্লেষণ বোঝাও",
+            "stream": False,
+            "client_turn_id": turn_id,
+        },
+        headers=auth_headers,
+    )
+    assert res_msg2.status_code == 200
+    msg2_data = res_msg2.json()
+    assert msg2_data["id"] == msg1_data["id"]
+
+    # Verify quota counter is STILL exactly 1 (NOT double-counted to 2!)
+    async with AsyncSessionLocal() as session:
+        stmt = select(UsageCounter).where(
+            UsageCounter.student_id == student.id,
+            UsageCounter.date == today,
+        )
+        res = await session.execute(stmt)
+        counter_after = res.scalar_one()
+        assert counter_after.chat_messages == 1, (
+            "Idempotent chat retry must NOT double-count against daily quota"
+        )
+
+
+# =============================================================================
+# 23. Chat Idempotency Expiry & Student/Session Scope Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_chat_idempotency_expiry_and_student_session_scope(
+    gateway_client: AsyncClient,
+) -> None:
+    """Verifies:
+    1. Replays are scoped to the same student and same session.
+    2. Reusing the same key with a different session executes a fresh turn.
+    3. Reusing the same key with a different student executes a fresh turn.
+    4. Expired keys (expires_at in past) execute a fresh turn.
+    """
+    student_a = await create_test_user(display_name="Student Scope A")
+    student_b = await create_test_user(display_name="Student Scope B")
+
+    token_a = create_access_jwt(student_a.id, "student")
+    token_b = create_access_jwt(student_b.id, "student")
+    headers_a = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_a}"}
+    headers_b = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_b}"}
+
+    # Student A creates Session 1 and Session 2
+    r_s1 = await gateway_client.post("/v1/chat/sessions", headers=headers_a)
+    assert r_s1.status_code in (200, 201)
+    session1_id = r_s1.json()["id"]
+
+    r_s2 = await gateway_client.post("/v1/chat/sessions", headers=headers_a)
+    assert r_s2.status_code in (200, 201)
+    session2_id = r_s2.json()["id"]
+
+    # Student B creates Session B
+    r_sb = await gateway_client.post("/v1/chat/sessions", headers=headers_b)
+    assert r_sb.status_code in (200, 201)
+    session_b_id = r_sb.json()["id"]
+
+    shared_key = f"scope-key-{uuid.uuid4().hex[:8]}"
+
+    # Step 1: Student A sends turn in Session 1
+    r1 = await gateway_client.post(
+        f"/v1/chat/sessions/{session1_id}/messages",
+        json={"content": "আমাকে কোষ বিভাজন শেখাও", "stream": False, "client_turn_id": shared_key},
+        headers=headers_a,
+    )
+    assert r1.status_code == 200
+    msg1_id = r1.json()["id"]
+
+    # Step 2: Student A replays SAME key in Session 1 -> cached turn returned
+    r1_replay = await gateway_client.post(
+        f"/v1/chat/sessions/{session1_id}/messages",
+        json={"content": "আমাকে কোষ বিভাজন শেখাও", "stream": False, "client_turn_id": shared_key},
+        headers=headers_a,
+    )
+    assert r1_replay.status_code == 200
+    assert r1_replay.json()["id"] == msg1_id
+
+    # Step 3: Student A sends SAME key in Session 2 -> fresh turn executed (different message id)
+    r2 = await gateway_client.post(
+        f"/v1/chat/sessions/{session2_id}/messages",
+        json={"content": "আমাকে কোষ বিভাজন শেখাও", "stream": False, "client_turn_id": shared_key},
+        headers=headers_a,
+    )
+    assert r2.status_code == 200
+    assert r2.json()["id"] != msg1_id
+
+    # Step 4: Student B sends SAME key in Session B -> fresh turn executed (isolated to Student B)
+    rb = await gateway_client.post(
+        f"/v1/chat/sessions/{session_b_id}/messages",
+        json={"content": "আমাকে কোষ বিভাজন শেখাও", "stream": False, "client_turn_id": shared_key},
+        headers=headers_b,
+    )
+    assert rb.status_code == 200
+    assert rb.json()["id"] != msg1_id
+    assert rb.json()["id"] != r2.json()["id"]
+
+    # Step 5: Expire Student A's Session 1 idempotency key in DB and clear Redis cache
+    from core.common.redis import get_redis_client
+    redis_client = get_redis_client()
+    await redis_client.delete(f"chat:idemp:{student_a.id}:{session1_id}:{shared_key}")
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(ChatIdempotencyRecord).where(
+            ChatIdempotencyRecord.student_id == student_a.id,
+            ChatIdempotencyRecord.session_id == uuid.UUID(session1_id),
+            ChatIdempotencyRecord.idempotency_key == shared_key,
+        )
+        res = await session.execute(stmt)
+        record = res.scalar_one()
+        record.expires_at = datetime.now(UTC) - timedelta(hours=1)
+        await session.commit()
+
+    # Step 6: Student A sends SAME key in Session 1 after expiry -> executes fresh turn
+    r1_post_expiry = await gateway_client.post(
+        f"/v1/chat/sessions/{session1_id}/messages",
+        json={"content": "আমাকে কোষ বিভাজন শেখাও", "stream": False, "client_turn_id": shared_key},
+        headers=headers_a,
+    )
+    assert r1_post_expiry.status_code == 200
+    # Fresh message created because previous record expired
+    assert r1_post_expiry.json()["id"] != msg1_id
+
+

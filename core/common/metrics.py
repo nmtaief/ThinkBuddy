@@ -36,6 +36,20 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
     buckets=[0.01, 0.05, 0.1, 0.25, 0.4, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
+ROUTE_DB_QUERIES = Histogram(
+    "thinkbuddy_route_db_queries",
+    "Database queries executed per route",
+    ["method", "endpoint"],
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
+)
+
+ROUTE_DB_DURATION_SECONDS = Histogram(
+    "thinkbuddy_route_db_duration_seconds",
+    "Database query duration per route in seconds",
+    ["method", "endpoint"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+
 # 2. LLM & Tutoring Metrics
 LLM_TOKENS_TOTAL = Counter(
     "thinkbuddy_llm_tokens_total",
@@ -119,6 +133,11 @@ async def metrics_middleware(request: Request, call_next: Callable) -> Response:
         HTTP_REQUEST_DURATION_SECONDS.labels(
             method=method, endpoint=normalized_path
         ).observe(duration)
+
+        from core.common.database import get_db_query_stats
+        query_count, db_time_s = get_db_query_stats()
+        ROUTE_DB_QUERIES.labels(method=method, endpoint=normalized_path).observe(query_count)
+        ROUTE_DB_DURATION_SECONDS.labels(method=method, endpoint=normalized_path).observe(db_time_s)
 
     return response
 

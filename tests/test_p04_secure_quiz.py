@@ -336,15 +336,36 @@ async def test_token_and_nonce_replay_protection(gateway_client: AsyncClient) ->
         headers={**auth_headers, "X-Attempt-Token": valid_attempt_token},
     )
     assert res_valid.status_code == 200
+    valid_data = res_valid.json()
+    assert valid_data["is_correct"] is None, "In assessed mode, is_correct must be withheld (None)"
 
-    # 4. Replay the same nonce for the already answered item -> 409 conflict
-    res_replay = await gateway_client.post(
+    # 4. Replay the same nonce with SAME answer -> idempotent 200 with identical response
+    res_replay_same = await gateway_client.post(
         f"/v1/attempts/{attempt_id}/items/1/answer",
         json={"nonce": valid_nonce, "response": {"selected_option_id": "opt_a"}},
         headers={**auth_headers, "X-Attempt-Token": valid_attempt_token},
     )
-    # The server has already processed position 1 or nonce is no longer active
-    assert res_replay.status_code in (409, 400)
+    assert res_replay_same.status_code == 200
+    assert res_replay_same.json() == valid_data
+    assert res_replay_same.json()["is_correct"] is None
+
+    # 5. Replay the same nonce with DIFFERENT answer -> 409 ANSWER_MISMATCH
+    res_replay_diff = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": valid_nonce, "response": {"selected_option_id": "opt_b"}},
+        headers={**auth_headers, "X-Attempt-Token": valid_attempt_token},
+    )
+    assert res_replay_diff.status_code == 409
+    assert res_replay_diff.json()["error"]["code"] == "ANSWER_MISMATCH"
+
+    # 6. Replay with different nonce on already answered item -> 409 ITEM_ALREADY_ANSWERED
+    res_replay_bad_nonce = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": "forged_new_nonce", "response": {"selected_option_id": "opt_a"}},
+        headers={**auth_headers, "X-Attempt-Token": valid_attempt_token},
+    )
+    assert res_replay_bad_nonce.status_code == 409
+    assert res_replay_bad_nonce.json()["error"]["code"] == "ITEM_ALREADY_ANSWERED"
 
 
 # =============================================================================
@@ -519,12 +540,13 @@ async def test_review_route_strictly_protected_until_submit(gateway_client: Asyn
         assert "correct_answer" in it
         assert "explanation" in it
 
-    # 4. Cross-student authorization check -> other student cannot review -> 403 Forbidden
+    # 4. Cross-student authorization check -> other student cannot review -> 404 Not Found
     res_review_other = await gateway_client.get(
         f"/v1/attempts/{attempt_id}/review",
         headers=other_headers,
     )
-    assert res_review_other.status_code in (403, 404)
+    assert res_review_other.status_code == 404
+    assert res_review_other.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
 
 
 # =============================================================================
@@ -1085,8 +1107,20 @@ async def test_concurrency_database_constraints_one_active_attempt_and_one_answe
     )
 
     ans_res1, ans_res2 = await asyncio.gather(ans_req1, ans_req2)
-    ans_statuses = {ans_res1.status_code, ans_res2.status_code}
-    assert ans_statuses == {200, 409}
+    # Both concurrent requests with identical answer payload succeed idempotently
+    assert ans_res1.status_code == 200
+    assert ans_res2.status_code == 200
+    assert ans_res1.json() == ans_res2.json()
+
+    # Concurrent or subsequent submit with different answer payload fails with 409 ANSWER_MISMATCH
+    diff_payload = {**ans_payload, "response": {"selected_option_id": "different_choice"}}
+    ans_diff = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/{first_item['position']}/answer",
+        json=diff_payload,
+        headers=item_headers,
+    )
+    assert ans_diff.status_code == 409
+    assert ans_diff.json()["error"]["code"] == "ANSWER_MISMATCH"
 
 
 # =============================================================================
@@ -1354,7 +1388,7 @@ async def test_isolation_cross_student_and_parent_access(gateway_client: AsyncCl
     attempt_token = res_start.json()["attempt_token"]
     item1 = res_start.json()["current_item"]
 
-    # 1. Student B tries to answer Student A's attempt -> 403 Forbidden
+    # 1. Student B tries to answer Student A's attempt -> 404 Not Found (indistinguishable from non-existent)
     res_b_answer = await gateway_client.post(
         f"/v1/attempts/{attempt_id}/items/1/answer",
         json={
@@ -1364,7 +1398,8 @@ async def test_isolation_cross_student_and_parent_access(gateway_client: AsyncCl
         },
         headers={**headers_b, "X-Attempt-Token": attempt_token},
     )
-    assert res_b_answer.status_code == 403
+    assert res_b_answer.status_code == 404
+    assert res_b_answer.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
 
     # 2. Linked parent tries to access questions/review while active -> 403 ATTEMPT_NOT_SUBMITTED
     res_p_early = await gateway_client.get(
@@ -1381,13 +1416,13 @@ async def test_isolation_cross_student_and_parent_access(gateway_client: AsyncCl
     )
     assert res_submit.status_code == 200
 
-    # 4. Unlinked parent tries to review Student A's submitted attempt -> 403 FORBIDDEN
+    # 4. Unlinked parent tries to review Student A's submitted attempt -> 404 ATTEMPT_NOT_FOUND
     res_unlinked_review = await gateway_client.get(
         f"/v1/attempts/{attempt_id}/review",
         headers=headers_p_unlinked,
     )
-    assert res_unlinked_review.status_code == 403
-    assert res_unlinked_review.json()["error"]["code"] == "FORBIDDEN"
+    assert res_unlinked_review.status_code == 404
+    assert res_unlinked_review.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
 
     # 5. Linked parent reviews Student A's submitted attempt -> 200 OK
     res_linked_review = await gateway_client.get(
@@ -1861,21 +1896,23 @@ async def test_scaled_too_fast_rule_multi_signal_and_parent_allow(
         assert att.invalid_reason is not None
 
     # 3. Parent "mark as allowed" flow (POST /v1/attempts/{id}/allow)
-    # 3a. Student themself calling allow -> 403 Forbidden
+    # 3a. Student themself calling allow -> 404 Not Found (indistinguishable)
     res_student_allow = await gateway_client.post(
         f"/v1/attempts/{attempt_id}/allow",
         json={"reason": "Self override attempt"},
         headers=auth_headers,
     )
-    assert res_student_allow.status_code == 403
+    assert res_student_allow.status_code == 404
+    assert res_student_allow.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
 
-    # 3b. Unlinked parent calling allow -> 403 Forbidden
+    # 3b. Unlinked parent calling allow -> 404 Not Found (indistinguishable)
     res_unlinked_allow = await gateway_client.post(
         f"/v1/attempts/{attempt_id}/allow",
         json={"reason": "Unlinked parent override"},
         headers={**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {unlinked_token}"},
     )
-    assert res_unlinked_allow.status_code == 403
+    assert res_unlinked_allow.status_code == 404
+    assert res_unlinked_allow.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
 
     # 3c. Linked parent calling allow -> 200 OK, resets attempt state to active and restores score
     res_parent_allow = await gateway_client.post(
@@ -2733,5 +2770,267 @@ def test_production_secret_check_covers_distinct_service_token_secret() -> None:
         QUESTION_KEY_ENCRYPTION_KEY="prod_super_secret_crypto_key_random_value_1234567890_5!",
     )
     assert valid_cfg.INTERNAL_SERVICE_SECRET == "prod_super_secret_hmac_key_random_value_1234567890_4!"
+
+
+# =============================================================================
+# 34. Idempotent Quiz Submit & Answer Mismatch Rejection Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_idempotent_quiz_submit_assessed_and_practice_modes(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P10 follow-up:
+    - Idempotent quiz submit: same nonce and same answer returns the identical original
+      response with nothing extra in assessed mode.
+    - Same nonce with a different answer is rejected with 409 ANSWER_MISMATCH.
+    - Practice mode preserves correctness feedback across idempotent retries.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    # --- Assessed Mode ---
+    quiz_assessed = await create_test_quiz(student.id, mode="assessed", question_count=2)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz_assessed.id}/attempts",
+        json={},
+        headers=auth_headers,
+    )
+    assert res_start.status_code in (200, 201)
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+    cur_item = start_data["current_item"]
+    nonce = cur_item["nonce"]
+    item_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+
+    options = cur_item["question"].get("options") or []
+    opt_choice1 = options[0]["id"] if len(options) > 0 else "opt_1"
+    opt_choice2 = options[1]["id"] if len(options) > 1 else "opt_2"
+    ans_payload1 = {"nonce": nonce, "response": {"selected_option_id": opt_choice1}}
+
+    # 1. Initial submission succeeds with 200 and withholds is_correct
+    res_ans1 = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json=ans_payload1,
+        headers=item_headers,
+    )
+    assert res_ans1.status_code == 200
+    ans_data1 = res_ans1.json()
+    assert ans_data1["is_correct"] is None, "Assessed mode must withhold is_correct"
+
+    # 2. Resubmission with same nonce and same answer returns identical response
+    res_retry_same = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json=ans_payload1,
+        headers=item_headers,
+    )
+    assert res_retry_same.status_code == 200
+    assert res_retry_same.json() == ans_data1
+    assert res_retry_same.json()["is_correct"] is None
+
+    # 3. Resubmission with same nonce but different answer fails 409 ANSWER_MISMATCH
+    ans_payload_diff = {"nonce": nonce, "response": {"selected_option_id": opt_choice2}}
+    res_retry_diff = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json=ans_payload_diff,
+        headers=item_headers,
+    )
+    assert res_retry_diff.status_code == 409
+    assert res_retry_diff.json()["error"]["code"] == "ANSWER_MISMATCH"
+
+    # --- Practice Mode ---
+    quiz_practice = await create_test_quiz(student.id, mode="practice", question_count=2)
+    res_start_p = await gateway_client.post(
+        f"/v1/quizzes/{quiz_practice.id}/attempts",
+        json={},
+        headers=auth_headers,
+    )
+    assert res_start_p.status_code in (200, 201)
+    start_p_data = res_start_p.json()
+    attempt_id_p = start_p_data["attempt_id"]
+    attempt_token_p = start_p_data["attempt_token"]
+    cur_item_p = start_p_data["current_item"]
+    nonce_p = cur_item_p["nonce"]
+    item_p_headers = {**auth_headers, "X-Attempt-Token": attempt_token_p}
+
+    ans_payload_p = {"nonce": nonce_p, "response": {"selected_option_id": opt_choice1}}
+    res_ans_p = await gateway_client.post(
+        f"/v1/attempts/{attempt_id_p}/items/1/answer",
+        json=ans_payload_p,
+        headers=item_p_headers,
+    )
+    assert res_ans_p.status_code == 200
+    ans_p_data = res_ans_p.json()
+    assert ans_p_data["is_correct"] is not None, "Practice mode must provide is_correct feedback"
+
+    # 4. Practice retry with same nonce and same answer returns identical response
+    res_retry_p_same = await gateway_client.post(
+        f"/v1/attempts/{attempt_id_p}/items/1/answer",
+        json=ans_payload_p,
+        headers=item_p_headers,
+    )
+    assert res_retry_p_same.status_code == 200
+    assert res_retry_p_same.json() == ans_p_data
+    assert res_retry_p_same.json()["is_correct"] == ans_p_data["is_correct"]
+
+    # 5. Practice retry with same nonce but different answer fails 409 ANSWER_MISMATCH
+    res_retry_p_diff = await gateway_client.post(
+        f"/v1/attempts/{attempt_id_p}/items/1/answer",
+        json={"nonce": nonce_p, "response": {"selected_option_id": opt_choice2}},
+        headers=item_p_headers,
+    )
+    assert res_retry_p_diff.status_code == 409
+    assert res_retry_p_diff.json()["error"]["code"] == "ANSWER_MISMATCH"
+
+
+# =============================================================================
+# 35. Nonce Rejection Across Attempts, Students, and Positions Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_nonce_rejection_across_attempts_students_and_positions(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P10 follow-up:
+    - Same nonce on a different attempt is rejected (409 INVALID_ITEM_NONCE).
+    - Same nonce on a different position in the same attempt is rejected (409 INVALID_ITEM_NONCE).
+    - Same nonce on an attempt owned by another student is rejected (403 FORBIDDEN).
+    """
+    await seed_sample_questions()
+    student_a = await create_test_user(role="student", display_name="Student A")
+    token_a = create_access_jwt(student_a.id, "student")
+    headers_a = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_a}"}
+
+    student_b = await create_test_user(role="student", display_name="Student B")
+    token_b = create_access_jwt(student_b.id, "student")
+    headers_b = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token_b}"}
+
+    # Student A starts Attempt 1
+    quiz_a1 = await create_test_quiz(student_a.id, mode="practice", question_count=3)
+    res_a1 = await gateway_client.post(
+        f"/v1/quizzes/{quiz_a1.id}/attempts",
+        json={},
+        headers=headers_a,
+    )
+    assert res_a1.status_code in (200, 201)
+    data_a1 = res_a1.json()
+    attempt_a1_id = data_a1["attempt_id"]
+    token_a1 = data_a1["attempt_token"]
+    nonce_a1_pos1 = data_a1["current_item"]["nonce"]
+    headers_a1 = {**headers_a, "X-Attempt-Token": token_a1}
+    options_a1 = data_a1["current_item"]["question"].get("options") or []
+    opt_a1 = options_a1[0]["id"] if len(options_a1) > 0 else "opt_1"
+
+    # Student A starts Attempt 2
+    quiz_a2 = await create_test_quiz(student_a.id, mode="practice", question_count=3)
+    res_a2 = await gateway_client.post(
+        f"/v1/quizzes/{quiz_a2.id}/attempts",
+        json={},
+        headers=headers_a,
+    )
+    assert res_a2.status_code in (200, 201)
+    data_a2 = res_a2.json()
+    attempt_a2_id = data_a2["attempt_id"]
+    token_a2 = data_a2["attempt_token"]
+    headers_a2 = {**headers_a, "X-Attempt-Token": token_a2}
+
+    # 1. Nonce from Attempt 1 Position 1 sent to Attempt 2 Position 1 -> 409 INVALID_ITEM_NONCE
+    res_cross_att = await gateway_client.post(
+        f"/v1/attempts/{attempt_a2_id}/items/1/answer",
+        json={"nonce": nonce_a1_pos1, "response": {"selected_option_id": opt_a1}},
+        headers=headers_a2,
+    )
+    assert res_cross_att.status_code == 409
+    assert res_cross_att.json()["error"]["code"] == "INVALID_ITEM_NONCE"
+
+    # 2. Nonce from Position 1 sent to Position 2 in Attempt 1 -> 409 INVALID_ITEM_NONCE
+    res_cross_pos = await gateway_client.post(
+        f"/v1/attempts/{attempt_a1_id}/items/2/answer",
+        json={"nonce": nonce_a1_pos1, "response": {"selected_option_id": opt_a1}},
+        headers=headers_a1,
+    )
+    assert res_cross_pos.status_code == 409
+    assert res_cross_pos.json()["error"]["code"] == "INVALID_ITEM_NONCE"
+
+    # 3. Student B attempts to answer Student A's attempt with valid Nonce -> 404 ATTEMPT_NOT_FOUND (Indistinguishable from not found)
+    res_cross_stud = await gateway_client.post(
+        f"/v1/attempts/{attempt_a1_id}/items/1/answer",
+        json={"nonce": nonce_a1_pos1, "response": {"selected_option_id": opt_a1}},
+        headers={**headers_b, "X-Attempt-Token": token_a1},
+    )
+    assert res_cross_stud.status_code == 404
+    assert res_cross_stud.json()["error"]["code"] == "ATTEMPT_NOT_FOUND"
+
+
+# =============================================================================
+# 36. Quiz Replay After Submission Returns Clear Error Test
+# =============================================================================
+@pytest.mark.asyncio
+async def test_quiz_answer_replay_after_submission_returns_clear_error(
+    gateway_client: AsyncClient,
+) -> None:
+    """Per P10 follow-up:
+    - After quiz attempt is submitted, a replay returns a clear error (409 ATTEMPT_NOT_ACTIVE).
+    - Submitting an already-submitted attempt returns identical submission summary idempotently.
+    """
+    await seed_sample_questions()
+    student = await create_test_user(role="student")
+    token = create_access_jwt(student.id, "student")
+    auth_headers = {**CLIENT_HEADERS_ANDROID, "Authorization": f"Bearer {token}"}
+
+    quiz = await create_test_quiz(student.id, mode="practice", question_count=1)
+    res_start = await gateway_client.post(
+        f"/v1/quizzes/{quiz.id}/attempts",
+        json={},
+        headers=auth_headers,
+    )
+    assert res_start.status_code in (200, 201)
+    start_data = res_start.json()
+    attempt_id = start_data["attempt_id"]
+    attempt_token = start_data["attempt_token"]
+    nonce = start_data["current_item"]["nonce"]
+    item_headers = {**auth_headers, "X-Attempt-Token": attempt_token}
+    options_start = start_data["current_item"]["question"].get("options") or []
+    opt_id = options_start[0]["id"] if len(options_start) > 0 else "opt_1"
+
+    # 1. Answer Item 1
+    res_ans = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": nonce, "response": {"selected_option_id": opt_id}},
+        headers=item_headers,
+    )
+    assert res_ans.status_code == 200
+
+    # 2. Finalize / submit attempt
+    res_submit = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/submit",
+        json={},
+        headers=item_headers,
+    )
+    assert res_submit.status_code == 200
+    submit_data = res_submit.json()
+    assert submit_data["state"] == "submitted"
+
+    # 3. Resubmitting the finalized attempt succeeds idempotently
+    res_submit_replay = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/submit",
+        json={},
+        headers=item_headers,
+    )
+    assert res_submit_replay.status_code == 200
+    assert res_submit_replay.json() == submit_data
+
+    # 4. Attempting to answer or replay an item on the submitted attempt returns a clear 409 error
+    res_item_replay_after_submit = await gateway_client.post(
+        f"/v1/attempts/{attempt_id}/items/1/answer",
+        json={"nonce": nonce, "response": {"selected_option_id": opt_id}},
+        headers=item_headers,
+    )
+    assert res_item_replay_after_submit.status_code == 409
+    err = res_item_replay_after_submit.json()["error"]
+    assert err["code"] == "ATTEMPT_NOT_ACTIVE"
+    assert "submitted" in err["message"].lower()
+
 
 

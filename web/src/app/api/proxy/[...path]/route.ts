@@ -169,9 +169,14 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
 
   // Overwrite client platform headers strictly from server
   const clientFormFactorHeader = req.headers.get("x-client-form-factor");
-  const formFactor = ["compact", "medium", "expanded"].includes(clientFormFactorHeader || "")
-    ? (clientFormFactorHeader as string)
-    : "expanded";
+  let formFactor = "desktop";
+  if (clientFormFactorHeader === "phone" || clientFormFactorHeader === "compact") {
+    formFactor = "phone";
+  } else if (clientFormFactorHeader === "tablet" || clientFormFactorHeader === "medium") {
+    formFactor = "tablet";
+  } else if (clientFormFactorHeader === "desktop" || clientFormFactorHeader === "expanded") {
+    formFactor = "desktop";
+  }
 
   const acceptLang = req.headers.get("accept-language")?.includes("en") ? "en" : "bn";
 

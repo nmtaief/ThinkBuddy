@@ -10,7 +10,12 @@ celery_app = Celery(
     "thinkbuddy_workers",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["workers.planner_tasks", "workers.quiz_tasks", "workers.privacy_tasks"],
+    include=[
+        "workers.planner_tasks",
+        "workers.quiz_tasks",
+        "workers.privacy_tasks",
+        "workers.cleanup_tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -24,6 +29,10 @@ celery_app.conf.update(
         "auto-submit-expired-quiz-attempts": {
             "task": "auto_submit_expired_attempts",
             "schedule": 30.0,
+        },
+        "cleanup-expired-idempotency-records": {
+            "task": "cleanup_expired_idempotency_records_task",
+            "schedule": 3600.0,  # runs hourly
         },
         "purge-shadow-runs-retention": {
             "task": "purge_shadow_runs_retention_task",

@@ -201,7 +201,7 @@ async def attest_quiz_attempt(
     service = QuizService(db)
     attempt_res = await db.execute(select(QuizAttempt).where(QuizAttempt.id == attempt_id))
     attempt = attempt_res.scalar_one_or_none()
-    if not attempt:
+    if not attempt or attempt.student_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},

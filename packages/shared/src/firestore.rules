@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: Check if user owns the document by UID
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper: Check if parent is linked to this student
+    function isLinkedParent(studentUid) {
+      return isAuthenticated() && (
+        request.auth.uid in get(/databases/$(database)/documents/students/$(studentUid)).data.linkedParents ||
+        exists(/databases/$(database)/documents/parents/$(request.auth.uid)/children/$(studentUid))
+      );
+    }
+
+    // User profiles (users collection)
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || resource.data.role == "student");
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAuthenticated() && isOwner(userId);
+      allow delete: if false; // Deletion handled via backend GDPR/purge compliance
+    }
+
+    // Student specific records (students collection)
+    match /students/{studentUid} {
+      // Student owns their data; linked parents have read-only access
+      allow read: if isOwner(studentUid) || isLinkedParent(studentUid);
+      allow create, update: if isOwner(studentUid) || (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedParents']));
+      allow delete: if false;
+
+      // Student subcollections: study sessions, tasks, routine, uploaded notes
+      match /{allSubcollections=**} {
+        allow read: if isOwner(studentUid) || isLinkedParent(studentUid);
+        allow write: if isOwner(studentUid);
+      }
+    }
+
+    // Parent specific records (parents collection)
+    match /parents/{parentUid} {
+      allow read, write: if isOwner(parentUid);
+
+      // Parent subcollections: linked children, notifications, preferences
+      match /{allSubcollections=**} {
+        allow read, write: if isOwner(parentUid);
+      }
+    }
+
+    // Public invite codes mapping for student-parent linking
+    match /invites/{code} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+  }
+}
+

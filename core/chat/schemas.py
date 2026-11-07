@@ -60,6 +60,10 @@ class ChatMessageCreateRequest(BaseModel):
         default=None,
         description="Preferred language code ('bn' or 'en'); defaults to student preference",
     )
+    client_turn_id: str | None = Field(
+        default=None,
+        description="Optional client-generated turn ID for idempotent retries",
+    )
 
 
 class ChatMessageResponse(BaseModel):

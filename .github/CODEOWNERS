@@ -1,17 +1,17 @@
 # ThinkBuddy Repository Code Owners
-# Global default maintainers
-* @thinkbuddy/core-maintainers
+# [TODO: Replace with your GitHub team handle or username, e.g. @your-org/maintainers]
+* @TODO_CORE_MAINTAINERS_TEAM
 
 # Backend architecture, API, routing, and data models
-/core/ @thinkbuddy/backend-leads
-/gateway/ @thinkbuddy/backend-leads
-/rag/ @thinkbuddy/ai-rag-team
-/workers/ @thinkbuddy/backend-leads
+/core/ @TODO_BACKEND_TEAM
+/gateway/ @TODO_BACKEND_TEAM
+/rag/ @TODO_AI_RAG_TEAM
+/workers/ @TODO_BACKEND_TEAM
 
 # Android Client Application
-/android/ @thinkbuddy/android-leads
+/android/ @TODO_ANDROID_TEAM
 
 # Security, Deployment, Infrastructure, and CI Scanners
-/.github/ @thinkbuddy/security-infrastructure
-/infra/ @thinkbuddy/security-infrastructure
-/docs/ @thinkbuddy/core-maintainers
+/.github/ @TODO_INFRA_SECURITY_TEAM
+/infra/ @TODO_INFRA_SECURITY_TEAM
+/docs/ @TODO_CORE_MAINTAINERS_TEAM

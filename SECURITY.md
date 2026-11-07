@@ -9,12 +9,12 @@ ThinkBuddy provides security updates and fixes for the following releases:
 | < 1.0   | :x:                |
 
 ## Reporting a Vulnerability
-The ThinkBuddy engineering team takes the security and privacy of our student and parent data seriously.
+The engineering team takes the security and privacy of our student and parent data seriously.
 
 If you discover a security vulnerability, please **DO NOT** create a public GitHub issue.
 Instead, report it responsibly via one of the following channels:
 
-- **Security Team Email:** `security@thinkbuddy.org`
+- **Security Team Email:** [TODO: Insert Security Email, e.g. security@yourdomain.com]
 - **Subject Format:** `[Vulnerability Report] Component - Brief Description`
 
 ### Information to Include in Reports

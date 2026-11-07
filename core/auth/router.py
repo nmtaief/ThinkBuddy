@@ -179,6 +179,7 @@ async def exchange_token(
             link.status = "active"
             link.student_id = user.id
             link.consent_at = utcnow()
+            user.has_parental_consent = True
             link.link_code_hash = None  # Invalidate single-use code immediately
 
             if link.family_id:

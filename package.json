@@ -1,0 +1,19 @@
+{
+  "name": "thinkbuddy-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:student": "npm --workspace=apps/student run dev",
+    "dev:parent": "npm --workspace=apps/parent run dev",
+    "build:student": "npm --workspace=apps/student run build",
+    "build:parent": "npm --workspace=apps/parent run build",
+    "build": "npm run build:student && npm run build:parent",
+    "deploy:student": "npm --workspace=apps/student run deploy",
+    "deploy:parent": "npm --workspace=apps/parent run deploy"
+  }
+}
+

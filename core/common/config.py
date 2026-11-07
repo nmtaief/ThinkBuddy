@@ -67,9 +67,17 @@ class CoreSettings(BaseSettings):
         default="postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy",
         description="Async PostgreSQL connection URL with pgvector",
     )
-    DB_POOL_SIZE: int = Field(default=30, description="Database pool size")
-    DB_MAX_OVERFLOW: int = Field(default=30, description="Database pool max overflow")
+    DB_POOL_SIZE: int = Field(default=25, description="Database pool size per Core worker process")
+    DB_MAX_OVERFLOW: int = Field(default=15, description="Database pool max overflow per Core worker process")
     DB_POOL_TIMEOUT: float = Field(default=15.0, description="Database pool checkout timeout in seconds")
+    WORKER_DB_POOL_SIZE: int = Field(
+        default=5,
+        description="Database pool size for Celery worker processes",
+    )
+    WORKER_DB_MAX_OVERFLOW: int = Field(
+        default=5,
+        description="Database pool max overflow for Celery worker processes",
+    )
 
     # Redis
     REDIS_URL: str = Field(

@@ -207,7 +207,6 @@ class QuizService:
         )
         await self.builder.initialize_attempt_items(attempt, questions)
         await self.db.commit()
-        await self.db.refresh(attempt)
         return attempt
 
     async def start_attempt(
@@ -255,8 +254,8 @@ class QuizService:
                 )
             if attempt.student_id != student_id:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail={"code": "FORBIDDEN", "message": "Cannot start another student's attempt."},
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
                 )
 
             # Check created attempt short expiry (5 minutes)
@@ -351,21 +350,20 @@ class QuizService:
             attempt.unverified_device = is_unverified
             attempt.nonce_hash = None  # Single-use nonce consumed upon activation
             await self.db.commit()
-            await self.db.refresh(attempt)
 
             items_res = await self.db.execute(
-                select(AttemptItem).where(AttemptItem.attempt_id == attempt.id).order_by(AttemptItem.position.asc())
+                select(AttemptItem, Question)
+                .join(Question, AttemptItem.question_id == Question.id)
+                .where(AttemptItem.attempt_id == attempt.id)
+                .order_by(AttemptItem.position.asc())
             )
-            items = list(items_res.scalars().all())
+            item_rows = list(items_res.all())
             first_item_public: AttemptItemPublic | None = None
-            if items:
-                q_res = await self.db.execute(
-                    select(Question).where(Question.id == items[0].question_id)
-                )
-                q_first = q_res.scalar_one()
+            if item_rows:
+                first_item, q_first = item_rows[0]
                 first_item_public = AttemptItemPublic(
-                    position=items[0].position,
-                    nonce=items[0].nonce,
+                    position=first_item.position,
+                    nonce=first_item.nonce,
                     time_limit_s=quiz.per_question_limit_s,
                     question=_format_attempt_question_public(q_first, attempt.id),
                 )
@@ -486,14 +484,9 @@ class QuizService:
                     "message": "You already have an active assessed attempt in progress.",
                 },
             ) from None
-        await self.db.refresh(attempt)
-
         first_item_public: AttemptItemPublic | None = None
-        if items:
-            q_res = await self.db.execute(
-                select(Question).where(Question.id == items[0].question_id)
-            )
-            q_first = q_res.scalar_one()
+        if items and questions:
+            q_first = questions[0]
             first_item_public = AttemptItemPublic(
                 position=items[0].position,
                 nonce=items[0].nonce,
@@ -539,8 +532,8 @@ class QuizService:
             )
         if attempt.student_id != student_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "FORBIDDEN", "message": "Cannot answer another student's attempt."},
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
             )
 
         if attempt.attempt_token != token:
@@ -601,9 +594,18 @@ class QuizService:
                 detail={"code": "ITEM_NOT_FOUND", "message": f"No item at position {position}."},
             )
 
-        # Check if item already answered (with idempotent return on retry with matching nonce)
+        # Check if item already answered
+        # (idempotent return on retry with matching nonce & answer)
         if item.answered_at is not None:
             if item.nonce == nonce:
+                if item.response != response:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "ANSWER_MISMATCH",
+                            "message": "Resubmitted answer does not match original submission.",
+                        },
+                    )
                 next_stmt = select(AttemptItem).where(
                     AttemptItem.attempt_id == attempt.id,
                     AttemptItem.position == position + 1,
@@ -717,11 +719,8 @@ class QuizService:
             )
         if attempt.student_id != student_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "code": "FORBIDDEN",
-                    "message": "Cannot record events for another student's attempt.",
-                },
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
             )
 
         event = AttemptEvent(
@@ -753,8 +752,8 @@ class QuizService:
             )
         if attempt.student_id != student_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "FORBIDDEN", "message": "Cannot submit another student's attempt."},
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
             )
 
         if attempt.attempt_token != token:
@@ -839,18 +838,18 @@ class QuizService:
                 link_res = await self.db.execute(link_stmt)
                 if not link_res.scalar_one_or_none():
                     raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
+                        status_code=status.HTTP_404_NOT_FOUND,
                         detail={
-                            "code": "FORBIDDEN",
-                            "message": "Parent is not linked to this student.",
+                            "code": "ATTEMPT_NOT_FOUND",
+                            "message": "Attempt not found.",
                         },
                     )
             else:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    status_code=status.HTTP_404_NOT_FOUND,
                     detail={
-                        "code": "FORBIDDEN",
-                        "message": "Access denied to another student's attempt.",
+                        "code": "ATTEMPT_NOT_FOUND",
+                        "message": "Attempt not found.",
                     },
                 )
 
@@ -957,8 +956,8 @@ class QuizService:
         user_id = getattr(actor_user, "id", None)
         if user_role not in ("parent", "admin"):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "FORBIDDEN", "message": "Only linked parents or administrators can allow an attempt."},
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
             )
 
         if user_role == "parent":
@@ -970,8 +969,8 @@ class QuizService:
             link_res = await self.db.execute(link_stmt)
             if not link_res.scalar_one_or_none():
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail={"code": "FORBIDDEN", "message": "Parent is not linked to this student."},
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "ATTEMPT_NOT_FOUND", "message": "Attempt not found."},
                 )
 
         prev_state = attempt.state

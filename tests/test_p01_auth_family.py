@@ -633,6 +633,8 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
             "0020_p08a_account_attestation_and_flags",
             "0021_p07b_parent_consent_export_deletion",
             "0022_p07b_consent_versions_and_deletion_ledger",
+            "0023_chat_idempotency_unique_constraint",
+            "0024_chat_idempotency_expires_at",
         )
 
         # 3. Test policy directly against live Postgres DB rows

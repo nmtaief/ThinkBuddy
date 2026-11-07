@@ -6,8 +6,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { session_id, message, textbook_id } = body;
 
-  const formFactor = req.headers.get("x-client-form-factor") || "expanded";
-  const acceptLang = req.headers.get("accept-language") || "bn";
+  const rawFormFactor = req.headers.get("x-client-form-factor") || "desktop";
+  const formFactor =
+    rawFormFactor === "phone" || rawFormFactor === "compact"
+      ? "phone"
+      : rawFormFactor === "tablet" || rawFormFactor === "medium"
+      ? "tablet"
+      : "desktop";
+  const acceptLang = req.headers.get("accept-language")?.includes("en") ? "en" : "bn";
 
   const headers: Record<string, string> = {
     "X-Client-Platform": "web",

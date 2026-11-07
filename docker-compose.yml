@@ -3,7 +3,7 @@ services:
     image: pgvector/pgvector:0.8.7-pg16
     container_name: thinkbuddy-postgres
     restart: unless-stopped
-    command: postgres -c max_connections=250 -c shared_buffers=256MB
+    command: postgres -c max_connections=250 -c shared_buffers=256MB -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-thinkbuddy}
       POSTGRES_USER: ${POSTGRES_USER:-thinkbuddy}
@@ -65,17 +65,23 @@ services:
       dockerfile: infra/docker/Dockerfile.core
     container_name: thinkbuddy-core
     restart: unless-stopped
+    command: ["uvicorn", "core.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "4"]
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: INFO
       CORE_HOST: 0.0.0.0
       CORE_PORT: 8001
       DATABASE_URL: postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@postgres:5432/thinkbuddy
-      DB_POOL_SIZE: 40
-      DB_MAX_OVERFLOW: 40
+      DB_POOL_SIZE: 25
+      DB_MAX_OVERFLOW: 15
       DB_POOL_TIMEOUT: 15.0
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
+      GATEWAY_TRUSTED_PROXIES: '["127.0.0.1", "::1", "172.28.0.0/29", "172.18.0.0/16"]'
+    volumes:
+      - ./core:/app/core
+      - ./migrations:/app/migrations
+      - ./rag:/app/rag
     ports:
       - "127.0.0.1:8001:8001"
     depends_on:
@@ -95,6 +101,7 @@ services:
       dockerfile: infra/docker/Dockerfile.gateway
     container_name: thinkbuddy-gateway
     restart: unless-stopped
+    command: ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: INFO
@@ -103,6 +110,10 @@ services:
       CORE_INTERNAL_URL: http://core:8001
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
+      GATEWAY_TRUSTED_PROXIES: '["127.0.0.1", "::1", "172.28.0.0/29", "172.18.0.0/16"]'
+    volumes:
+      - ./gateway:/app/gateway
+      - ./core:/app/core
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -14,7 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit.models import AuditLog
 from core.auth.models import Session as UserSession, User
-from core.chat.models import ChatCitation, ChatMessage, ChatSession, UsageCounter
+from core.chat.models import (
+    ChatCitation,
+    ChatIdempotencyRecord,
+    ChatMessage,
+    ChatSession,
+    UsageCounter,
+)
 from core.common.config import settings
 from core.devices.models import Device
 from core.families.models import Family, FamilyMember, ParentStudentLink, StudentProfile
@@ -212,6 +218,7 @@ async def execute_data_purge(
                             await db.execute(delete(ChatCitation).where(ChatCitation.message_id.in_(cm_ids)))
                         await db.execute(delete(ChatMessage).where(ChatMessage.session_id.in_(cs_ids)))
                     await db.execute(delete(ChatSession).where(ChatSession.student_id == u_id))
+                    await db.execute(delete(ChatIdempotencyRecord).where(ChatIdempotencyRecord.student_id == u_id))
                     await db.execute(delete(UsageCounter).where(UsageCounter.student_id == u_id))
 
                     # 7. Student Profile, Parent-Student Links (clearing invitation codes)
