@@ -1,6 +1,6 @@
 """Untrusted AI Proposal Validator (P06a).
 
-Per thinkbuddy-docs/docs/07_AI_PLANNER_API.md §8:
+Per docs/07_AI_PLANNER_API.md §8:
 - Treats AI output as completely untrusted input.
 - Enforces hard rules (V01 to V15):
   * V01: Schema and contract version valid (ai-planner/v1.0), size caps respected (Hard).

@@ -1,7 +1,7 @@
 """Shared AI Planner API Contract models (ai-planner/v1.0).
 
 Used across the ThinkBuddy backend, AI provider client, validator, and mock test services.
-Conforms strictly to thinkbuddy-docs/docs/07_AI_PLANNER_API.md.
+Conforms strictly to docs/07_AI_PLANNER_API.md.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """LLM gateway abstraction with mock support and LiteLLM streaming capabilities.
 
-Implements Deliverable 8 from thinkbuddy-docs/prompts/P05_rag_chat_streaming.md:
+Implements RAG chat streaming deliverable:
 - LLM gateway with model routing per task (classification vs generation)
 - Streaming token generator
 - Client disconnect awareness

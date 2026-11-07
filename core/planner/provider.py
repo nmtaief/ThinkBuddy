@@ -1,6 +1,6 @@
 """Plan Provider Abstraction Layer & AI Planner Integration (P06a).
 
-Per thinkbuddy-docs/docs/07_AI_PLANNER_API.md §1, §2, §8, §10, §11:
+Per docs/07_AI_PLANNER_API.md §1, §2, §8, §10, §11:
 - Provider interface: `PlanProvider` ABC with `DeterministicProvider` and `AiPlannerProvider`.
 - `DeterministicProvider`: Pure-Python rule-based baseline (P03).
 - `AiPlannerProvider`: HTTP client with short-lived signed service token auth, timeouts,

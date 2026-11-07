@@ -1,6 +1,6 @@
 """Hybrid curriculum retriever with boosting and reranking for AI Chat.
 
-Implements Deliverable 1 from thinkbuddy-docs/prompts/P05_rag_chat_streaming.md:
+Implements curriculum and study item retriever:
 - Hybrid (vector + lexical) retrieval
 - Class/subject/medium filtering
 - Document context (current chapter / printed page) boosting

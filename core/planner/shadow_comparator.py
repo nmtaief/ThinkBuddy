@@ -1,6 +1,6 @@
 """Shadow-Mode Comparison Engine & Metrics (P06a).
 
-Per thinkbuddy-docs/docs/07_AI_PLANNER_API.md §10, §12:
+Per docs/07_AI_PLANNER_API.md §10, §12:
 Runs the AI planner alongside the deterministic baseline planner in shadow mode,
 comparing outputs on coverage parity, budget discipline, churn, and violations.
 """

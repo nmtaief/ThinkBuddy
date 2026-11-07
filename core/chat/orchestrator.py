@@ -1,6 +1,6 @@
 """Chat orchestrator managing query understanding, RAG retrieval, SSE streaming, and guardrails.
 
-Implements Deliverables from thinkbuddy-docs/prompts/P05_rag_chat_streaming.md:
+Implements RAG chat streaming orchestrator:
 - Query classification (study question vs off-topic vs unsafe vs quiz integrity)
 - Secure quiz active lockout enforcement
 - Entitlement & daily quota checking
