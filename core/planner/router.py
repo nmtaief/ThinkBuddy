@@ -608,7 +608,9 @@ async def execute_student_plan_regeneration(
             elif trigger_setup_id and s.id != trigger_setup_id:
                 plan_reason = "multi_subject_sync"
 
+            plan_id = uuid.uuid4()
             new_plan = Plan(
+                id=plan_id,
                 setup_id=s.id,
                 student_id=student_id,
                 version=new_student_plan_version,
@@ -633,26 +635,26 @@ async def execute_student_plan_regeneration(
                 },
             )
             db.add(new_plan)
-            await db.flush()
 
             for g_day in plan_out.days:
                 sub_tasks = [t for t in g_day.tasks if t.subject == s.subject]
                 if not sub_tasks:
                     continue
 
+                day_id = uuid.uuid4()
                 p_day = PlanDay(
-                    plan_id=new_plan.id,
+                    id=day_id,
+                    plan_id=plan_id,
                     date=g_day.date,
                     planned_minutes=sum(t.est_minutes for t in sub_tasks),
                     day_type=g_day.day_type,
                 )
                 db.add(p_day)
-                await db.flush()
 
                 for g_task in sub_tasks:
                     t_row = Task(
                         id=uuid.uuid4(),
-                        plan_day_id=p_day.id,
+                        plan_day_id=day_id,
                         student_id=student_id,
                         type=g_task.type,
                         chapter_id=uuid.UUID(str(g_task.chapter_id)) if g_task.chapter_id else None,
