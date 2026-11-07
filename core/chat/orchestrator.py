@@ -183,28 +183,16 @@ class ChatOrchestrator:
     async def assert_no_active_assessed_quiz(self, student_id: uuid.UUID) -> None:
         """Lockout chat during active assessed quiz attempts per docs/05_SECURE_QUIZ.md §2."""
         quiz_service = QuizService(self.db)
-        is_active = await quiz_service.is_assessed_attempt_active(student_id)
-        if is_active:
-            stmt = (
-                select(QuizAttempt)
-                .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
-                .where(
-                    QuizAttempt.student_id == student_id,
-                    QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
-                    Quiz.mode == "assessed",
-                )
+        active_attempt = await quiz_service.get_active_assessed_attempt(student_id)
+        if active_attempt:
+            event = AttemptEvent(
+                attempt_id=active_attempt.id,
+                type="chat_attempt",
+                meta={"endpoint": "chat", "attempted_at": datetime.now(UTC).isoformat()},
             )
-            res = await self.db.execute(stmt)
-            active_attempt = res.scalar_one_or_none()
-            if active_attempt:
-                event = AttemptEvent(
-                    attempt_id=active_attempt.id,
-                    type="chat_attempt",
-                    meta={"endpoint": "chat", "attempted_at": datetime.now(UTC).isoformat()},
-                )
-                self.db.add(event)
-                IntegrityEngine.process_event(active_attempt, "chat_attempt", {})
-                await self.db.commit()
+            self.db.add(event)
+            IntegrityEngine.process_event(active_attempt, "chat_attempt", {})
+            await self.db.commit()
 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

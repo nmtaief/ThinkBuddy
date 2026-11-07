@@ -91,11 +91,8 @@ class QuizService:
         self.builder = QuizBuilderService(db)
         self.grading = QuizGradingService(db)
 
-    async def is_assessed_attempt_active(self, student_id: uuid.UUID) -> bool:
-        """Return True if student currently has an open assessed attempt (created, active, warned, paused).
-
-        Used by chat and assistant endpoints to enforce anti-cheat lockout.
-        """
+    async def get_active_assessed_attempt(self, student_id: uuid.UUID) -> QuizAttempt | None:
+        """Return active assessed attempt for student if one is currently open."""
         stmt = select(QuizAttempt).where(
             QuizAttempt.student_id == student_id,
             QuizAttempt.state.in_(OPEN_ATTEMPT_STATES),
@@ -104,7 +101,7 @@ class QuizService:
         res = await self.db.execute(stmt)
         active_attempt = res.scalar_one_or_none()
         if not active_attempt:
-            return False
+            return None
 
         # Check if pause has expired and auto-resume if so
         if active_attempt.state == "paused":
@@ -118,9 +115,17 @@ class QuizService:
             active_attempt.submitted_at = active_attempt.deadline_at
             await self.grading.finalize_and_emit_signals(active_attempt)
             await self.db.commit()
-            return False
+            return None
 
-        return True
+        return active_attempt
+
+    async def is_assessed_attempt_active(self, student_id: uuid.UUID) -> bool:
+        """Return True if student currently has an open assessed attempt (created, active, warned, paused).
+
+        Used by chat and assistant endpoints to enforce anti-cheat lockout.
+        """
+        attempt = await self.get_active_assessed_attempt(student_id)
+        return attempt is not None
 
     async def create_attempt(
         self,
