@@ -131,3 +131,4 @@ class AITutorStatsResponse(BaseModel):
     active_primary_model: str
     active_embedding_provider: str
     rag_chat_enabled: bool
+

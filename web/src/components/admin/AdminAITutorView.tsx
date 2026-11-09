@@ -118,10 +118,10 @@ export const AdminAITutorView: React.FC = () => {
   const fetchData = useCallback(async () => {
     try {
       const [resConfig, resStats] = await Promise.all([
-        fetch("/api/proxy/admin/ai-tutor/config", {
+        fetch("/api/admin/ai-tutor/config", {
           headers: { "x-client-platform": "web" },
         }),
-        fetch("/api/proxy/admin/ai-tutor/stats", {
+        fetch("/api/admin/ai-tutor/stats", {
           headers: { "x-client-platform": "web" },
         }),
       ]);
@@ -189,7 +189,7 @@ export const AdminAITutorView: React.FC = () => {
     }
 
     try {
-      const res = await fetch("/api/proxy/admin/ai-tutor/config", {
+      const res = await fetch("/api/admin/ai-tutor/config", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -230,7 +230,7 @@ export const AdminAITutorView: React.FC = () => {
       if (apiKey.trim()) payload.api_key = apiKey.trim();
       if (apiBase.trim()) payload.api_base = apiBase.trim();
 
-      const res = await fetch("/api/proxy/admin/ai-tutor/test-llm", {
+      const res = await fetch("/api/admin/ai-tutor/test-llm", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -261,7 +261,7 @@ export const AdminAITutorView: React.FC = () => {
     setTestingRAG(true);
     setRagResult(null);
     try {
-      const res = await fetch("/api/proxy/admin/ai-tutor/test-rag", {
+      const res = await fetch("/api/admin/ai-tutor/test-rag", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -10,8 +10,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
+from pathlib import Path
 import uuid
 
+# Ensure root directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import core.families.models  # noqa: F401
 from sqlalchemy import select
 
 from core.audit.models import AuditLog
@@ -46,6 +52,8 @@ async def create_or_promote_admin(phone: str, email: str, name: str) -> None:
         else:
             user = User(
                 id=uuid.uuid4(),
+                auth_provider="system",
+                auth_uid=f"system:{phone}",
                 phone=phone,
                 email=email,
                 role="admin",
