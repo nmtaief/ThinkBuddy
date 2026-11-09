@@ -95,6 +95,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
           </button>
 
+          {/* Admin link — desktop */}
+          <a
+            href="/admin"
+            className="btn-secondary touch-target navbar-desktop-only"
+            style={{ fontSize: "var(--text-xs)", gap: 4, padding: "0 10px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+            title="AI Tutor & RAG Admin Panel"
+          >
+            <Shield size={14} />
+            <span>Admin</span>
+          </a>
+
           {/* User avatar — desktop only */}
           {user && (
             <span
@@ -258,6 +269,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* Language switch */}
+              <a
+                href="/admin"
+                className="btn-secondary touch-target"
+                style={{
+                  width: "100%", fontSize: "var(--text-xs)", gap: 8, padding: "10px 14px",
+                  textDecoration: "none", display: "flex", alignItems: "center",
+                  backgroundColor: "var(--color-surface-hover)",
+                  borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)",
+                  color: "var(--color-text-primary)", fontWeight: 600,
+                }}
+              >
+                <Shield size={16} />
+                <span>AI Tutor & RAG Admin Panel</span>
+              </a>
 
               {/* Language switch */}
               <div

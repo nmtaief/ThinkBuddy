@@ -13,6 +13,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import core.admin.models  # noqa: F401
 import core.audit.models  # noqa: F401
 import core.auth.models  # noqa: F401
 import core.curriculum.models  # noqa: F401

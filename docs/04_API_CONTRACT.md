@@ -70,6 +70,13 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `GET /admin/ai-planner/shadow-metrics` – get aggregate shadow-mode comparison metrics and latest run logs.
 - `DELETE /admin/ai-planner/shadow-metrics/retention?retention_days=30` – purge shadow run records older than retention threshold (default 30 days) from dedicated `ai_planner_shadow_runs` table. Scheduled daily background task ensures durable retention compliance.
 
+### Admin AI Tutor & RAG Management (`/admin/ai-tutor/*`, role: admin)
+- `GET /admin/ai-tutor/config` – retrieve current AI Tutor (Buddy) and RAG configuration with masked API keys.
+- `PUT /admin/ai-tutor/config` – update LLM provider, API keys, models, fallback models, temperature, persona prompt, embedding provider/model, confidence threshold, and max chunks (audit logged with secret masking).
+- `POST /admin/ai-tutor/test-llm` – diagnostic ping to test LLM API connectivity, latency, and token response.
+- `POST /admin/ai-tutor/test-rag` – test RAG textbook chunk retrieval for a query and inspect similarity scores and printed pages.
+- `GET /admin/ai-tutor/stats` – get knowledge base statistics (indexed textbooks, chapters, chunks, and sessions).
+
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).
 - `POST /quizzes/{id}/attempts/create` – create attempt in state `created` with short 5-minute expiry; generates a random single-use server nonce (stored hashed on server) and returns `attempt_id`, `state="created"`, `nonce`, `deadline_at` for client to request Play Integrity attestation.

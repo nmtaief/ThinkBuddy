@@ -195,10 +195,16 @@ class LiteLLMGateway(LLMGateway):
         primary_model: str = "gemini/gemini-1.5-flash",
         fallback_model: str = "openai/gpt-4o-mini",
         classifier_model: str = "openai/gpt-4o-mini",
+        api_key: str | None = None,
+        api_base: str | None = None,
+        temperature: float = 0.3,
     ) -> None:
         self.primary_model = primary_model
         self.fallback_model = fallback_model
         self.classifier_model = classifier_model
+        self.api_key = api_key
+        self.api_base = api_base
+        self.temperature = temperature
 
     async def classify_query(self, query: str) -> str:
         # Heuristic fast-path before calling classifier model
@@ -230,15 +236,22 @@ class LiteLLMGateway(LLMGateway):
         timeout: float = 30.0,
     ) -> AsyncIterator[str]:
         target_model = model or self.primary_model
+        kwargs: dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+            "stream": True,
+            "timeout": timeout,
+            "temperature": self.temperature,
+        }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+
         try:
             import litellm  # type: ignore[import-untyped]
 
-            response = await litellm.acompletion(
-                model=target_model,
-                messages=messages,
-                stream=True,
-                timeout=timeout,
-            )
+            response = await litellm.acompletion(**kwargs)
             async for chunk in response:
                 content = chunk.choices[0].delta.content or ""
                 if content:
@@ -252,12 +265,9 @@ class LiteLLMGateway(LLMGateway):
             )
             import litellm
 
-            response = await litellm.acompletion(
-                model=self.fallback_model,
-                messages=messages,
-                stream=True,
-                timeout=timeout,
-            )
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs["model"] = self.fallback_model
+            response = await litellm.acompletion(**fallback_kwargs)
             async for chunk in response:
                 content = chunk.choices[0].delta.content or ""
                 if content:
@@ -270,15 +280,22 @@ class LiteLLMGateway(LLMGateway):
         timeout: float = 30.0,
     ) -> LLMGenerationResult:
         target_model = model or self.primary_model
+        kwargs: dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+            "stream": False,
+            "timeout": timeout,
+            "temperature": self.temperature,
+        }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+
         try:
             import litellm
 
-            response = await litellm.acompletion(
-                model=target_model,
-                messages=messages,
-                stream=False,
-                timeout=timeout,
-            )
+            response = await litellm.acompletion(**kwargs)
             content = response.choices[0].message.content or ""
             usage = response.usage
             return LLMGenerationResult(
@@ -292,12 +309,9 @@ class LiteLLMGateway(LLMGateway):
             logger.warning("Primary LLM (%s) failed, using fallback: %s", target_model, ex)
             import litellm
 
-            response = await litellm.acompletion(
-                model=self.fallback_model,
-                messages=messages,
-                stream=False,
-                timeout=timeout,
-            )
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs["model"] = self.fallback_model
+            response = await litellm.acompletion(**fallback_kwargs)
             content = response.choices[0].message.content or ""
             usage = response.usage
             return LLMGenerationResult(
@@ -307,3 +321,32 @@ class LiteLLMGateway(LLMGateway):
                 model=self.fallback_model,
                 latency_ms=450,
             )
+
+
+async def get_active_llm_gateway(db: Any | None = None) -> LLMGateway:
+    """Resolve active LLM gateway from database configuration or default to mock."""
+    if db is not None:
+        try:
+            from sqlalchemy import select
+            from core.admin.models import AITutorConfig
+
+            stmt = select(AITutorConfig).order_by(AITutorConfig.created_at.asc()).limit(1)
+            result = await db.execute(stmt)
+            config = result.scalar_one_or_none()
+            if config and config.is_enabled and config.api_key and config.llm_provider != "mock":
+                try:
+                    import litellm  # noqa: F401
+                    return LiteLLMGateway(
+                        primary_model=config.primary_model,
+                        fallback_model=config.fallback_model,
+                        api_key=config.api_key,
+                        api_base=config.api_base,
+                        temperature=config.temperature,
+                    )
+                except ImportError:
+                    logger.warning("litellm is not installed; falling back to MockLLMGateway")
+                    return MockLLMGateway()
+        except Exception as ex:
+            logger.debug("Could not load AITutorConfig for LLMGateway: %s", ex)
+
+    return MockLLMGateway()

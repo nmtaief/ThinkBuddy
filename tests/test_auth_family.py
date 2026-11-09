@@ -642,6 +642,7 @@ async def test_db_backed_migrations_and_ownership_policy() -> None:
             "0022_p07b_consent_versions_and_deletion_ledger",
             "0023_chat_idempotency_unique_constraint",
             "0024_chat_idempotency_expires_at",
+            "0025_ai_tutor_and_rag_config",
         )
 
         # 3. Test policy directly against live Postgres DB rows

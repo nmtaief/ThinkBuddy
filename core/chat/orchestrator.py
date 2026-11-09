@@ -91,8 +91,15 @@ class ChatOrchestrator:
     ) -> None:
         self.db = db
         self.retriever = retriever or ChatRetriever(db)
-        self.llm_gateway = llm_gateway or MockLLMGateway()
+        self.llm_gateway = llm_gateway
         self.chat_service = chat_service or ChatService(db)
+
+    async def _get_gateway(self) -> LLMGateway:
+        """Resolve LLM gateway: explicitly provided mock or dynamic active config."""
+        if self.llm_gateway is not None:
+            return self.llm_gateway
+        from core.chat.llm import get_active_llm_gateway
+        return await get_active_llm_gateway(self.db)
 
     async def get_cached_turn(
         self,
@@ -258,7 +265,8 @@ class ChatOrchestrator:
         )
 
         # 4. Query Intent Classification
-        intent = await self.llm_gateway.classify_query(payload.content)
+        gateway = await self._get_gateway()
+        intent = await gateway.classify_query(payload.content)
 
         if intent == "quiz_integrity":
             refusal_text = (
@@ -457,7 +465,7 @@ class ChatOrchestrator:
 
         # Stream tokens with client disconnect cancellation
         try:
-            async for token in self.llm_gateway.stream_chat(prompt_messages):
+            async for token in gateway.stream_chat(prompt_messages):
                 if request is not None and await request.is_disconnected():
                     logger.info("Client disconnected during SSE stream for %s.", student_id)
                     return
@@ -554,7 +562,8 @@ class ChatOrchestrator:
         )
 
         # 2. Classification
-        intent = await self.llm_gateway.classify_query(payload.content)
+        gateway = await self._get_gateway()
+        intent = await gateway.classify_query(payload.content)
         if intent in ["quiz_integrity", "unsafe", "off_topic", "prompt_injection"]:
             if intent == "prompt_injection":
                 refusal_text = (
@@ -687,7 +696,7 @@ class ChatOrchestrator:
                 ),
             },
         ]
-        gen_result = await self.llm_gateway.generate_chat(prompt_messages)
+        gen_result = await gateway.generate_chat(prompt_messages)
         latency_ms = int((time.perf_counter() - start_time) * 1000)
 
         _, asst_msg = await self.chat_service.save_turn(
