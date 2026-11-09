@@ -256,6 +256,46 @@ class LiteLLMGateway(LLMGateway):
                 content = chunk.choices[0].delta.content or ""
                 if content:
                     yield content
+        except ImportError:
+            # Native httpx streaming fallback for OpenRouter & OpenAI-compatible
+            base_url = self.api_base or (
+                "https://openrouter.ai/api/v1" if ("openrouter" in target_model.lower() or (self.api_key and self.api_key.startswith("sk-or-"))) else
+                "https://api.openai.com/v1"
+            )
+            chat_url = base_url.rstrip("/") + "/chat/completions"
+            clean_model = target_model.replace("openrouter/", "", 1) if target_model.startswith("openrouter/") else target_model
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://thinkbuddy.app",
+                "X-Title": "ThinkBuddy AI Tutor",
+            }
+            payload = {
+                "model": clean_model,
+                "messages": messages,
+                "stream": True,
+                "temperature": self.temperature,
+            }
+            try:
+                import httpx
+                import json
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream("POST", chat_url, headers=headers, json=payload) as resp:
+                        async for line in resp.aiter_lines():
+                            line = line.strip()
+                            if not line or not line.startswith("data:"):
+                                continue
+                            if line == "data: [DONE]":
+                                break
+                            try:
+                                chunk_data = json.loads(line[5:].strip())
+                                delta_content = chunk_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                if delta_content:
+                                    yield delta_content
+                            except Exception:
+                                continue
+            except Exception as ex:
+                logger.warning("Native HTTP streaming failed for %s: %s", target_model, ex)
         except Exception as ex:
             logger.warning(
                 "Primary LLM (%s) failed, falling back to %s: %s",
@@ -263,15 +303,18 @@ class LiteLLMGateway(LLMGateway):
                 self.fallback_model,
                 ex,
             )
-            import litellm
+            try:
+                import litellm
 
-            fallback_kwargs = dict(kwargs)
-            fallback_kwargs["model"] = self.fallback_model
-            response = await litellm.acompletion(**fallback_kwargs)
-            async for chunk in response:
-                content = chunk.choices[0].delta.content or ""
-                if content:
-                    yield content
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs["model"] = self.fallback_model
+                response = await litellm.acompletion(**fallback_kwargs)
+                async for chunk in response:
+                    content = chunk.choices[0].delta.content or ""
+                    if content:
+                        yield content
+            except Exception as fb_ex:
+                logger.error("Fallback LLM failed: %s", fb_ex)
 
     async def generate_chat(
         self,
@@ -292,35 +335,87 @@ class LiteLLMGateway(LLMGateway):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
+        start_time = time.perf_counter()
         try:
             import litellm
 
             response = await litellm.acompletion(**kwargs)
             content = response.choices[0].message.content or ""
             usage = response.usage
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
             return LLMGenerationResult(
                 content=content,
                 tokens_in=getattr(usage, "prompt_tokens", 50),
                 tokens_out=getattr(usage, "completion_tokens", 100),
                 model=target_model,
-                latency_ms=300,
+                latency_ms=latency_ms,
             )
+        except ImportError:
+            # Native httpx generation fallback for OpenRouter & OpenAI-compatible
+            base_url = self.api_base or (
+                "https://openrouter.ai/api/v1" if ("openrouter" in target_model.lower() or (self.api_key and self.api_key.startswith("sk-or-"))) else
+                "https://api.openai.com/v1"
+            )
+            chat_url = base_url.rstrip("/") + "/chat/completions"
+            clean_model = target_model.replace("openrouter/", "", 1) if target_model.startswith("openrouter/") else target_model
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://thinkbuddy.app",
+                "X-Title": "ThinkBuddy AI Tutor",
+            }
+            payload = {
+                "model": clean_model,
+                "messages": messages,
+                "stream": False,
+                "temperature": self.temperature,
+            }
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(chat_url, headers=headers, json=payload)
+                    latency_ms = int((time.perf_counter() - start_time) * 1000)
+                    if resp.is_success:
+                        res_json = resp.json()
+                        content = res_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        usage = res_json.get("usage", {})
+                        return LLMGenerationResult(
+                            content=content,
+                            tokens_in=usage.get("prompt_tokens", 50),
+                            tokens_out=usage.get("completion_tokens", 100),
+                            model=target_model,
+                            latency_ms=latency_ms,
+                        )
+            except Exception as ex:
+                logger.warning("Native HTTP generation failed for %s: %s", target_model, ex)
         except Exception as ex:
             logger.warning("Primary LLM (%s) failed, using fallback: %s", target_model, ex)
-            import litellm
+            try:
+                import litellm
 
-            fallback_kwargs = dict(kwargs)
-            fallback_kwargs["model"] = self.fallback_model
-            response = await litellm.acompletion(**fallback_kwargs)
-            content = response.choices[0].message.content or ""
-            usage = response.usage
-            return LLMGenerationResult(
-                content=content,
-                tokens_in=getattr(usage, "prompt_tokens", 50),
-                tokens_out=getattr(usage, "completion_tokens", 100),
-                model=self.fallback_model,
-                latency_ms=450,
-            )
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs["model"] = self.fallback_model
+                response = await litellm.acompletion(**fallback_kwargs)
+                content = response.choices[0].message.content or ""
+                usage = response.usage
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                return LLMGenerationResult(
+                    content=content,
+                    tokens_in=getattr(usage, "prompt_tokens", 50),
+                    tokens_out=getattr(usage, "completion_tokens", 100),
+                    model=self.fallback_model,
+                    latency_ms=latency_ms,
+                )
+            except Exception as fb_ex:
+                logger.error("Fallback generation failed: %s", fb_ex)
+
+        return LLMGenerationResult(
+            content="[ThinkBuddy AI Tutor Service Unavailable]",
+            tokens_in=0,
+            tokens_out=0,
+            model=target_model,
+            latency_ms=0,
+        )
 
 
 async def get_active_llm_gateway(db: Any | None = None) -> LLMGateway:
@@ -334,18 +429,16 @@ async def get_active_llm_gateway(db: Any | None = None) -> LLMGateway:
             result = await db.execute(stmt)
             config = result.scalar_one_or_none()
             if config and config.is_enabled and config.api_key and config.llm_provider != "mock":
-                try:
-                    import litellm  # noqa: F401
-                    return LiteLLMGateway(
-                        primary_model=config.primary_model,
-                        fallback_model=config.fallback_model,
-                        api_key=config.api_key,
-                        api_base=config.api_base,
-                        temperature=config.temperature,
-                    )
-                except ImportError:
-                    logger.warning("litellm is not installed; falling back to MockLLMGateway")
-                    return MockLLMGateway()
+                base_url = config.api_base or (
+                    "https://openrouter.ai/api/v1" if config.llm_provider == "openrouter" else None
+                )
+                return LiteLLMGateway(
+                    primary_model=config.primary_model,
+                    fallback_model=config.fallback_model,
+                    api_key=config.api_key,
+                    api_base=base_url,
+                    temperature=config.temperature,
+                )
         except Exception as ex:
             logger.debug("Could not load AITutorConfig for LLMGateway: %s", ex)
 

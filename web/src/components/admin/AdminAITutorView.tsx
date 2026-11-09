@@ -7,15 +7,21 @@ import {
   Database,
   Send,
   BookOpen,
-  CheckCircle,
+  CheckCircle2,
   AlertCircle,
   RefreshCw,
   Eye,
   EyeOff,
   Zap,
-  Layers,
-  MessageSquare,
   ShieldCheck,
+  ExternalLink,
+  Copy,
+  Check,
+  Activity,
+  Cpu,
+  Globe,
+  Search,
+  CheckCircle,
 } from "lucide-react";
 
 interface AITutorConfig {
@@ -63,6 +69,112 @@ interface RAGChunk {
   snippet: string;
 }
 
+interface ProviderOption {
+  id: string;
+  name: string;
+  badge?: string;
+  tagline: string;
+  defaultBase?: string;
+  recommendedModels: { id: string; name: string; tag?: string }[];
+  accentGradient: string;
+  borderActive: string;
+}
+
+const PROVIDERS: ProviderOption[] = [
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    badge: "RECOMMENDED",
+    tagline: "One unified API key for 200+ models (Gemini, Claude, Llama 3, DeepSeek)",
+    defaultBase: "https://openrouter.ai/api/v1",
+    accentGradient: "from-blue-600 to-indigo-600",
+    borderActive: "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20",
+    recommendedModels: [
+      { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash", tag: "FREE" },
+      { id: "google/gemini-flash-1.5", name: "Gemini 1.5 Flash", tag: "FAST" },
+      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", tag: "SMART" },
+      { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", tag: "POPULAR" },
+      { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B", tag: "OPEN" },
+      { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tag: "CODE" },
+    ],
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    badge: "DIRECT",
+    tagline: "Official Google DeepMind Gemini API with native multimodal speed",
+    accentGradient: "from-emerald-600 to-teal-600",
+    borderActive: "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20",
+    recommendedModels: [
+      { id: "gemini/gemini-1.5-flash", name: "Gemini 1.5 Flash", tag: "DEFAULT" },
+      { id: "gemini/gemini-1.5-pro", name: "Gemini 1.5 Pro", tag: "REASONING" },
+      { id: "gemini/gemini-2.0-flash-exp", name: "Gemini 2.0 Flash Exp", tag: "LATEST" },
+    ],
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    badge: "DIRECT",
+    tagline: "Direct official OpenAI developer API for GPT-4o series",
+    defaultBase: "https://api.openai.com/v1",
+    accentGradient: "from-sky-600 to-blue-700",
+    borderActive: "border-sky-500 bg-sky-50/50 dark:bg-sky-950/20",
+    recommendedModels: [
+      { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", tag: "RECOMMENDED" },
+      { id: "openai/gpt-4o", name: "GPT-4o", tag: "FLAGSHIP" },
+    ],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    badge: "DIRECT",
+    tagline: "Claude 3.5 Sonnet and Haiku via Anthropic direct API",
+    accentGradient: "from-amber-600 to-orange-600",
+    borderActive: "border-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
+    recommendedModels: [
+      { id: "anthropic/claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", tag: "NUANCED" },
+      { id: "anthropic/claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", tag: "SPEED" },
+    ],
+  },
+  {
+    id: "groq",
+    name: "Groq Cloud",
+    badge: "FASTEST",
+    tagline: "Sub-second LPU inference for Llama 3 models",
+    defaultBase: "https://api.groq.com/openai/v1",
+    accentGradient: "from-purple-600 to-pink-600",
+    borderActive: "border-purple-500 bg-purple-50/50 dark:bg-purple-950/20",
+    recommendedModels: [
+      { id: "groq/llama-3.3-70b-versatile", name: "Llama 3.3 70B", tag: "FAST" },
+      { id: "groq/llama-3.1-8b-instant", name: "Llama 3.1 8B", tag: "INSTANT" },
+    ],
+  },
+  {
+    id: "ollama",
+    name: "Ollama (Local)",
+    badge: "PRIVATE",
+    tagline: "Offline self-hosted local inference without internet dependency",
+    defaultBase: "http://localhost:11434/v1",
+    accentGradient: "from-slate-600 to-slate-800",
+    borderActive: "border-slate-500 bg-slate-50/50 dark:bg-slate-900/40",
+    recommendedModels: [
+      { id: "ollama/llama3.2", name: "Llama 3.2 3B", tag: "LOCAL" },
+      { id: "ollama/mistral", name: "Mistral 7B", tag: "LOCAL" },
+    ],
+  },
+  {
+    id: "custom",
+    name: "Custom Base URL",
+    badge: "OPENAI-COMPATIBLE",
+    tagline: "Any standard OpenAI-compatible API endpoint, proxy, or gateway",
+    accentGradient: "from-zinc-600 to-neutral-800",
+    borderActive: "border-zinc-500 bg-zinc-50/50 dark:bg-zinc-900/40",
+    recommendedModels: [
+      { id: "default-model", name: "Default Custom Model" },
+    ],
+  },
+];
+
 export const AdminAITutorView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"llm" | "rag" | "diagnostics" | "stats">("llm");
   const [config, setConfig] = useState<AITutorConfig | null>(null);
@@ -71,13 +183,14 @@ export const AdminAITutorView: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [copiedResponse, setCopiedResponse] = useState<boolean>(false);
 
   // Form Fields
-  const [llmProvider, setLlmProvider] = useState<string>("gemini");
+  const [llmProvider, setLlmProvider] = useState<string>("openrouter");
   const [apiKey, setApiKey] = useState<string>("");
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
-  const [apiBase, setApiBase] = useState<string>("");
-  const [primaryModel, setPrimaryModel] = useState<string>("gemini/gemini-1.5-flash");
+  const [apiBase, setApiBase] = useState<string>("https://openrouter.ai/api/v1");
+  const [primaryModel, setPrimaryModel] = useState<string>("google/gemini-2.0-flash-exp:free");
   const [fallbackModel, setFallbackModel] = useState<string>("openai/gpt-4o-mini");
   const [temperature, setTemperature] = useState<number>(0.3);
   const [systemPrompt, setSystemPrompt] = useState<string>("");
@@ -99,14 +212,15 @@ export const AdminAITutorView: React.FC = () => {
   const [llmResult, setLlmResult] = useState<{
     success: boolean;
     content: string;
-    latency_ms: number;
     tokens_in: number;
     tokens_out: number;
+    latency_ms: number;
     model_used: string;
-    error: string | null;
+    error?: string | null;
   } | null>(null);
 
-  const [ragQuery, setRagQuery] = useState<string>("সালোকসংশ্লেষণ কি এবং উদ্ভিদে এটি কীভাবে ঘটে?");
+  // RAG Testing states
+  const [ragQuery, setRagQuery] = useState<string>("সালোকসংশ্লেষণ কী এবং উদ্ভিদ কীভাবে খাদ্য তৈরি করে?");
   const [testingRAG, setTestingRAG] = useState<boolean>(false);
   const [ragResult, setRagResult] = useState<{
     confidence: number;
@@ -130,7 +244,7 @@ export const AdminAITutorView: React.FC = () => {
         const data: AITutorConfig = await resConfig.json();
         setConfig(data);
         setLlmProvider(data.llm_provider);
-        setApiBase(data.api_base || "");
+        setApiBase(data.api_base || (data.llm_provider === "openrouter" ? "https://openrouter.ai/api/v1" : ""));
         setPrimaryModel(data.primary_model);
         setFallbackModel(data.fallback_model);
         setTemperature(data.temperature);
@@ -159,6 +273,21 @@ export const AdminAITutorView: React.FC = () => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchData();
   }, [fetchData]);
+
+  const selectProvider = (p: ProviderOption) => {
+    setLlmProvider(p.id);
+    if (p.defaultBase) {
+      setApiBase(p.defaultBase);
+    } else if (p.id !== "custom") {
+      setApiBase("");
+    }
+    if (p.recommendedModels.length > 0) {
+      setPrimaryModel(p.recommendedModels[0].id);
+      if (p.recommendedModels.length > 1) {
+        setFallbackModel(p.recommendedModels[1].id);
+      }
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,257 +411,347 @@ export const AdminAITutorView: React.FC = () => {
     }
   };
 
+  const copyResponseText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedResponse(true);
+    setTimeout(() => setCopiedResponse(false), 2000);
+  };
+
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] text-slate-500">
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mb-2" />
-        <p className="text-sm">Loading AI Tutor & RAG settings...</p>
+      <div className="flex flex-col items-center justify-center min-h-[460px] text-slate-500">
+        <RefreshCw className="w-9 h-9 animate-spin text-blue-600 mb-3" />
+        <p className="text-sm font-medium tracking-wide">Loading AI Tutor & RAG Governance Dashboard...</p>
       </div>
     );
   }
 
+  const activeProviderObj = PROVIDERS.find((p) => p.id === llmProvider) || PROVIDERS[0];
+
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 rounded-2xl p-6 text-white shadow-lg">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20">
-              <Sparkles className="w-6 h-6 text-yellow-300" />
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* Top Banner / Hero Header */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 p-6 sm:p-8 text-white shadow-2xl">
+        <div className="absolute top-0 right-0 -mt-12 -mr-12 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-12 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold tracking-wider uppercase bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                ThinkBuddy Admin Suite
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Server Authority
+              </span>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight">Buddy AI Tutor & RAG Admin Panel</h1>
-              <p className="text-xs sm:text-sm text-blue-100/80">
-                Configure LLM APIs, knowledge retrieval, and NCTB curriculum grounding.
-              </p>
-            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+              Buddy AI Tutor & RAG Management
+            </h1>
+            <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
+              Configure LLM providers with OpenRouter, Google Gemini, OpenAI, or Anthropic. Manage curriculum RAG embeddings, test live API connectivity, and inspect real NCTB textbook citations.
+            </p>
           </div>
-          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full border border-white/20 text-xs">
-            <span className={`w-2.5 h-2.5 rounded-full ${isEnabled ? "bg-emerald-400 animate-pulse" : "bg-rose-400"}`} />
-            <span>{isEnabled ? "AI Tutor Active" : "Tutor Paused"}</span>
+
+          {/* Status Badge Box */}
+          <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0 bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${config?.has_api_key ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-200">
+                {config?.has_api_key ? "Live API Connected" : "Ready for API Key"}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 space-y-0.5">
+              <div className="truncate max-w-[220px]">
+                Provider: <span className="text-slate-200 font-medium capitalize">{config?.llm_provider || "openrouter"}</span>
+              </div>
+              <div className="truncate max-w-[220px]">
+                Model: <span className="text-blue-300 font-mono text-[10px]">{config?.primary_model || "google/gemini-2.0-flash"}</span>
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Quick Meta Stats */}
-        {stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-white/15 text-xs">
-            <div>
-              <span className="text-blue-200 block">Indexed Textbooks</span>
-              <span className="text-lg font-bold">{stats.total_books} Books</span>
-            </div>
-            <div>
-              <span className="text-blue-200 block">Curriculum Chunks</span>
-              <span className="text-lg font-bold">{stats.total_chunks} Chunks</span>
-            </div>
-            <div>
-              <span className="text-blue-200 block">Active LLM Model</span>
-              <span className="text-sm font-semibold truncate block">{stats.active_primary_model}</span>
-            </div>
-            <div>
-              <span className="text-blue-200 block">Embedding Model</span>
-              <span className="text-sm font-semibold truncate block">{stats.active_embedding_provider}</span>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Alert Messages */}
+      {/* Notifications */}
       {saveSuccess && (
-        <div className="flex items-center gap-2 p-4 bg-emerald-50 text-emerald-800 rounded-xl border border-emerald-200 text-sm">
-          <CheckCircle className="w-5 h-5 flex-shrink-0 text-emerald-600" />
-          <span>{saveSuccess}</span>
-        </div>
-      )}
-      {saveError && (
-        <div className="flex items-center gap-2 p-4 bg-rose-50 text-rose-800 rounded-xl border border-rose-200 text-sm">
-          <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-600" />
-          <span>{saveError}</span>
+        <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-sm shadow-sm animate-in fade-in">
+          <CheckCircle className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <p className="font-medium">{saveSuccess}</p>
         </div>
       )}
 
-      {/* Navigation Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 sm:gap-4 overflow-x-auto">
+      {saveError && (
+        <div className="flex items-center gap-3 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-sm shadow-sm">
+          <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 dark:text-rose-400" />
+          <p className="font-medium">{saveError}</p>
+        </div>
+      )}
+
+      {/* Modern Tab Bar */}
+      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-x-auto">
         <button
           onClick={() => setActiveTab("llm")}
-          className={`flex items-center gap-2 pb-3 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
             activeTab === "llm"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-slate-500 hover:text-slate-700"
+              ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-700"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
           }`}
         >
           <Key className="w-4 h-4" />
-          Buddy LLM & API Key
+          LLM & OpenRouter API
         </button>
+
         <button
           onClick={() => setActiveTab("rag")}
-          className={`flex items-center gap-2 pb-3 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
             activeTab === "rag"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-slate-500 hover:text-slate-700"
+              ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-700"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
           }`}
         >
           <Database className="w-4 h-4" />
           RAG & Vector Retrieval
         </button>
+
         <button
           onClick={() => setActiveTab("diagnostics")}
-          className={`flex items-center gap-2 pb-3 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
             activeTab === "diagnostics"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-slate-500 hover:text-slate-700"
+              ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-700"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
           }`}
         >
           <Zap className="w-4 h-4" />
-          Diagnostics & Testing
+          Live Diagnostics Console
         </button>
+
         <button
           onClick={() => setActiveTab("stats")}
-          className={`flex items-center gap-2 pb-3 px-2 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
             activeTab === "stats"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-slate-500 hover:text-slate-700"
+              ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-700"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
           }`}
         >
-          <Layers className="w-4 h-4" />
-          Knowledge Base Stats
+          <BookOpen className="w-4 h-4" />
+          Curriculum Knowledge Base
         </button>
       </div>
 
-      {/* Tab 1: LLM & Buddy API Settings */}
+      {/* TAB 1: LLM & OPENROUTER PROVIDER */}
       {activeTab === "llm" && (
         <form onSubmit={handleSave} className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Key className="w-5 h-5 text-blue-600" />
-              LLM Provider & API Credentials
-            </h2>
+          {/* Featured Provider Selector Cards */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Select LLM Provider
+              </label>
+              <span className="text-[11px] text-slate-500">
+                Click any provider to auto-configure optimal settings
+              </span>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              {/* Provider Selection */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  LLM Provider
-                </label>
-                <select
-                  value={llmProvider}
-                  onChange={(e) => {
-                    const p = e.target.value;
-                    setLlmProvider(p);
-                    if (p === "gemini") setPrimaryModel("gemini/gemini-1.5-flash");
-                    else if (p === "openai") setPrimaryModel("openai/gpt-4o-mini");
-                    else if (p === "anthropic") setPrimaryModel("anthropic/claude-3-5-sonnet");
-                    else if (p === "groq") setPrimaryModel("groq/llama-3.3-70b-versatile");
-                    else if (p === "ollama") setPrimaryModel("ollama/llama3");
-                  }}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="gemini">Google Gemini (Recommended for Bangla & Speed)</option>
-                  <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
-                  <option value="anthropic">Anthropic (Claude 3.5 Sonnet / Haiku)</option>
-                  <option value="groq">Groq (Ultra-fast Llama 3.3)</option>
-                  <option value="ollama">Ollama / Local vLLM Inference</option>
-                  <option value="custom">Custom OpenAI-Compatible API</option>
-                </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {PROVIDERS.map((p) => {
+                const isSelected = llmProvider === p.id;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => selectProvider(p)}
+                    className={`cursor-pointer rounded-2xl border p-4 transition-all relative overflow-hidden ${
+                      isSelected
+                        ? `${p.borderActive} shadow-md`
+                        : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 font-bold text-sm text-slate-900 dark:text-slate-100">
+                        <span className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${p.accentGradient}`} />
+                        {p.name}
+                      </div>
+                      {p.badge && (
+                        <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                          p.id === "openrouter"
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                        }`}>
+                          {p.badge}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug line-clamp-2">
+                      {p.tagline}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* OpenRouter Callout Box if OpenRouter is selected */}
+          {llmProvider === "openrouter" && (
+            <div className="rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-transparent border border-blue-200 dark:border-blue-900/60 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-300">
+                  <Globe className="w-4 h-4" />
+                  OpenRouter Unified Gateway Active
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  You can use Gemini 2.0 Flash (Free), Claude 3.5 Sonnet, GPT-4o, Llama 3.3 or DeepSeek with a single OpenRouter key.
+                </p>
               </div>
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors shrink-0"
+              >
+                Get OpenRouter Key
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          )}
 
+          {/* Model Quick Select Pills */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4 shadow-sm">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                Recommended Models for {activeProviderObj.name} (Click to Set as Primary)
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {activeProviderObj.recommendedModels.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setPrimaryModel(m.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                      primaryModel === m.id
+                        ? "bg-blue-600 text-white shadow-sm ring-2 ring-blue-500/30"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/60 dark:border-slate-700"
+                    }`}
+                  >
+                    <span>{m.name}</span>
+                    {m.tag && (
+                      <span className={`text-[10px] uppercase font-bold px-1.5 py-0.2 rounded ${
+                        primaryModel === m.id ? "bg-white/20 text-white" : "bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300"
+                      }`}>
+                        {m.tag}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Credentials & Models Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
               {/* API Key */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  API Key
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {activeProviderObj.name} API Key
+                  </label>
                   {config?.has_api_key && (
-                    <span className="ml-2 text-emerald-600 text-[11px] font-normal">
-                      (Configured: {config.api_key_masked})
+                    <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                      Configured: {config.api_key_masked}
                     </span>
                   )}
-                </label>
+                </div>
                 <div className="relative">
                   <input
                     type={showApiKey ? "text" : "password"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={config?.has_api_key ? "Leave blank to keep existing key" : "Paste API Key (e.g. AIzaSy... or sk-...)"}
-                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder={config?.has_api_key ? "Leave blank to keep existing key, or paste new key..." : "Paste your API key here (sk-...)"}
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   />
                   <button
                     type="button"
                     onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                   >
                     {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500">
+                  Stored securely on the server. Never sent to browser clients or leaked in transcripts (Rule 15).
+                </p>
               </div>
 
-              {/* Primary Model */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Primary Generation Model
-                </label>
-                <input
-                  type="text"
-                  value={primaryModel}
-                  onChange={(e) => setPrimaryModel(e.target.value)}
-                  placeholder="e.g. gemini/gemini-1.5-flash or openai/gpt-4o-mini"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                />
-              </div>
-
-              {/* Fallback Model */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Fallback Model (Automatic Retry on Outage)
-                </label>
-                <input
-                  type="text"
-                  value={fallbackModel}
-                  onChange={(e) => setFallbackModel(e.target.value)}
-                  placeholder="e.g. openai/gpt-4o-mini"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                />
-              </div>
-
-              {/* Custom API Base URL */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              {/* API Base URL */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Custom Base URL (Optional)
                 </label>
                 <input
                   type="text"
                   value={apiBase}
                   onChange={(e) => setApiBase(e.target.value)}
-                  placeholder="http://localhost:11434/v1 (for Ollama) or custom proxy"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none text-xs"
+                  placeholder="https://openrouter.ai/api/v1 (or custom endpoint)"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                />
+                <p className="text-[11px] text-slate-500">
+                  For OpenRouter: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">https://openrouter.ai/api/v1</code>
+                </p>
+              </div>
+
+              {/* Primary Model */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Primary Model Identifier
+                </label>
+                <input
+                  type="text"
+                  value={primaryModel}
+                  onChange={(e) => setPrimaryModel(e.target.value)}
+                  placeholder="google/gemini-2.0-flash-exp:free or openai/gpt-4o-mini"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                 />
               </div>
 
-              {/* Temperature */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Temperature (Creativity vs Accuracy)
-                  </label>
-                  <span className="text-xs font-mono text-blue-600 font-bold">{temperature}</span>
-                </div>
+              {/* Fallback Model */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Fallback Model Identifier
+                </label>
                 <input
-                  type="range"
-                  min="0.0"
-                  max="1.0"
-                  step="0.05"
-                  value={temperature}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="w-full accent-blue-600"
+                  type="text"
+                  value={fallbackModel}
+                  onChange={(e) => setFallbackModel(e.target.value)}
+                  placeholder="openai/gpt-4o-mini or anthropic/claude-3-5-haiku"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                 />
-                <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                  <span>0.0 (Strict / Deterministic)</span>
-                  <span>0.3 (Recommended for NCTB)</span>
-                  <span>1.0 (Creative)</span>
-                </div>
               </div>
             </div>
 
+            {/* Temperature Slider */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Generation Temperature: <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{temperature}</span>
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  {temperature <= 0.3 ? "Strict Fact-adherent (Recommended for NCTB)" : temperature <= 0.7 ? "Balanced Explanations" : "Creative"}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.0"
+                max="1.0"
+                step="0.05"
+                value={temperature}
+                onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                className="w-full accent-blue-600 cursor-pointer"
+              />
+            </div>
+
             {/* Persona & System Prompt */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+            <div className="space-y-1.5 pt-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                 Buddy&apos;s Persona & System Prompt Instructions
               </label>
               <textarea
@@ -542,245 +761,303 @@ export const AdminAITutorView: React.FC = () => {
                 placeholder="Custom instruction prompt for Buddy the AI Tutor..."
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none leading-relaxed"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-[11px] text-slate-500">
                 Controls tone, language policy (natural Bangla & English), and adherence to cited textbook pages.
               </p>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3">
+          {/* Action Row */}
+          <div className="flex items-center justify-between pt-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab("diagnostics")}
+              className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              <Zap className="w-4 h-4" />
+              Test This Model in Diagnostic Console →
+            </button>
+
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium text-sm shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md transition-colors disabled:opacity-50"
             >
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-              Save & Activate LLM Settings
+              {saving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Saving & Activating...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  Save & Activate AI Tutor Configuration
+                </>
+              )}
             </button>
           </div>
         </form>
       )}
 
-      {/* Tab 2: RAG & Vector Retrieval Settings */}
+      {/* TAB 2: RAG & VECTOR RETRIEVAL */}
       {activeTab === "rag" && (
         <form onSubmit={handleSave} className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Database className="w-5 h-5 text-indigo-600" />
-              RAG & Multilingual Vector Retrieval
-            </h2>
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5 shadow-sm">
+            <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+                NCTB Textbook Vector Knowledge Base Settings
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure textbook embedding models, minimum similarity score threshold, and maximum retrieved context chunks.
+              </p>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Embedding Provider */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Embedding Provider
                 </label>
                 <select
                   value={embeddingProvider}
                   onChange={(e) => setEmbeddingProvider(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
                 >
-                  <option value="bge-m3">BAAI/bge-m3 (Recommended SOTA for Bengali & English)</option>
+                  <option value="bge-m3">BGE-M3 (Multilingual Bengali-English Optimized)</option>
                   <option value="openai">OpenAI (text-embedding-3-small)</option>
-                  <option value="gemini">Google (text-embedding-004)</option>
-                  <option value="hosted">Generic Hosted / HuggingFace Endpoint</option>
-                  <option value="mock">Mock Embeddings (Fast Offline Dev)</option>
+                  <option value="gemini">Google Gemini Embedding</option>
+                  <option value="mock">Local Deterministic (Mock Mode)</option>
                 </select>
               </div>
 
-              {/* Embedding API Key */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Embedding API Key (Optional for Hosted)
-                  {config?.has_embedding_api_key && (
-                    <span className="ml-2 text-emerald-600 text-[11px] font-normal">
-                      (Configured: {config.embedding_api_key_masked})
-                    </span>
-                  )}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showEmbeddingApiKey ? "text" : "password"}
-                    value={embeddingApiKey}
-                    onChange={(e) => setEmbeddingApiKey(e.target.value)}
-                    placeholder="Leave blank to use primary LLM key or self-hosted"
-                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
-                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
-                  >
-                    {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Model Identifier */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Embedding Model
+              {/* Embedding Model */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Embedding Model Identifier
                 </label>
                 <input
                   type="text"
                   value={embeddingModel}
                   onChange={(e) => setEmbeddingModel(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                 />
               </div>
 
-              {/* Vector Dimensions */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              {/* Embedding Dimensions */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                   Vector Dimensions
                 </label>
                 <input
                   type="number"
                   value={embeddingDimensions}
-                  onChange={(e) => setEmbeddingDimensions(parseInt(e.target.value) || 1024)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
+                  onChange={(e) => setEmbeddingDimensions(parseInt(e.target.value, 10))}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                 />
-              </div>
-
-              {/* Confidence Threshold */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Minimum Retrieval Confidence Gate
-                  </label>
-                  <span className="text-xs font-mono text-indigo-600 font-bold">{confidenceThreshold}</span>
-                </div>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="0.9"
-                  step="0.05"
-                  value={confidenceThreshold}
-                  onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
-                  className="w-full accent-indigo-600"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Queries below this score trigger cautious fallback rather than hallucinations.
-                </p>
+                <p className="text-[11px] text-slate-500">Standard: 1024 (BGE-M3), 1536 (OpenAI text-embedding-3-small)</p>
               </div>
 
               {/* Max Chunks */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    Max Authoritative Chunks per Prompt
-                  </label>
-                  <span className="text-xs font-mono text-indigo-600 font-bold">{maxChunks} chunks</span>
-                </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Max Authoritative Chunks per Turn ({maxChunks})
+                </label>
                 <input
                   type="range"
                   min="1"
                   max="8"
-                  step="1"
                   value={maxChunks}
-                  onChange={(e) => setMaxChunks(parseInt(e.target.value))}
-                  className="w-full accent-indigo-600"
+                  onChange={(e) => setMaxChunks(parseInt(e.target.value, 10))}
+                  className="w-full accent-blue-600 cursor-pointer"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Top NCTB textbook excerpts provided to Buddy for precise answers.
-                </p>
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>1 Chunk (Compact)</span>
+                  <span>4 Chunks (Recommended)</span>
+                  <span>8 Chunks (Detailed)</span>
+                </div>
               </div>
             </div>
 
-            {/* Global Activation Toggle */}
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-sm font-semibold text-slate-900 dark:text-white block">
-                  Enable Buddy AI Tutor Chat
-                </span>
-                <span className="text-xs text-slate-500">
-                  Allow students to interact with the AI tutor across mobile and web apps.
+            {/* Confidence Threshold */}
+            <div className="space-y-1.5 pt-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Minimum Confidence Threshold: <span className="font-mono text-blue-600 font-bold">{confidenceThreshold}</span>
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Chunks below this similarity score are excluded from student responses
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsEnabled(!isEnabled)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  isEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-700"
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    isEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
+              <input
+                type="range"
+                min="0.2"
+                max="0.8"
+                step="0.05"
+                value={confidenceThreshold}
+                onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+                className="w-full accent-blue-600 cursor-pointer"
+              />
+            </div>
+
+            {/* Embedding API Key */}
+            <div className="space-y-1.5 pt-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Embedding API Key (Optional if using BGE-M3 or local inference)
+              </label>
+              <div className="relative">
+                <input
+                  type={showEmbeddingApiKey ? "text" : "password"}
+                  value={embeddingApiKey}
+                  onChange={(e) => setEmbeddingApiKey(e.target.value)}
+                  placeholder="Paste embedding API key if using cloud embeddings..."
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                 />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
+                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3">
+          <div className="flex justify-end">
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium text-sm shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md transition-colors disabled:opacity-50"
             >
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-              Save & Activate RAG Settings
+              {saving ? "Saving..." : "Save RAG Retrieval Settings"}
             </button>
           </div>
         </form>
       )}
 
-      {/* Tab 3: Diagnostics & Testing */}
+      {/* TAB 3: DIAGNOSTICS CONSOLE */}
       {activeTab === "diagnostics" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Test LLM API */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-                  <Zap className="w-4 h-4 text-amber-500" />
-                  Test LLM API Connectivity
-                </h3>
-                <span className="text-xs text-slate-400 font-mono">{primaryModel}</span>
+        <div className="space-y-6">
+          {/* Diagnostic Ping Container */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-md">
+            {/* Console Mac-style Topbar */}
+            <div className="bg-slate-100 dark:bg-slate-800/80 px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-rose-500/80" />
+                <div className="w-3 h-3 rounded-full bg-amber-500/80" />
+                <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
+                <span className="text-xs font-mono text-slate-500 dark:text-slate-400 ml-2">
+                  live-llm-diagnostic: {llmProvider} / {primaryModel}
+                </span>
               </div>
-              <p className="text-xs text-slate-500 mb-3">
-                Send a real-time prompt to verify that your configured API credentials and model respond correctly.
-              </p>
-              <textarea
-                rows={3}
-                value={testPrompt}
-                onChange={(e) => setTestPrompt(e.target.value)}
-                className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+              <span className="text-[11px] font-mono text-slate-400 uppercase">
+                Latency & Token Telemetry
+              </span>
             </div>
 
-            <div className="space-y-4">
-              <button
-                type="button"
-                onClick={handleTestLLM}
-                disabled={testingLLM}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium text-xs shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {testingLLM ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Run Live LLM Test
-              </button>
+            <div className="p-6 space-y-4">
+              {/* Sample Prompts */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Prompt to Send to Buddy AI Tutor
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {[
+                    "Say hello and introduce yourself as ThinkBuddy AI Tutor in English and Bangla.",
+                    "সালোকসংশ্লেষণ কী? সংক্ষিপ্ত এবং সহজ ভাষায় বুঝিয়ে বলো।",
+                    "What is Pythagoras theorem with a practical math example?",
+                  ].map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setTestPrompt(p)}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200/60 dark:border-slate-700 transition-colors"
+                    >
+                      {p.slice(0, 40)}...
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  rows={3}
+                  value={testPrompt}
+                  onChange={(e) => setTestPrompt(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none leading-relaxed"
+                />
+              </div>
 
-              {llmResult && (
-                <div
-                  className={`p-4 rounded-xl border text-xs space-y-2 ${
-                    llmResult.success
-                      ? "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
-                      : "bg-rose-50 border-rose-200 text-rose-800"
-                  }`}
+              <div className="flex justify-between items-center pt-2">
+                <div className="text-[11px] text-slate-500">
+                  Target: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">{primaryModel}</code> via <span className="capitalize font-semibold">{llmProvider}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestLLM}
+                  disabled={testingLLM}
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-md transition-colors disabled:opacity-50"
                 >
-                  <div className="flex items-center justify-between font-mono text-[11px] text-slate-500 pb-2 border-b border-slate-200 dark:border-slate-700">
-                    <span>Latency: {llmResult.latency_ms} ms</span>
-                    <span>Tokens: {llmResult.tokens_in} in / {llmResult.tokens_out} out</span>
-                  </div>
-                  {llmResult.success ? (
-                    <div className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
-                      {llmResult.content}
-                    </div>
+                  {testingLLM ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Testing API...
+                    </>
                   ) : (
-                    <div className="text-rose-600 font-mono">
-                      Error: {llmResult.error}
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      Run Live Ping Test
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Result Area */}
+              {llmResult && (
+                <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                      llmResult.success
+                        ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                        : "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                    }`}>
+                      {llmResult.success ? "200 Success" : "API Error"}
+                    </span>
+
+                    <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                      <Activity className="w-3.5 h-3.5 text-blue-500" />
+                      Latency: <strong className="text-slate-900 dark:text-slate-100">{llmResult.latency_ms}ms</strong>
+                    </span>
+
+                    <span className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                      <Cpu className="w-3.5 h-3.5 text-purple-500" />
+                      Tokens: <strong>{llmResult.tokens_in} in / {llmResult.tokens_out} out</strong>
+                    </span>
+
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg">
+                      Model: {llmResult.model_used}
+                    </span>
+                  </div>
+
+                  {llmResult.error && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-mono">
+                      {llmResult.error}
+                    </div>
+                  )}
+
+                  {llmResult.content && (
+                    <div className="relative rounded-2xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 p-4">
+                      <button
+                        type="button"
+                        onClick={() => copyResponseText(llmResult.content)}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg bg-white/60 dark:bg-slate-900/60"
+                        title="Copy Response"
+                      >
+                        {copiedResponse ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                        Buddy AI Tutor Response:
+                      </h4>
+                      <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        {llmResult.content}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -788,126 +1065,145 @@ export const AdminAITutorView: React.FC = () => {
             </div>
           </div>
 
-          {/* Test RAG Retrieval */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-                  <Database className="w-4 h-4 text-blue-500" />
-                  Test NCTB Textbook RAG Retrieval
-                </h3>
-                <span className="text-xs text-slate-400 font-mono">Top {maxChunks} Chunks</span>
-              </div>
-              <p className="text-xs text-slate-500 mb-3">
-                Enter a curriculum study question to verify chunk retrieval and printed page accuracy.
+          {/* RAG Retrieval Evaluation Box */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4 shadow-sm">
+            <div className="border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex items-center gap-2">
+                <Search className="w-4 h-4 text-blue-600" />
+                RAG Curriculum Textbook Retrieval Evaluation
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Test how the vector knowledge base indexes and retrieves NCTB textbooks with printed page citations.
               </p>
+            </div>
+
+            <div className="flex gap-2">
               <input
                 type="text"
                 value={ragQuery}
                 onChange={(e) => setRagQuery(e.target.value)}
-                placeholder="Ask textbook question..."
-                className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Enter a curriculum topic query..."
+                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
               />
-            </div>
-
-            <div className="space-y-4">
               <button
                 type="button"
                 onClick={handleTestRAG}
                 disabled={testingRAG}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium text-xs shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm transition-colors shrink-0 disabled:opacity-50"
               >
-                {testingRAG ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                Search Curriculum Chunks
+                {testingRAG ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                Search Chunks
               </button>
-
-              {ragResult && (
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs space-y-3 max-h-[260px] overflow-y-auto">
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 border-b border-slate-200 dark:border-slate-700 pb-2">
-                    <span>Confidence: {(ragResult.confidence * 100).toFixed(1)}%</span>
-                    <span>Search Latency: {ragResult.latency_ms} ms</span>
-                  </div>
-                  {ragResult.chunks.length === 0 ? (
-                    <p className="text-slate-400 italic">No textbook chunks matched this query.</p>
-                  ) : (
-                    ragResult.chunks.map((c, i) => (
-                      <div key={c.chunk_id || i} className="p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1">
-                        <div className="flex items-center justify-between text-[11px] font-semibold text-blue-600 dark:text-blue-400">
-                          <span>{c.book_title} — {c.chapter_title}</span>
-                          <span className="bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded text-[10px]">
-                            Printed Page {c.printed_page}
-                          </span>
-                        </div>
-                        <p className="text-slate-600 dark:text-slate-300 text-[11px] line-clamp-3">
-                          {c.snippet}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
             </div>
+
+            {ragResult && (
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span>
+                    Confidence Score: <strong className="text-blue-600 font-mono">{(ragResult.confidence * 100).toFixed(1)}%</strong>
+                  </span>
+                  <span className="text-slate-500 font-mono text-[11px]">
+                    Latency: {ragResult.latency_ms}ms • Retrieved: {ragResult.chunks.length} chunks
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {ragResult.chunks.map((chunk, idx) => (
+                    <div
+                      key={chunk.chunk_id || idx}
+                      className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 text-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+                          {chunk.book_title} — {chunk.chapter_title}
+                        </span>
+                        <span className="font-mono text-[11px] bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md font-bold">
+                          Printed Page {chunk.printed_page}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-serif text-[11px]">
+                        &quot;{chunk.snippet}&quot;
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Tab 4: Knowledge Base Stats */}
-      {activeTab === "stats" && stats && (
+      {/* TAB 4: KNOWLEDGE BASE STATS */}
+      {activeTab === "stats" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-            <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 flex items-center justify-center">
-                <BookOpen className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-xs text-slate-500 block">Total Textbooks</span>
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{stats.total_books}</span>
-                <span className="text-[11px] text-slate-400 block">{stats.total_chapters} Total Chapters</span>
-              </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Textbooks</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats?.total_books ?? 0}</div>
+              <div className="text-[10px] text-emerald-600 font-semibold">NCTB Curriculum</div>
             </div>
 
-            <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 flex items-center justify-center">
-                <Database className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-xs text-slate-500 block">Vector Store Chunks</span>
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{stats.total_chunks}</span>
-                <span className="text-[11px] text-emerald-600 block">Active in pgvector</span>
-              </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Chapters Mapped</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats?.total_chapters ?? 0}</div>
+              <div className="text-[10px] text-blue-600 font-semibold">Class 6 to 10</div>
             </div>
 
-            <div className="p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center">
-                <MessageSquare className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-xs text-slate-500 block">Tutor Conversations</span>
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{stats.total_chat_sessions}</span>
-                <span className="text-[11px] text-slate-400 block">{stats.total_chat_messages} Messages Served</span>
-              </div>
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Vector Chunks</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats?.total_chunks ?? 0}</div>
+              <div className="text-[10px] text-indigo-600 font-semibold">pgvector Indexed</div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Chat Sessions</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats?.total_chat_sessions ?? 0}</div>
+              <div className="text-[10px] text-purple-600 font-semibold">Student Inquiries</div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Messages</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats?.total_chat_messages ?? 0}</div>
+              <div className="text-[10px] text-teal-600 font-semibold">AI Explanations</div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <h3 className="font-semibold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              System Architecture & Grounding Invariants
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+              How Buddy AI Tutor & RAG Citations Work
             </h3>
-            <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-2 list-disc pl-5">
-              <li>
-                <strong>Standing Rule 7:</strong> Every answer produced by Buddy carries textbook, chapter, and page citations. Low confidence queries refuse rather than hallucinate.
-              </li>
-              <li>
-                <strong>Standing Rule 8:</strong> Printed page number (displayed to students) is strictly separated from internal PDF page offsets.
-              </li>
-              <li>
-                <strong>Standing Rule 6 & 18:</strong> Buddy is locked out during active student quizzes to preserve academic integrity.
-              </li>
-              <li>
-                <strong>Standing Rule 15:</strong> LLM API keys and secrets are never stored in browser client storage or logged in plaintext.
-              </li>
-            </ul>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600 dark:text-slate-300">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">1</span>
+                  Hybrid Semantic Retrieval
+                </div>
+                <p className="leading-relaxed">
+                  When a student asks a study question, pgvector runs dense embeddings (BGE-M3) + sparse keyword search over authoritative NCTB textbooks.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px]">2</span>
+                  Printed Page Grounding
+                </div>
+                <p className="leading-relaxed">
+                  Citations are strictly bound to printed page numbers (Rule 8: printed page ≠ PDF index), ensuring students can match the textbook in their hands.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px]">3</span>
+                  OpenRouter / LLM Generation
+                </div>
+                <p className="leading-relaxed">
+                  The active LLM receives the grounded chunks and generates an encouraging, pedagogically sound explanation in natural Bangla and English.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}

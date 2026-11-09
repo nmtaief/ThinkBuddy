@@ -153,7 +153,7 @@ async def test_llm_connection(
     target_base = req.api_base or config.api_base
 
     # Check if mock or no key
-    if target_provider == "mock" or (not target_key and target_provider != "ollama"):
+    if target_provider == "mock" or (not target_key and target_provider not in ("ollama", "mock")):
         # Deterministic simulation if no key provided or mock requested
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         return TestLLMResponse(
@@ -166,6 +166,83 @@ async def test_llm_connection(
             model_used=f"{target_model} (mock/preview)",
             error=None,
         )
+
+    # 1. Direct OpenAI-compatible / OpenRouter HTTP execution
+    if target_key and (target_provider in ("openrouter", "openai", "groq", "ollama", "custom") or target_base):
+        base_url = target_base or (
+            "https://openrouter.ai/api/v1" if target_provider == "openrouter" else
+            "https://api.groq.com/openai/v1" if target_provider == "groq" else
+            "https://api.openai.com/v1" if target_provider == "openai" else
+            "http://localhost:11434/v1" if target_provider == "ollama" else
+            None
+        )
+        if base_url:
+            chat_url = base_url.rstrip("/") + "/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {target_key}",
+                "Content-Type": "application/json",
+            }
+            if target_provider == "openrouter" or "openrouter" in base_url:
+                headers["HTTP-Referer"] = "https://thinkbuddy.app"
+                headers["X-Title"] = "ThinkBuddy AI Tutor"
+
+            clean_model = target_model
+            if clean_model.startswith("openrouter/"):
+                clean_model = clean_model.replace("openrouter/", "", 1)
+
+            payload = {
+                "model": clean_model,
+                "messages": [
+                    {"role": "system", "content": config.system_prompt or "You are Buddy, the friendly AI tutor for ThinkBuddy."},
+                    {"role": "user", "content": req.prompt},
+                ],
+                "temperature": config.temperature,
+                "max_tokens": 500,
+            }
+
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    http_res = await client.post(chat_url, headers=headers, json=payload)
+                    latency_ms = int((time.perf_counter() - start_time) * 1000)
+
+                    if http_res.is_success:
+                        res_json = http_res.json()
+                        content = res_json.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        usage = res_json.get("usage", {})
+                        return TestLLMResponse(
+                            success=True,
+                            content=content,
+                            tokens_in=usage.get("prompt_tokens", len(req.prompt.split())),
+                            tokens_out=usage.get("completion_tokens", len(content.split())),
+                            latency_ms=latency_ms,
+                            model_used=target_model,
+                            error=None,
+                        )
+                    else:
+                        err_text = http_res.text
+                        logger.error("API error from %s: %s %s", target_provider, http_res.status_code, err_text)
+                        return TestLLMResponse(
+                            success=False,
+                            content="",
+                            tokens_in=0,
+                            tokens_out=0,
+                            latency_ms=latency_ms,
+                            model_used=target_model,
+                            error=f"HTTP {http_res.status_code}: {err_text[:300]}",
+                        )
+            except Exception as ex:
+                logger.error("HTTP call failed for %s: %s", target_provider, ex)
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                return TestLLMResponse(
+                    success=False,
+                    content="",
+                    tokens_in=0,
+                    tokens_out=0,
+                    latency_ms=latency_ms,
+                    model_used=target_model,
+                    error=str(ex),
+                )
 
     try:
         import litellm

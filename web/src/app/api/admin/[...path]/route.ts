@@ -95,3 +95,4 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   return handleAdminProxy(req, ctx);
 }
+
