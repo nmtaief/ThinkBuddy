@@ -95,16 +95,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
           </button>
 
-          {/* Admin link — desktop */}
-          <a
-            href="/admin"
-            className="btn-secondary touch-target navbar-desktop-only"
-            style={{ fontSize: "var(--text-xs)", gap: 4, padding: "0 10px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-            title="AI Tutor & RAG Admin Panel"
-          >
-            <Shield size={14} />
-            <span>Admin</span>
-          </a>
+          {/* Admin link — only for authenticated admin users */}
+          {user?.role === "admin" && (
+            <a
+              href="/admin"
+              className="btn-secondary touch-target navbar-desktop-only"
+              style={{ fontSize: "var(--text-xs)", gap: 4, padding: "0 10px", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              title="AI Tutor & RAG Admin Panel"
+            >
+              <Shield size={14} />
+              <span>Admin</span>
+            </a>
+          )}
 
           {/* User avatar — desktop only */}
           {user && (

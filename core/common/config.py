@@ -238,15 +238,15 @@ class CoreSettings(BaseSettings):
 
     # Ingestion & RAG Settings
     EMBEDDING_PROVIDER: str = Field(
-        default="mock",
+        default="bge-m3",
         description="Embedding provider implementation (mock, hosted, bge-m3, multilingual-e5)",
     )
     EMBEDDING_MODEL: str = Field(
-        default="bge-m3",
+        default="BAAI/bge-m3",
         description="Model identifier for multilingual text embeddings",
     )
     EMBEDDING_DIMENSION: int = Field(
-        default=384,
+        default=1024,
         description="Vector dimension for embeddings (read from provider config)",
     )
     EMBEDDING_BATCH_SIZE: int = Field(
@@ -418,6 +418,13 @@ class CoreSettings(BaseSettings):
                     f"Refusing to start in environment '{self.ENV}': "
                     "JWT_SECRET_KEY, LINK_CODE_SECRET, INTERNAL_SERVICE_TOKEN, "
                     "INTERNAL_SERVICE_SECRET, QUESTION_KEY_ENCRYPTION_KEY, and EXPORT_ENCRYPTION_KEY must be distinct."
+                )
+                raise ValueError(msg)
+
+            if self.EMBEDDING_PROVIDER.lower() in ("mock", "test"):
+                msg = (
+                    f"Refusing to start in environment '{self.ENV}': "
+                    "EMBEDDING_PROVIDER must not be 'mock' in non-local environments."
                 )
                 raise ValueError(msg)
 

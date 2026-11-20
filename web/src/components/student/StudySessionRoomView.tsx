@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { StudyTask, PageStudyBreakdown, HomeworkTask, UploadedStudyNote } from "@/lib/types";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { StudyTask, PageStudyBreakdown, HomeworkTask } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
-import { apiClient } from "@/lib/api-client";
+import {
+  enrichStudyTaskWithCurriculumData,
+  getStudyBreakdownForTask,
+  StudySessionQuizQuestion,
+} from "@/lib/curriculum-study-engine";
 import {
   Clock,
   Play,
@@ -20,14 +24,14 @@ import {
   Save,
   Check,
   Flame,
-  Upload,
-  Camera,
   Layers,
   ListTodo,
   CheckSquare,
   ShieldCheck,
   Star,
-  UserCheck,
+  Bot,
+  RefreshCw,
+  GraduationCap,
 } from "lucide-react";
 
 interface StudySessionRoomViewProps {
@@ -84,53 +88,51 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
     return lang === "bn" ? toBengaliDigits(formatted) : formatted;
   };
 
-  // Chapter Chunking & Pages Data (Science 42-44 or task defaults)
-  const chapterPart = task.chapter_part || 2;
-  const chapterTotalParts = task.chapter_total_parts || 3;
+  // Dynamically resolve authentic NCTB curriculum pages & board homework tasks
+  const enrichedTask = useMemo(() => {
+    return enrichStudyTaskWithCurriculumData(task);
+  }, [task]);
 
-  const defaultPagesBreakdown: PageStudyBreakdown[] = task.pages_breakdown || [
-    {
-      page: 42,
-      title: "সালোকসংশ্লেষণের মৌলিক ধারণা ও কাঁচামাল",
-      summary_bn:
-        "সালোকসংশ্লেষণ হলো সবুজ উদ্ভিদের শর্করা তৈরির জৈব-রাসায়নিক প্রক্রিয়া। প্রধান কাঁচামাল: কার্বন ডাই-অক্সাইড (CO₂) ও পানি (H₂O); শক্তি যোগায় সূর্যালোক এবং ক্লোরোফিল সৌরশক্তি শোষণ করে।",
-      key_points: [
-        "উদ্ভিদের পাতায় মেসোফিল কোষে অবস্থিত ক্লোরোপ্লাস্টে প্রক্রিয়াটি সম্পন্ন হয়।",
-        "বায়ুমণ্ডল থেকে পত্ররন্ধ্রের মাধ্যমে CO₂ গৃহীত হয় এবং মূলরোম দিয়ে মাটি থেকে পানি শোষিত হয়।",
-        "সবুজ পাতার ক্লোরোফিল কণা সৌরশক্তি শোষণ করে রাসায়নিক শক্তিতে রূপান্তরিত করে।",
-      ],
-    },
-    {
-      page: 43,
-      title: "সালোকসংশ্লেষণের বিক্রিয়া ও পর্যায়সমূহ",
-      summary_bn:
-        "পূর্ণাঙ্গ সমীকরণ: 6CO₂ + 12H₂O ⟶ C₆H₁₂O₆ + 6H₂O + 6O₂ (সূর্যালোক ও ক্লোরোফিলের উপস্থিতিতে)। প্রক্রিয়াটি আলোক এবং অন্ধকার (কার্বন বিজারণ) পর্যায়ে সম্পন্ন হয়।",
-      key_points: [
-        "আলোক পর্যায়ে পানির ফটোলাইসিস ঘটে এবং উচ্চ শক্তি সম্পন্ন ATP ও NADPH তৈরি হয়।",
-        "অন্ধকার পর্যায়ে কেলভিন চক্রের মাধ্যমে CO₂ বিজারিত হয়ে গ্লুকোজ উৎপন্ন হয়।",
-        "উপজাত হিসেবে বায়ুমণ্ডলে জীবনধারণের জন্য অক্সিজেন (O₂) নির্গত হয়।",
-      ],
-    },
-    {
-      page: 44,
-      title: "সালোকসংশ্লেষণের পরিবেশগত তাৎপর্য ও গ্যাসীয় ভারসাম্য",
-      summary_bn:
-        "সালোকসংশ্লেষণ সমগ্র জীবজগতের খাদ্যের একমাত্র প্রাথমিক উৎস এবং বায়ুমণ্ডলে অক্সিজেন ও কার্বন ডাই-অক্সাইডের অনুপাত ভারসাম্যপূর্ণ রাখে।",
-      key_points: [
-        "সমগ্র প্রাণী ও মানবকুলের শ্বাসকার্যের জন্য অক্সিজেন নিশ্চিত করে।",
-        "গ্রিনহাউস গ্যাস কার্বন ডাই-অক্সাইড শোষণ করে পরিবেশ ও জলবায়ু রক্ষা করে।",
-        "জীবাশ্ম জ্বালানি (কয়লা, তেল, গ্যাস) মূলত উদ্ভিদের সঞ্চিত প্রাচীন সৌরশক্তি।",
-      ],
-    },
-  ];
+  const curriculumData = useMemo(() => {
+    let derivedChapter = 1;
+    const numMatch = task.title.match(/অধ্যায়\s*(\d+)|Chapter\s*(\d+)|Unit\s*(\d+)|(\d+)/i);
+    if (numMatch) {
+      derivedChapter = parseInt(numMatch[1] || numMatch[2] || numMatch[3] || numMatch[4], 10) || 1;
+    }
+    return getStudyBreakdownForTask({
+      subjectSlug: task.subject,
+      subjectName: task.subject,
+      chapterNumber: derivedChapter,
+      chapterTitle: task.title,
+      part: task.chapter_part || 1,
+      totalParts: task.chapter_total_parts || 3,
+    });
+  }, [task]);
+
+  const chapterPart = enrichedTask.chapter_part || 1;
+  const chapterTotalParts = enrichedTask.chapter_total_parts || 3;
+  const defaultPagesBreakdown: PageStudyBreakdown[] = enrichedTask.pages_breakdown || [];
+  const defaultHomework: HomeworkTask[] = enrichedTask.homework_tasks || [];
+
+  const startPage = defaultPagesBreakdown[0]?.page || enrichedTask.printed_page_start || 1;
+  const endPage = defaultPagesBreakdown[defaultPagesBreakdown.length - 1]?.page || enrichedTask.printed_page_end || startPage;
 
   // Track page study progress & split times
-  const [pagesProgress, setPagesProgress] = useState<PageStudyState[]>(
+  const [pagesProgress, setPagesProgress] = useState<PageStudyState[]>(() =>
     defaultPagesBreakdown.map((p) => ({
       page: p.page,
       completed: false,
     }))
   );
+
+  useEffect(() => {
+    setPagesProgress(
+      defaultPagesBreakdown.map((p) => ({
+        page: p.page,
+        completed: false,
+      }))
+    );
+  }, [task]);
 
   const handleTogglePage = (pageNumber: number) => {
     setPagesProgress((prev) =>
@@ -148,159 +150,78 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
     );
   };
 
-  // Homework Tasks state
-  const defaultHomework: HomeworkTask[] = task.homework_tasks || [
-    {
-      id: "hw_1",
-      title_bn: "সালোকসংশ্লেষণ প্রক্রিয়ার পূর্ণাঙ্গ রাসায়নিক সমীকরণটি খাতায় না দেখে লিখো ও সমতাকরণ করো।",
-      completed: false,
-    },
-    {
-      id: "hw_2",
-      title_bn: "একটি ক্লোরোপ্লাস্টের চিত্র এঁকে গ্রানা ও স্ট্রোমা চিহ্নিত করো।",
-      completed: false,
-    },
-    {
-      id: "hw_3",
-      title_bn: "বায়ুমণ্ডলে অক্সিজেন ও কার্বন ডাই-অক্সাইডের ভারসাম্য রক্ষায় সালোকসংশ্লেষণের ভূমিকা ৩টি বাক্যে খাতায় ব্যাখ্যা করো।",
-      completed: false,
-    },
-  ];
+  const [homeworkList, setHomeworkList] = useState<HomeworkTask[]>(() => defaultHomework);
 
-  const [homeworkList, setHomeworkList] = useState<HomeworkTask[]>(defaultHomework);
+  useEffect(() => {
+    setHomeworkList(defaultHomework);
+  }, [task]);
+
   const handleToggleHomework = (hwId: string) => {
     setHomeworkList((prev) =>
       prev.map((hw) => (hw.id === hwId ? { ...hw, completed: !hw.completed } : hw))
     );
   };
 
-  // Note taking & Upload state
-  const [noteContent, setNoteContent] = useState(
-    "১. সালোকসংশ্লেষণের পূর্ণাঙ্গ সমীকরণ: 6CO₂ + 12H₂O ⟶ C₆H₁₂O₆ + 6H₂O + 6O₂ (সূর্যালোক ও ক্লোরোফিল)।\n২. পাতায় ক্লোরোপ্লাস্টের গ্রানায় আলোক পর্যায় এবং স্ট্রোমায় অন্ধকার পর্যায় (কেলভিন চক্র) ঘটে।"
-  );
-  const [isSavedNote, setIsSavedNote] = useState(false);
-  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(
-    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='260' viewBox='0 0 600 260'><rect width='100%25' height='100%25' fill='%23f1f5f9'/><rect x='15' y='15' width='570' height='230' rx='10' fill='%23ffffff' stroke='%2394a3b8' stroke-dasharray='4'/><text x='35' y='50' font-family='sans-serif' font-size='14' font-weight='bold' fill='%230f172a'>হাতে লেখা বিজ্ঞান খাতা • পৃষ্ঠা ৪২-৪৪ (তাহমিদ আলিম)</text><circle cx='80' cy='130' r='35' fill='%23bbf7d0' stroke='%2315803d'/><text x='62' y='135' font-family='sans-serif' font-size='11' fill='%2314532d'>ক্লোরোপ্লাস্ট</text><text x='150' y='120' font-family='sans-serif' font-size='13' fill='%230284c7'>6CO₂ + 12H₂O ⟶ C₆H₁₂O₆ + 6H₂O + 6O₂</text><text x='150' y='145' font-family='sans-serif' font-size='12' fill='%23475569'>✓ গ্রানা ও স্ট্রোমা লেবেলিং সম্পন্ন • কেলভিন চক্রের ধাপসমূহ বর্ণিত</text><text x='35' y='210' font-family='sans-serif' font-size='11' fill='%2364748b'>জমা দেয়ার সময়: আজকের তারিখ • ThinkBuddy Verified Notebook</text></svg>"
-  );
-  const [uploadSuccessMsg, setUploadSuccessMsg] = useState(false);
+  // Class level detection: Class 6/7 are strictly School Assessments (No Board exams in Bangladesh)
+  const classMatch = (task.subject || "").match(/^c(\d+)_/i) || (task.title || "").match(/শ্রেণি\s*(\d+)|Class\s*(\d+)/i);
+  const classLevelNum = classMatch ? parseInt(classMatch[1] || classMatch[2], 10) : 8;
+  const isSchoolExamOnly = classLevelNum <= 7;
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUploadedImagePreview(reader.result as string);
-        setIsSavedNote(false);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleSaveAndSubmitNote = async () => {
-    setIsSavedNote(true);
-    setUploadSuccessMsg(true);
-
-    const newNote: UploadedStudyNote = {
-      id: `note_${Date.now()}`,
-      task_id: task.id,
-      task_title: task.title,
-      subject: task.subject,
-      student_id: "stu_101",
-      student_name: studentName,
-      pages_covered: `${task.printed_page_start || 42}–${task.printed_page_end || 44}`,
-      time_spent_seconds: secondsElapsed,
-      text_note: noteContent,
-      image_url: uploadedImagePreview || undefined,
-      created_at: new Date().toISOString(),
-      is_pro: true,
-      teacher_review: {
-        teacher_name: "জনাব রফিকুল ইসলাম (M.Sc, বিএড)",
-        badge: "সিনিয়র বিজ্ঞান শিক্ষক • ThinkBuddy Academic Mentor",
-        comments:
-          "চমৎকার প্রস্তুতি ও সুন্দর হাতের লেখা! সালোকসংশ্লেষণের সমীকরণ ও কাঁচামাল নিখুঁত। অভিভাবক ও শিক্ষক ড্যাশবোর্ডে সংরক্ষিত হয়েছে।",
-        rating: 5,
-        reviewed_at: new Date().toISOString(),
-      },
-    };
-
-    await apiClient.uploadStudyNote(newNote);
-    setTimeout(() => setUploadSuccessMsg(false), 4000);
-  };
-
-  // Post-Study Mastery Check Quiz
+  // Post-Study Mastery Check Quiz (Dynamic & AI-driven)
   const [quizStarted, setQuizStarted] = useState(false);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [quizScore, setQuizScore] = useState(0);
+  const [isAiGeneratingQuiz, setIsAiGeneratingQuiz] = useState(false);
 
-  const scienceQuestions = [
-    {
-      id: "q1",
-      question_bn: "সালোকসংশ্লেষণ প্রক্রিয়ার প্রধান কাঁচামাল কোন দুটি?",
-      question_en: "Which two are the primary raw materials of photosynthesis?",
-      options_bn: [
-        "অক্সিজেন ও নাইট্রোজেন",
-        "কার্বন ডাই-অক্সাইড ও পানি (CO₂ এবং H₂O)",
-        "গ্লুকোজ ও ক্লোরোফিল",
-        "অ্যালকোহল ও মিথেন",
-      ],
-      options_en: [
-        "Oxygen & Nitrogen",
-        "Carbon Dioxide & Water (CO₂ and H₂O)",
-        "Glucose & Chlorophyll",
-        "Alcohol & Methane",
-      ],
-      correctIndex: 1,
-      explanation_bn:
-        "পাঠ্যবই পৃষ্ঠা ৪২ অনুযায়ী: উদ্ভিদ মূল দিয়ে পানি (H₂O) শোষণ করে এবং পত্ররন্ধ্র দিয়ে CO₂ গ্রহণ করে।",
-      explanation_en:
-        "From textbook page 42: Plants absorb water via root hairs and CO₂ through stomata.",
-    },
-    {
-      id: "q2",
-      question_bn: "সালোকসংশ্লেষণের আলোক পর্যায়ে পানির বিভাজন ঘটে কী উৎপন্ন হয়?",
-      question_en: "What is produced in the light-dependent phase through photolysis of water?",
-      options_bn: [
-        "শুধুমাত্র কার্বন ডাই-অক্সাইড",
-        "অক্সিজেন (O₂), ATP এবং NADPH₂",
-        "ল্যাকটিক অ্যাসিড",
-        "ইউরিয়া",
-      ],
-      options_en: [
-        "Only Carbon Dioxide",
-        "Oxygen (O₂), ATP and NADPH₂",
-        "Lactic acid",
-        "Urea",
-      ],
-      correctIndex: 1,
-      explanation_bn:
-        "পাঠ্যবই পৃষ্ঠা ৪৩ অনুযায়ী: আলোক পর্যায়ে সূর্যালোকের সাহায্যে পানি ভেঙে O₂, ATP এবং NADPH₂ তৈরি হয়।",
-      explanation_en:
-        "From textbook page 43: Photolysis of water releases O₂ and generates assimilatory power ATP & NADPH₂.",
-    },
-    {
-      id: "q3",
-      question_bn: "বায়ুমণ্ডলে অক্সিজেন ও কার্বন ডাই-অক্সাইডের ভারসাম্য বজায় রাখতে সালোকসংশ্লেষণ কীভাবে ভূমিকা রাখে?",
-      question_en: "How does photosynthesis maintain O₂ and CO₂ atmospheric balance?",
-      options_bn: [
-        "CO₂ নির্গত করে এবং O₂ শোষণ করে",
-        "গ্রিনহাউস গ্যাস CO₂ শোষণ করে এবং প্রাণীদের জন্য O₂ মুক্ত করে",
-        "নাইট্রোজেন গ্যাস উৎপাদন করে",
-        "কোনো ভূমিকা রাখে না",
-      ],
-      options_en: [
-        "Emitting CO₂ and consuming O₂",
-        "Absorbing CO₂ greenhouse gas and releasing O₂ for aerobic life",
-        "Producing nitrogen gas",
-        "Has no role",
-      ],
-      correctIndex: 1,
-      explanation_bn:
-        "পাঠ্যবই পৃষ্ঠা ৪৪ অনুযায়ী: সালোকসংশ্লেষণ জীবজগতের শ্বাসকার্যের অক্সিজেন সরবরাহ করে এবং ক্ষতিকর CO₂ শোষণ করে পরিবেশ নির্মল রাখে।",
-      explanation_en:
-        "From textbook page 44: It balances the carbon cycle by sequestering CO₂ and replenishing O₂.",
-    },
-  ];
+  const initialQuestions: StudySessionQuizQuestion[] = useMemo(() => {
+    return curriculumData.quiz_questions && curriculumData.quiz_questions.length > 0
+      ? curriculumData.quiz_questions
+      : [];
+  }, [curriculumData]);
+
+  const [quizQuestions, setQuizQuestions] = useState<StudySessionQuizQuestion[]>(initialQuestions);
+
+  useEffect(() => {
+    if (curriculumData.quiz_questions && curriculumData.quiz_questions.length > 0) {
+      setQuizQuestions(curriculumData.quiz_questions);
+      setSelectedAnswers({});
+      setQuizSubmitted(false);
+      setQuizScore(0);
+    }
+  }, [curriculumData]);
+
+  const handleGenerateAiQuiz = async () => {
+    setIsAiGeneratingQuiz(true);
+    try {
+      const freshSeed = Date.now();
+      const res = await fetch("/api/curriculum/quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: task.subject,
+          chapterTitle: task.title,
+          classLevel: classLevelNum,
+          startPage,
+          endPage,
+          count: 15,
+          seed: freshSeed,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.data?.questions) {
+        setQuizQuestions(data.data.questions);
+        setSelectedAnswers({});
+        setQuizSubmitted(false);
+        setQuizScore(0);
+        setQuizStarted(true);
+      }
+    } catch (err) {
+      console.error("AI quiz generation error:", err);
+    } finally {
+      setIsAiGeneratingQuiz(false);
+    }
+  };
 
   const handleSelectAnswer = (qId: string, optIndex: number) => {
     if (quizSubmitted) return;
@@ -309,7 +230,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
 
   const handleSubmitQuiz = () => {
     let score = 0;
-    scienceQuestions.forEach((q) => {
+    quizQuestions.forEach((q) => {
       if (selectedAnswers[q.id] === q.correctIndex) {
         score += 1;
       }
@@ -319,7 +240,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
   };
 
   const handleFinishSession = () => {
-    onComplete(task.id, secondsElapsed, noteContent, quizSubmitted ? quizScore : 3);
+    onComplete(task.id, secondsElapsed, "", quizSubmitted ? quizScore : 3);
   };
 
   const completedPagesCount = pagesProgress.filter((p) => p.completed).length;
@@ -676,7 +597,9 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
             <ListTodo size={20} style={{ color: "var(--color-warning)" }} />
             <div>
               <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, margin: 0 }}>
-                {lang === "bn" ? "পৃষ্ঠা ৪২–৪৪ এর উপর বাড়ির কাজ (Homework / HW)" : "Homework Tasks on Pages 42–44"}
+                {lang === "bn"
+                  ? `পৃষ্ঠা ${toBengaliDigits(startPage)}–${toBengaliDigits(endPage)} এর উপর বাড়ির কাজ (Homework / HW)`
+                  : `Homework Tasks on Pages ${startPage}–${endPage}`}
               </h2>
               <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
                 {lang === "bn" ? "পড়ার পর খাতায় নিজে সমাধান করে টিক দিন" : "Solve in exercise book and check off"}
@@ -739,199 +662,63 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
         </div>
       </div>
 
-      {/* SECTION 3: Student Study Note & Exercise Book Photo Upload */}
+      {/* SECTION 2.5: High-Yield Notes & Strategy */}
       <div className="card" style={{ padding: "var(--space-6)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "var(--space-2)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <FileText size={20} style={{ color: "var(--color-primary)" }} />
-            <div>
-              <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, margin: 0 }}>
-                {lang === "bn" ? "পড়ার খাতার নোট ও ছবি আপলোড" : "Exercise Book & Study Notes Upload"}
-              </h2>
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                {lang === "bn"
-                  ? "অভিভাবক সরাসরি দেখতে পারবেন এবং ThinkBuddy Pro শিক্ষকরা মূল্যায়ন করবেন"
-                  : "Viewable by parents and reviewed by ThinkBuddy Pro certified teachers"}
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-4)" }}>
+          <Sparkles size={20} style={{ color: "var(--color-primary)" }} />
+          <div>
+            <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, margin: 0 }}>
+              {isSchoolExamOnly
+                ? (lang === "bn" ? "অধ্যায়ের গুরুত্বপূর্ণ নোট ও বিদ্যালয় মূল্যায়ন প্রস্তুতি" : "Chapter Key Notes & School Assessment Strategy")
+                : (lang === "bn" ? "অধ্যায়ের গুরুত্বপূর্ণ নোট ও বোর্ড পরীক্ষার প্রস্তুতি" : "Chapter Key Notes & Board Exam Strategy")}
+            </h2>
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+              {isSchoolExamOnly
+                ? (lang === "bn" ? "শ্রেণি ৬ ও ৭ এর বিদ্যালয়ভিত্তিক বার্ষিক ও ধারাবাহিক মূল্যায়ন প্রস্তুতি" : "School continuous and annual exam preparation for class 6 & 7")
+                : (lang === "bn" ? "পরীক্ষার আগে দ্রুত রিভিশনের জন্য মূল তত্ত্ব, সূত্র ও টিপস" : "Core takeaways, key formulas, and high-yield board exam tips")}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--space-4)" }}>
+          <div style={{ padding: "var(--space-4)", borderRadius: "var(--radius-md)", backgroundColor: "rgba(37, 99, 235, 0.04)", border: "1px solid rgba(37, 99, 235, 0.15)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "var(--space-2)", color: "var(--color-primary)", fontWeight: 700, fontSize: "var(--text-sm)" }}>
+              <BookOpen size={16} />
+              <span>{lang === "bn" ? "মূল তত্ত্ব ও ফর্মুলা সামারি" : "Core Concepts & Formula Summary"}</span>
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: "var(--text-xs)", lineHeight: 1.7, color: "var(--color-text-secondary)" }}>
+              <li><strong>পাঠ্যবইয়ের পরিধি:</strong> {enrichedTask.chapter_title} (পৃষ্ঠা {toBengaliDigits(startPage)}–{toBengaliDigits(endPage)})</li>
+              {curriculumData.notes?.core_concepts?.slice(0, 3).map((concept, idx) => (
+                <li key={idx}><strong>মূল পয়েন্ট {toBengaliDigits(idx + 1)}:</strong> {concept}</li>
+              ))}
+              {curriculumData.notes?.key_formulas_or_reactions?.slice(0, 2).map((formula, idx) => (
+                <li key={`f-${idx}`} style={{ color: "var(--color-primary)", fontWeight: 600 }}>{formula}</li>
+              ))}
+              <li><strong>স্ব-মূল্যায়ন:</strong> উপরের {toBengaliDigits(homeworkList.length)}টি বাড়ির কাজ খাতায় সমাধান করে টিক দাও।</li>
+            </ul>
+          </div>
+
+          <div style={{ padding: "var(--space-4)", borderRadius: "var(--radius-md)", backgroundColor: "rgba(16, 185, 129, 0.04)", border: "1px solid rgba(16, 185, 129, 0.15)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "var(--space-2)", color: "var(--color-success)", fontWeight: 700, fontSize: "var(--text-sm)" }}>
+              <Award size={16} />
+              <span>
+                {isSchoolExamOnly
+                  ? (lang === "bn" ? "বিদ্যালয় ধারাবাহিক ও সামষ্টিক মূল্যায়ন টিপস" : "School Assessment Scoring Tips")
+                  : (lang === "bn" ? "বোর্ড পরীক্ষার সৃজনশীল (CQ) টিপস" : "Board Exam CQ Scoring Tips")}
               </span>
             </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: "var(--text-xs)", lineHeight: 1.7, color: "var(--color-text-secondary)" }}>
+              {(curriculumData.notes?.exam_strategy_tips || curriculumData.notes?.board_exam_tips || []).map((tip, idx) => (
+                <li key={idx}>{tip}</li>
+              ))}
+            </ul>
           </div>
-
-          <span
-            className="badge"
-            style={{
-              backgroundColor: "rgba(37, 99, 235, 0.12)",
-              color: "var(--color-primary)",
-              fontWeight: 700,
-              fontSize: "var(--text-xs)",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <Star size={12} />
-            <span>Pro: Teacher Review Active</span>
-          </span>
-        </div>
-
-
-
-        {/* Text Note Area */}
-        <textarea
-          value={noteContent}
-          onChange={(e) => {
-            setNoteContent(e.target.value);
-            setIsSavedNote(false);
-          }}
-          placeholder={
-            lang === "bn"
-              ? "সালোকসংশ্লেষণের মূল সূত্র, সমীকরণ বা কঠিন পয়েন্টগুলো এখানে লিখে রাখো..."
-              : "Type your equations, formulas and takeaways..."
-          }
-          rows={4}
-          style={{
-            width: "100%",
-            padding: "var(--space-3)",
-            borderRadius: "var(--radius-md)",
-            border: "1px solid var(--color-border)",
-            backgroundColor: "var(--color-bg)",
-            color: "var(--color-text)",
-            fontFamily: "inherit",
-            fontSize: "var(--text-sm)",
-            lineHeight: 1.6,
-            resize: "vertical",
-            marginBottom: "var(--space-4)",
-          }}
-        />
-
-        {/* Photo Upload Area */}
-        <div
-          style={{
-            border: "1.5px dashed var(--color-border)",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--space-4)",
-            backgroundColor: "var(--color-surface-hover)",
-            marginBottom: "var(--space-4)",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <Camera size={18} style={{ color: "var(--color-primary)" }} />
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: 700 }}>
-                {lang === "bn" ? "হাতে লেখা খাতার পাতার ছবি (Handwritten Notebook Photo)" : "Handwritten Exercise Book Photo"}
-              </span>
-            </div>
-
-            <label
-              className="btn-secondary touch-target"
-              style={{
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 14px",
-                fontSize: "var(--text-xs)",
-              }}
-            >
-              <Upload size={14} />
-              <span>{lang === "bn" ? "নতুন ছবি আপলোড করুন" : "Upload Notebook Photo"}</span>
-              <input type="file" accept="image/*" onChange={handleImageFileChange} style={{ display: "none" }} />
-            </label>
-          </div>
-
-          {/* Uploaded Note Preview */}
-          {uploadedImagePreview && (
-            <div style={{ marginTop: "var(--space-2)" }}>
-              <img
-                src={uploadedImagePreview}
-                alt="Student Handwritten Notebook"
-                style={{
-                  width: "100%",
-                  maxHeight: 220,
-                  objectFit: "cover",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--color-border)",
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Action: Save & Submit for Parent & Teacher Review */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
-          <button
-            onClick={handleSaveAndSubmitNote}
-            className="btn-primary touch-target"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--space-2)",
-              fontSize: "var(--text-sm)",
-              padding: "10px 20px",
-              borderRadius: "var(--radius-md)",
-              fontWeight: 700,
-            }}
-          >
-            {isSavedNote ? <Check size={16} /> : <Upload size={16} />}
-            <span>
-              {isSavedNote
-                ? (lang === "bn" ? "খাতা ও নোট সফলভাবে জমা হয়েছে ✓" : "Note & Notebook Submitted ✓")
-                : (lang === "bn" ? "অভিভাবক ও শিক্ষক পর্যালোচনার জন্য জমা দিন" : "Submit for Parent & Teacher Review")}
-            </span>
-          </button>
-
-          {uploadSuccessMsg && (
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-success)", fontWeight: 700 }}>
-            </span>
-          )}
-        </div>
-
-        {/* ThinkBuddy Pro Live Teacher Review Preview */}
-        <div
-          style={{
-            marginTop: "var(--space-5)",
-            padding: "var(--space-4)",
-            borderRadius: "var(--radius-lg)",
-            backgroundColor: "rgba(37, 99, 235, 0.04)",
-            border: "1px solid rgba(37, 99, 235, 0.2)",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-2)", flexWrap: "wrap", gap: "var(--space-2)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <UserCheck size={18} style={{ color: "var(--color-primary)" }} />
-              <div>
-                <span style={{ fontSize: "var(--text-sm)", fontWeight: 800, color: "var(--color-primary)" }}>
-                  জনাব রফিকুল ইসলাম (M.Sc, বিএড)
-                </span>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginLeft: 6 }}>
-                  (সিনিয়র বিজ্ঞান শিক্ষক • ThinkBuddy Academic Mentor)
-                </span>
-              </div>
-            </div>
-
-            <span
-              className="badge"
-              style={{
-                backgroundColor: "var(--color-success)",
-                color: "#ffffff",
-                fontSize: "var(--text-xs)",
-                fontWeight: 700,
-                padding: "2px 8px",
-              }}
-            >
-              ⭐⭐⭐⭐⭐ ৫.০ / ৫.০ (A+)
-            </span>
-          </div>
-
-          <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: 1.6, margin: 0 }}>
-            <strong>{lang === "bn" ? "শিক্ষকের মন্তব্য ও দিকনির্দেশনা: " : "Teacher's Evaluation: "}</strong>
-            &ldquo;খাতায় সালোকসংশ্লেষণের পূর্ণাঙ্গ সমীকরণ এবং মেসোফিল টিস্যুর কাজ অত্যন্ত স্পষ্টভাবে লিখেছ। ক্লোরোপ্লাস্টের চিত্রে গ্রানা ও স্ট্রোমা লেবেলিং নিখুঁত। আলোক ও অন্ধকার পর্যায়ের ধাপগুলো এভাবে খাতায় লিখে চর্চা করলে পরীক্ষায় সর্বোচ্চ নম্বর পাবে। চালিয়ে যাও!&rdquo;
-          </p>
         </div>
       </div>
 
-      {/* SECTION 4: Post-Study Mastery Check Quiz (শিখন মূল্যায়ন) */}
+      {/* SECTION 3: Post-Study Mastery Check Quiz (Dynamic & AI Handled) */}
       <div className="card" style={{ padding: "var(--space-6)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "var(--space-2)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "var(--space-3)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             <HelpCircle size={20} style={{ color: "var(--color-primary)" }} />
             <div>
@@ -939,30 +726,64 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
                 {lang === "bn" ? "শিখন মূল্যায়ন কুইজ (Mastery Check)" : "Post-Study Mastery Check Quiz"}
               </h2>
               <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                {lang === "bn" ? "পৃষ্ঠা ৪২–৪৪ এর ধারণার ওপর ৩টি দ্রুত বহুনির্বাচনি প্রশ্ন" : "3 quick MCQs on pages 42–44"}
+                {lang === "bn"
+                  ? `পৃষ্ঠা ${toBengaliDigits(startPage)}–${toBengaliDigits(endPage)} এর ধারণার ওপর ${toBengaliDigits(quizQuestions.length)}টি দ্রুত বহুনির্বাচনি প্রশ্ন`
+                  : `${quizQuestions.length} quick MCQs on pages ${startPage}–${endPage}`}
               </span>
             </div>
           </div>
 
-          {!quizStarted ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
+            {/* AI Regeneration Button */}
             <button
-              onClick={() => setQuizStarted(true)}
-              className="btn-primary touch-target"
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)", padding: "8px 16px" }}
+              onClick={handleGenerateAiQuiz}
+              disabled={isAiGeneratingQuiz}
+              className="btn-secondary touch-target"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "var(--text-xs)",
+                padding: "6px 12px",
+                borderRadius: "var(--radius-full)",
+                border: "1px solid var(--color-primary)",
+                color: "var(--color-primary)",
+                backgroundColor: "rgba(37, 99, 235, 0.05)",
+              }}
+              title={lang === "bn" ? "এআই দিয়ে এই অধ্যায়ের জন্য নতুন ১৫টি প্রশ্ন তৈরি করুন" : "Generate 15 fresh MCQs using AI for this chapter"}
             >
-              <Play size={14} />
-              <span>{lang === "bn" ? "কুইজ শুরু করুন" : "Start Mastery Quiz"}</span>
+              {isAiGeneratingQuiz ? (
+                <RefreshCw size={13} className="spin-slow" />
+              ) : (
+                <Bot size={14} />
+              )}
+              <span>
+                {isAiGeneratingQuiz
+                  ? (lang === "bn" ? "এআই প্রশ্ন তৈরি করছে..." : "Generating AI Quiz...")
+                  : (lang === "bn" ? "এআই কুইজ রিফ্রেশ" : "AI Quiz Refresh")}
+              </span>
             </button>
-          ) : (
-            <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
-              {lang === "bn" ? "৩টি প্রশ্ন • প্রতিটি প্রশ্নের মান ১" : "3 Questions • 1 mark each"}
-            </span>
-          )}
+
+            {!quizStarted ? (
+              <button
+                onClick={() => setQuizStarted(true)}
+                className="btn-primary touch-target"
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)", padding: "8px 16px" }}
+              >
+                <Play size={14} />
+                <span>{lang === "bn" ? "কুইজ শুরু করুন" : "Start Mastery Quiz"}</span>
+              </button>
+            ) : (
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
+                {lang === "bn" ? `${toBengaliDigits(quizQuestions.length)}টি প্রশ্ন • মান ১ করে` : `${quizQuestions.length} Questions • 1 mark each`}
+              </span>
+            )}
+          </div>
         </div>
 
         {quizStarted && (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-            {scienceQuestions.map((q, qIndex) => {
+            {quizQuestions.map((q, qIndex) => {
               const selectedOpt = selectedAnswers[q.id];
 
               return (
@@ -989,12 +810,12 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
                       {lang === "bn" ? `প্রশ্ন ${toBengaliDigits(qIndex + 1)}` : `Q${qIndex + 1}`}
                     </span>
                     <h3 style={{ fontSize: "var(--text-base)", fontWeight: 700, margin: 0 }}>
-                      {lang === "bn" ? q.question_bn : q.question_en}
+                      {lang === "bn" ? q.question_bn : (q.question_en || q.question_bn)}
                     </h3>
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-                    {(lang === "bn" ? q.options_bn : q.options_en).map((optText, optIdx) => {
+                    {(lang === "bn" ? q.options_bn : (q.options_en || q.options_bn)).map((optText, optIdx) => {
                       const isSelected = selectedOpt === optIdx;
                       const isCorrect = q.correctIndex === optIdx;
 
@@ -1071,7 +892,7 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
                       }}
                     >
                       <strong>{lang === "bn" ? "ব্যাখ্যা: " : "Explanation: "}</strong>
-                      {lang === "bn" ? q.explanation_bn : q.explanation_en}
+                      {lang === "bn" ? q.explanation_bn : (q.explanation_en || q.explanation_bn)}
                     </div>
                   )}
                 </div>
@@ -1082,14 +903,14 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
             {!quizSubmitted ? (
               <button
                 onClick={handleSubmitQuiz}
-                disabled={Object.keys(selectedAnswers).length < scienceQuestions.length}
+                disabled={Object.keys(selectedAnswers).length < quizQuestions.length}
                 className="btn-primary touch-target"
                 style={{
                   padding: "12px 24px",
                   fontSize: "var(--text-sm)",
                   fontWeight: 700,
                   alignSelf: "flex-start",
-                  opacity: Object.keys(selectedAnswers).length < scienceQuestions.length ? 0.6 : 1,
+                  opacity: Object.keys(selectedAnswers).length < quizQuestions.length ? 0.6 : 1,
                 }}
               >
                 {lang === "bn" ? "ফলাফল ও ব্যাখ্যা দেখুন" : "Submit Answers & View Score"}
@@ -1110,22 +931,23 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
                   <Award size={32} style={{ color: "var(--color-success)" }} />
                   <div>
                     <h3 style={{ fontSize: "var(--text-lg)", fontWeight: 800, margin: 0 }}>
+                      {lang === "bn" ? "শিখন মূল্যায়ন সম্পন্ন!" : "Mastery Assessment Completed!"}
                     </h3>
                     <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
                       {lang === "bn" ? "তোমার অর্জিত স্কোর: " : "Your Score: "}
                       <strong style={{ color: "var(--color-success)", fontSize: "var(--text-base)" }}>
                         {lang === "bn"
-                          ? `${toBengaliDigits(quizScore)} / ${toBengaliDigits(scienceQuestions.length)}`
-                          : `${quizScore} / ${scienceQuestions.length}`}
+                          ? `${toBengaliDigits(quizScore)} / ${toBengaliDigits(quizQuestions.length)}`
+                          : `${quizScore} / ${quizQuestions.length}`}
                       </strong>
                     </div>
                   </div>
                 </div>
 
                 <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text)", margin: 0, lineHeight: 1.6 }}>
-                  {quizScore === scienceQuestions.length
+                  {quizScore === quizQuestions.length
                     ? (lang === "bn" ? "অসাধারণ দক্ষতা! সবগুলো প্রশ্নের সঠিক উত্তর দিয়েছো।" : "Outstanding! You got every question right.")
-                    : quizScore >= 2
+                    : quizScore >= Math.round(quizQuestions.length * 0.7)
                     ? (lang === "bn" ? "চমৎকার প্রচেষ্টা! নিয়মিত চর্চায় তোমার দক্ষতা আরও বৃদ্ধি পাবে।" : "Great effort! Continuous practice will strengthen your mastery.")
                     : (lang === "bn" ? "ভালো চেষ্টা করেছো! পাঠ্যবইয়ের অধ্যায়টি পুনরায় পড়ে আবার চেষ্টা করো।" : "Good try! Review the chapter in your textbook and try again.")}
                 </p>
@@ -1150,11 +972,12 @@ export const StudySessionRoomView: React.FC<StudySessionRoomViewProps> = ({
       >
         <div>
           <div style={{ fontSize: "var(--text-sm)", fontWeight: 700 }}>
+            {lang === "bn" ? "আজকের অধ্যয়ন অগ্রগতি" : "Today's Study Progress"}
           </div>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             {lang === "bn"
-              ? `মোট অধ্যয়নকৃত সময়: ${formatTimer(secondsElapsed)} • পৃষ্ঠা ৪২–৪৪ সম্পন্ন`
-              : `Total Time Spent: ${formatTimer(secondsElapsed)} • Pages 42–44 Completed`}
+              ? `মোট অধ্যয়নকৃত সময়: ${formatTimer(secondsElapsed)} • পৃষ্ঠা ${toBengaliDigits(startPage)}–${toBengaliDigits(endPage)} সম্পন্ন`
+              : `Total Time Spent: ${formatTimer(secondsElapsed)} • Pages ${startPage}–${endPage} Completed`}
           </div>
         </div>
 

@@ -78,10 +78,13 @@ services:
       REDIS_URL: redis://redis:6379/0
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev_internal_service_token_placeholder_change_in_production}
       GATEWAY_TRUSTED_PROXIES: '["127.0.0.1", "::1", "172.28.0.0/29", "172.18.0.0/16"]'
+      BGE_M3_MODEL_PATH: /home/thinkbuddy/.cache/huggingface/hub/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181
+      HF_HOME: /home/thinkbuddy/.cache/huggingface
     volumes:
       - ./core:/app/core
       - ./migrations:/app/migrations
       - ./rag:/app/rag
+      - C:/Users/UseR/.cache/huggingface:/home/thinkbuddy/.cache/huggingface:ro
     ports:
       - "127.0.0.1:8001:8001"
     depends_on:
@@ -90,7 +93,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s
       timeout: 5s
       retries: 3

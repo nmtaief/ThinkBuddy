@@ -10,12 +10,14 @@ Per docs/04_API_CONTRACT.md §2, §3 and docs/05_SECURE_QUIZ.md §2:
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth.dependencies import require_role
@@ -30,6 +32,8 @@ from core.chat.schemas import (
 )
 from core.chat.service import ChatService
 from core.common.database import get_db_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -206,12 +210,29 @@ async def send_chat_message(
     await orchestrator.assert_no_active_assessed_quiz(current_user.id)
     await orchestrator.check_quota(current_user.id)
 
+    # Resolve student profile to enforce class_level, medium, and subject scoping
+    student_profile = None
+    try:
+        from core.families.models import StudentProfile
+        stmt = select(StudentProfile).where(StudentProfile.user_id == current_user.id)
+        res = await db.execute(stmt)
+        prof = res.scalar_one_or_none()
+        if prof:
+            student_profile = {
+                "class_level": prof.class_level,
+                "medium": prof.medium,
+                "group": prof.group,
+            }
+    except Exception as exc:
+        logger.warning("Error fetching student profile for chat turn: %s", exc)
+
     if wants_sse:
         generator = orchestrator.stream_chat_turn(
             student_id=current_user.id,
             session_id=session_id,
             payload=payload,
             request=request,
+            student_profile=student_profile,
             idempotency_key=eff_key,
         )
         return StreamingResponse(
@@ -228,5 +249,6 @@ async def send_chat_message(
         student_id=current_user.id,
         session_id=session_id,
         payload=payload,
+        student_profile=student_profile,
         idempotency_key=eff_key,
     )

@@ -190,3 +190,38 @@ async def get_chapter_detail(
         concepts=concepts_list,
         chunks_count=chunks_count,
     )
+
+
+@router.get("/curriculum/subjects")
+async def get_curriculum_subjects(
+    class_level: int = Query(default=8, ge=6, le=10, description="Class level (6-10)"),
+    group: str = Query(default="general", description="Group (general, science, humanities, business_studies)"),
+) -> list[dict[str, Any]]:
+    """Retrieve official NCTB subjects catalog with metadata for class and group."""
+    from core.curriculum.nctb_subjects import get_subjects_for_class_and_group
+
+    subjects = get_subjects_for_class_and_group(class_level, group)
+    return [
+        {
+            "slug": s.slug,
+            "name_bn": s.name_bn,
+            "name_en": s.name_en,
+            "class_level": s.class_level,
+            "group": s.group,
+            "total_chapters": s.total_chapters,
+            "base_difficulty": s.base_difficulty,
+            "is_stem": s.is_stem,
+            "recommended_min_weekly_minutes": s.recommended_min_weekly_minutes,
+            "chapters": [
+                {
+                    "number": ch.number,
+                    "title_bn": ch.title_bn,
+                    "title_en": ch.title_en,
+                    "estimated_study_hours": ch.estimated_study_hours,
+                    "is_hard": ch.is_hard,
+                }
+                for ch in s.chapters
+            ],
+        }
+        for s in subjects
+    ]

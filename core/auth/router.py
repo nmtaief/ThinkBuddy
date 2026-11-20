@@ -15,7 +15,7 @@ from core.audit.models import AuditLog
 from core.auth.dependencies import get_current_user
 from core.auth.models import Session as DbSession
 from core.auth.models import User
-from core.auth.provider import get_auth_provider
+from core.auth.provider import get_auth_provider, get_google_auth_provider
 from core.auth.tokens import create_access_jwt, generate_secure_token, hash_link_code, hash_token
 from core.common.config import settings
 from core.common.database import get_db_session
@@ -34,6 +34,22 @@ class AuthExchangeRequest(BaseModel):
     link_code: str | None = Field(
         default=None,
         description="Expiring invitation link code from parent (required for student registration)",
+    )
+    display_name: str | None = Field(default=None, description="User full name (Bangla/English)")
+    locale: str = Field(default="bn", description="Preferred locale: bn or en")
+    class_level: int | None = Field(default=None, description="Class level (6-12) for students")
+    group: str | None = Field(
+        default=None, description="Group for 9-12 (science, humanities, business_studies)"
+    )
+    medium: str = Field(default="bn", description="Medium: bn or en")
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str = Field(..., description="Google OAuth2 ID token credential from Google Sign-In")
+    role: str = Field(default="student", description="Role: student or parent")
+    link_code: str | None = Field(
+        default=None,
+        description="Optional invitation link code from parent",
     )
     display_name: str | None = Field(default=None, description="User full name (Bangla/English)")
     locale: str = Field(default="bn", description="Preferred locale: bn or en")
@@ -101,19 +117,9 @@ async def exchange_token(
     user = result.scalar_one_or_none()
 
     if not user:
-        # Enforce that student cannot register without a parent link code
+        # Check if student is registering via parent invitation link code
         link: ParentStudentLink | None = None
-        if requested_role == "student":
-            if not payload.link_code:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "code": "LINK_CODE_REQUIRED",
-                        "message": (
-                            "Student registration requires a valid parent invitation link code."
-                        ),
-                    },
-                )
+        if requested_role == "student" and payload.link_code:
             code_hash = hash_link_code(payload.link_code)
             link_stmt = select(ParentStudentLink).where(
                 ParentStudentLink.link_code_hash == code_hash,
@@ -157,12 +163,12 @@ async def exchange_token(
             parent_prof_res = await db.execute(parent_prof_stmt)
             parent_prof = parent_prof_res.scalar_one_or_none()
 
-            class_lvl = parent_prof.class_level if parent_prof else (payload.class_level or 7)
+            class_lvl = parent_prof.class_level if parent_prof else (payload.class_level or 8)
             med = parent_prof.medium if parent_prof else payload.medium
             sch = parent_prof.school if parent_prof else None
             grp = parent_prof.group if parent_prof else payload.group
             opts = parent_prof.optional_subject_ids if parent_prof else []
-            mins = parent_prof.daily_minutes if parent_prof else 45
+            mins = parent_prof.daily_minutes if parent_prof else 60
 
             profile = StudentProfile(
                 user_id=user.id,
@@ -190,6 +196,18 @@ async def exchange_token(
                     relation="child",
                 )
                 db.add(member)
+        elif requested_role == "student":
+            # Self-registered student (direct web onboarding)
+            profile = StudentProfile(
+                user_id=user.id,
+                class_level=payload.class_level or 8,
+                group=payload.group,
+                optional_subject_ids=[],
+                medium=payload.medium or "bn",
+                school=None,
+                daily_minutes=60,
+            )
+            db.add(profile)
 
             audit = AuditLog(
                 id=uuid.uuid4(),
@@ -210,6 +228,108 @@ async def exchange_token(
 
     # Create session with rotating refresh token
     raw_refresh = generate_secure_token(32)
+    refresh_hash = hash_token(raw_refresh)
+    session_expiry = utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
+    new_session = DbSession(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        refresh_token_hash=refresh_hash,
+        expires_at=session_expiry,
+    )
+    db.add(new_session)
+    await db.flush()
+
+    access_token = create_access_jwt(user.id, user.role)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserResponse(
+            id=user.id,
+            auth_provider=user.auth_provider,
+            auth_uid=user.auth_uid,
+            role=user.role,
+            display_name=user.display_name,
+            phone=user.phone,
+            email=user.email,
+            locale=user.locale,
+            status=user.status,
+        ),
+    )
+
+
+@router.post("/auth/google", response_model=TokenResponse)
+async def google_auth_exchange(
+    payload: GoogleAuthRequest,
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> TokenResponse:
+    """Exchange verified Google OAuth2 ID token for ThinkBuddy session tokens."""
+    provider = get_google_auth_provider()
+    try:
+        verified_user = await provider.verify_token(payload.id_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_GOOGLE_TOKEN", "message": str(exc)},
+        ) from exc
+
+    requested_role = payload.role.lower()
+    if requested_role not in {"student", "parent"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_ROLE",
+                "message": "Only 'student' or 'parent' roles can register.",
+            },
+        )
+
+    # Find existing user by auth_uid or email
+    stmt = select(User).where(
+        (User.auth_uid == verified_user.uid)
+        | ((User.email == verified_user.email) & (User.email.isnot(None)))
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        display_name = payload.display_name or verified_user.display_name or "ThinkBuddy User"
+        initial_consent = False if requested_role == "parent" else True
+        user = User(
+            id=uuid.uuid4(),
+            auth_provider="google",
+            auth_uid=verified_user.uid,
+            role=requested_role,
+            display_name=display_name,
+            phone=verified_user.phone,
+            email=verified_user.email,
+            locale=payload.locale,
+            status="active",
+            has_parental_consent=initial_consent,
+        )
+        db.add(user)
+        await db.flush()
+
+        if requested_role == "student":
+            profile = StudentProfile(
+                user_id=user.id,
+                class_level=payload.class_level or 8,
+                group=payload.group,
+                optional_subject_ids=[],
+                medium=payload.medium or "bn",
+                school=None,
+                daily_minutes=60,
+            )
+            db.add(profile)
+    else:
+        # Update user auth_uid / auth_provider if previously unlinked or registered via email
+        if user.auth_provider != "google" and verified_user.email and user.email == verified_user.email:
+            user.auth_provider = "google"
+            user.auth_uid = verified_user.uid
+
+    # Create new session
+    raw_refresh = generate_secure_token()
     refresh_hash = hash_token(raw_refresh)
     session_expiry = utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -448,7 +568,7 @@ async def reauthenticate_user(
     - Family data export
     - Parental consent withdrawal
     """
-    from core.auth.provider import get_auth_provider
+    from core.auth.provider import get_auth_provider, get_google_auth_provider
     from core.auth.tokens import create_reauth_jwt
 
     provider = get_auth_provider()

@@ -47,7 +47,7 @@ class ChatCitationItem(BaseModel):
 class ChatMessageCreateRequest(BaseModel):
     """Incoming user message payload."""
 
-    content: str = Field(min_length=1, max_length=4000, description="Student's query text")
+    content: str = Field(default="", max_length=4000, description="Student's query text")
     document_context: DocumentContext | None = Field(
         default=None,
         description="Optional current textbook page context for retrieval boosting",
@@ -63,6 +63,18 @@ class ChatMessageCreateRequest(BaseModel):
     client_turn_id: str | None = Field(
         default=None,
         description="Optional client-generated turn ID for idempotent retries",
+    )
+    class_override: int | None = Field(
+        default=None,
+        description="Optional class level override from client UI (e.g. 6, 7, 8, 9, 10)",
+    )
+    retry_message_id: uuid.UUID | None = Field(
+        default=None,
+        description="Optional ID of previously failed user message to retry with original prompt",
+    )
+    image_data: str | None = Field(
+        default=None,
+        description="Optional base64 JPEG/PNG data of student question photo",
     )
 
 

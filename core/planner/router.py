@@ -10,6 +10,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -2058,4 +2059,240 @@ async def reject_ai_suggestion(
     await db.commit()
 
     return {"status": "rejected", "suggestion_id": str(suggestion_id)}
+
+
+# ==============================================================================
+# ONBOARDING & INTERACTIVE TIME ALLOCATION ENGINE
+# ==============================================================================
+
+class CalculateAllocationPayload(BaseModel):
+    class_level: int = Field(default=8, ge=6, le=10)
+    group: str = Field(default="general")
+    selected_subject_slugs: list[str] | None = None
+    weak_subject_slugs: list[str] | None = None
+    focus_subject_slugs: list[str] | None = None
+    subject_priorities: dict[str, str] | None = None
+    chapter_statuses: dict[str, dict[str, str]] | None = None
+    daily_study_hours: float = Field(default=2.5, ge=0.5, le=10.0)
+    exam_name: str = Field(default="অর্ধবার্ষিক পরীক্ষা (Half-Yearly Exam)")
+    exam_date: str | None = None
+
+
+class StudentOnboardingPayload(BaseModel):
+    class_level: int = Field(default=8, ge=6, le=10)
+    medium: str = Field(default="bn")
+    group: str = Field(default="general")
+    selected_subject_slugs: list[str] = Field(default_factory=list)
+    weak_subject_slugs: list[str] = Field(default_factory=list)
+    focus_subject_slugs: list[str] = Field(default_factory=list)
+    subject_priorities: dict[str, str] = Field(default_factory=dict)
+    daily_study_hours: float = Field(default=2.5, ge=0.5, le=10.0)
+    exam_name: str = Field(default="অর্ধবার্ষিক পরীক্ষা (Half-Yearly Exam)")
+    exam_date: str | None = None
+    study_window_start: str = Field(default="18:00")
+    study_window_end: str = Field(default="22:00")
+    weekly_off_days: list[str] = Field(default_factory=lambda: ["fri", "sat"])
+
+
+@router.post("/planner/calculate-allocation")
+async def calculate_allocation_preview(
+    payload: CalculateAllocationPayload,
+) -> dict[str, Any]:
+    """Calculate mathematically grounded daily time and spaced revision allocation for any subject combination."""
+    from dataclasses import asdict
+    from core.planner.dataset import calculate_study_and_revision_dataset
+
+    summary = calculate_study_and_revision_dataset(
+        class_level=payload.class_level,
+        group=payload.group,
+        selected_subject_slugs=payload.selected_subject_slugs,
+        weak_subject_slugs=payload.weak_subject_slugs,
+        focus_subject_slugs=payload.focus_subject_slugs,
+        subject_priorities=payload.subject_priorities,
+        chapter_statuses=payload.chapter_statuses,
+        daily_study_hours=payload.daily_study_hours,
+        exam_date_val=payload.exam_date,
+        exam_name=payload.exam_name,
+    )
+    return asdict(summary)
+
+
+@router.post("/planner/ai-review-and-plan")
+async def ai_review_and_plan_endpoint(
+    payload: dict[str, Any],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Review student study setup with LLM, parse natural text, and generate balanced plan."""
+    from pydantic import TypeAdapter
+    from core.planner.ai_planner import AIPlanReviewRequest, review_and_generate_ai_plan
+
+    req_obj = TypeAdapter(AIPlanReviewRequest).validate_python(payload)
+    res = await review_and_generate_ai_plan(req_obj, db)
+    return res.model_dump()
+
+
+@router.post("/students/onboarding")
+async def submit_student_onboarding(
+    payload: StudentOnboardingPayload,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Submit student self-onboarding: configure syllabus, exams, study budget, weak/focus subjects."""
+    from dataclasses import asdict
+    from core.planner.dataset import calculate_study_and_revision_dataset
+
+    student_id = current_user.id
+    if current_user.role == "parent":
+        # If parent is onboarding, find or create student under parent
+        stmt_link = select(ParentStudentLink).where(
+            ParentStudentLink.parent_id == current_user.id,
+            ParentStudentLink.status == "active",
+        )
+        res_link = await db.execute(stmt_link)
+        link = res_link.scalars().first()
+        if link and link.student_id:
+            student_id = link.student_id
+
+    # 1. Update or create StudentProfile
+    stmt_prof = select(StudentProfile).where(StudentProfile.user_id == student_id)
+    profile = (await db.execute(stmt_prof)).scalar_one_or_none()
+    daily_mins = int(round(payload.daily_study_hours * 60))
+
+    if not profile:
+        profile = StudentProfile(
+            user_id=student_id,
+            class_level=payload.class_level,
+            group=payload.group,
+            medium=payload.medium,
+            school=None,
+            optional_subject_ids=[],
+            daily_minutes=daily_mins,
+            available_days=payload.weekly_off_days,
+            time_zone="Asia/Dhaka",
+        )
+        db.add(profile)
+    else:
+        profile.class_level = payload.class_level
+        profile.group = payload.group
+        profile.medium = payload.medium
+        profile.daily_minutes = daily_mins
+        profile.available_days = payload.weekly_off_days
+
+    # 2. Update or create StudentStudySettings
+    stmt_settings = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+    settings_obj = (await db.execute(stmt_settings)).scalar_one_or_none()
+
+    if not settings_obj:
+        settings_obj = StudentStudySettings(
+            id=uuid.uuid4(),
+            student_id=student_id,
+            school_day_minutes=daily_mins,
+            holiday_minutes=int(round(daily_mins * 1.2)),
+            study_window_start=payload.study_window_start,
+            study_window_end=payload.study_window_end,
+            recurring_unavailable_blocks=[],
+            blocked_observance_keys=[],
+            custom_blackout_dates=[],
+            subject_priorities=payload.subject_priorities,
+            version=1,
+            updated_by_user_id=current_user.id,
+        )
+        db.add(settings_obj)
+    else:
+        settings_obj.school_day_minutes = daily_mins
+        settings_obj.holiday_minutes = int(round(daily_mins * 1.2))
+        settings_obj.study_window_start = payload.study_window_start
+        settings_obj.study_window_end = payload.study_window_end
+        settings_obj.subject_priorities = payload.subject_priorities
+        settings_obj.version = (settings_obj.version or 1) + 1
+        settings_obj.updated_by_user_id = current_user.id
+
+    # 3. Create or update StudySetup for primary exam
+    exam_target_date = None
+    if payload.exam_date:
+        try:
+            exam_target_date = datetime.strptime(payload.exam_date[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    for slug in payload.selected_subject_slugs:
+        stmt_setup = select(StudySetup).where(
+            StudySetup.student_id == student_id,
+            StudySetup.subject == slug,
+        )
+        setup = (await db.execute(stmt_setup)).scalar_one_or_none()
+        if not setup:
+            setup = StudySetup(
+                id=uuid.uuid4(),
+                student_id=student_id,
+                subject=slug,
+                exam_name=payload.exam_name,
+                exam_date=exam_target_date,
+                set_by_user_id=current_user.id,
+                active_plan_version=1,
+                version=1,
+            )
+            db.add(setup)
+        else:
+            setup.exam_name = payload.exam_name
+            setup.exam_date = exam_target_date
+            setup.version = (setup.version or 1) + 1
+
+    await db.flush()
+
+    # 4. Generate balanced time and revision allocation dataset
+    summary = calculate_study_and_revision_dataset(
+        class_level=payload.class_level,
+        group=payload.group,
+        selected_subject_slugs=payload.selected_subject_slugs,
+        weak_subject_slugs=payload.weak_subject_slugs,
+        focus_subject_slugs=payload.focus_subject_slugs,
+        subject_priorities=payload.subject_priorities,
+        daily_study_hours=payload.daily_study_hours,
+        exam_date_val=payload.exam_date,
+        exam_name=payload.exam_name,
+    )
+
+    return {
+        "status": "success",
+        "message": "Student study onboarding completed successfully.",
+        "summary": asdict(summary),
+    }
+
+
+@router.get("/planner/combinations")
+async def get_planner_combinations(
+    class_level: int | None = Query(default=None, ge=6, le=10),
+    group: str | None = Query(default=None),
+    strategy: str | None = Query(default=None),
+    daily_hours: float | None = Query(default=None),
+) -> dict[str, Any]:
+    """Retrieve pre-generated combination datasets for classes, groups, and routine strategies."""
+    import json
+    from pathlib import Path
+
+    data_path = Path(__file__).resolve().parent / "datasets" / "all_combinations_dataset.json"
+    if not data_path.exists():
+        raise HTTPException(status_code=404, detail="Combinations dataset not yet generated")
+
+    with open(data_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    combs = data.get("combinations", [])
+    if class_level is not None:
+        combs = [c for c in combs if c.get("class_level") == class_level]
+    if group is not None:
+        combs = [c for c in combs if c.get("group") == group]
+    if strategy is not None:
+        combs = [c for c in combs if c.get("routine_strategy") == strategy]
+    if daily_hours is not None:
+        combs = [c for c in combs if c.get("daily_study_hours") == daily_hours]
+
+    return {
+        "status": "success",
+        "total_matches": len(combs),
+        "rules": data.get("rules", {}),
+        "combinations": combs,
+    }
+
 

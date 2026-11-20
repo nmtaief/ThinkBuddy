@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import logging
 import math
+import os
 from abc import ABC, abstractmethod
 
 import httpx
@@ -247,15 +248,134 @@ class HostedMultilingualEmbeddingProvider(EmbeddingProvider):
         return all_embeddings
 
 
+class BgeM3EmbeddingProvider(EmbeddingProvider):
+    """Local, production-grade multilingual dense embedding provider powered by BAAI/bge-m3.
+
+    Delivers state-of-the-art retrieval across Bengali, English, and Banglish without external API calls,
+    zero token cost, and complete student data privacy.
+    """
+
+    _model = None
+
+    def __init__(self, model_path: str | None = None, dimension: int = 1024) -> None:
+        self._dimension = dimension
+        self._model_name = "BAAI/bge-m3"
+        resolved_path = model_path or os.getenv("BGE_M3_MODEL_PATH")
+        if not resolved_path or not os.path.exists(resolved_path):
+            candidates = [
+                "/home/thinkbuddy/.cache/huggingface/hub/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181",
+                "/root/.cache/huggingface/hub/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181",
+                r"C:\Users\UseR\.cache\huggingface\hub\models--BAAI--bge-m3\snapshots\5617a9f61b028005a4858fdac845db406aefb181",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    resolved_path = cand
+                    break
+            if not resolved_path:
+                resolved_path = "BAAI/bge-m3"
+        self._model_path = resolved_path
+
+        if BgeM3EmbeddingProvider._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+
+                logger.info("Initializing BgeM3EmbeddingProvider from %s", self._model_path)
+                BgeM3EmbeddingProvider._model = SentenceTransformer(
+                    self._model_path, device="cpu", local_files_only=os.path.exists(self._model_path)
+                )
+            except Exception as ex:
+                logger.error("Failed to initialize BgeM3EmbeddingProvider from %s: %s", self._model_path, ex)
+                raise
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    async def embed_query(self, text: str) -> list[float]:
+        emb = BgeM3EmbeddingProvider._model.encode(
+            text, normalize_embeddings=True, show_progress_bar=False
+        ).tolist()
+        EmbeddingStats.record(num_texts=1, estimated_tokens=len(text.split()), cost_usd=0.0)
+        return emb
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        batch_size = settings.EMBEDDING_BATCH_SIZE or 32
+        all_embs: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            batch_embs = BgeM3EmbeddingProvider._model.encode(
+                batch, normalize_embeddings=True, show_progress_bar=False
+            ).tolist()
+            all_embs.extend(batch_embs)
+        EmbeddingStats.record(
+            num_texts=len(texts),
+            estimated_tokens=sum(len(t.split()) for t in texts),
+            cost_usd=0.0,
+        )
+        return all_embs
+
+
 def get_embedding_provider() -> EmbeddingProvider:
     """Factory returning configured EmbeddingProvider instance."""
     provider_type = settings.EMBEDDING_PROVIDER.lower()
-    if provider_type in ("mock", "test", "local"):
+    if provider_type in ("bge-m3", "bge_m3", "production"):
+        return BgeM3EmbeddingProvider(dimension=settings.EMBEDDING_DIMENSION)
+
+    if provider_type in ("mock", "test"):
+        if getattr(settings, "ENVIRONMENT", "development") not in ("test", "development") and os.getenv("TESTING") != "true":
+            raise ValueError(
+                "Mock embeddings are strictly forbidden in production. Set EMBEDDING_PROVIDER='bge-m3'."
+            )
         return MockMultilingualEmbeddingProvider(
             dimension=settings.EMBEDDING_DIMENSION,
             model_name=settings.EMBEDDING_MODEL,
         )
+
     return HostedMultilingualEmbeddingProvider(
         model_name=settings.EMBEDDING_MODEL,
         dimension=settings.EMBEDDING_DIMENSION,
     )
+
+
+async def verify_embedding_compatibility(session) -> None:
+    """Fail-loud startup check verifying database column dimension, config, and provider."""
+    from sqlalchemy import text
+
+    # 1. Check PostgreSQL column dimension
+    query = text(
+        "SELECT atttypmod FROM pg_attribute WHERE attrelid = 'chunks'::regclass AND attname = 'embedding';"
+    )
+    res = await session.execute(query)
+    db_dim = res.scalar()
+    if db_dim is not None and db_dim != settings.EMBEDDING_DIMENSION:
+        raise RuntimeError(
+            f"Embedding dimension mismatch: Database column chunks.embedding is vector({db_dim}) "
+            f"but settings.EMBEDDING_DIMENSION is {settings.EMBEDDING_DIMENSION}."
+        )
+
+    # 2. Check provider dimension
+    provider = get_embedding_provider()
+    if provider.dimension != settings.EMBEDDING_DIMENSION:
+        raise RuntimeError(
+            f"Embedding provider dimension mismatch: Provider {provider.model_name} produces {provider.dimension} "
+            f"dimensions but settings.EMBEDDING_DIMENSION is {settings.EMBEDDING_DIMENSION}."
+        )
+
+    # 3. Check model names of stored retrievable chunks
+    chk_query = text(
+        "SELECT DISTINCT embedding_model FROM chunks WHERE embedding IS NOT NULL AND retrievable = true;"
+    )
+    chk_res = await session.execute(chk_query)
+    stored_models = [r[0] for r in chk_res.fetchall() if r[0]]
+    for sm in stored_models:
+        if sm != provider.model_name and not (sm == "bge-m3" and provider.model_name == "BAAI/bge-m3"):
+            raise RuntimeError(
+                f"Embedding model mismatch: Retrievable chunks in database were embedded with '{sm}' "
+                f"but active provider is '{provider.model_name}'."
+            )

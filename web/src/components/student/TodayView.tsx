@@ -1,10 +1,34 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { TodayPayload, StudyTask } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { MathRenderer } from "@/components/MathRenderer";
-import { CheckCircle2, Circle, Flame, Calendar, Clock, BookOpen, Play, Sparkles } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Flame,
+  Calendar,
+  Clock,
+  BookOpen,
+  Play,
+  Sparkles,
+  RotateCcw,
+  AlertTriangle,
+  Tag,
+  HelpCircle,
+  ShieldCheck,
+  Check,
+} from "lucide-react";
 import { StudySessionRoomView } from "@/components/student/StudySessionRoomView";
-
+import { enqueueCompletedStudySession } from "@/lib/revision-queue-engine";
+import {
+  detectPlannerPhase,
+  generateExamModeDayPlan,
+  ExamTimetableEntry,
+  SubjectSyllabusInput,
+  DayGapPlan,
+  ScheduledStudyBlock,
+  toBengaliNumber,
+} from "@/lib/exam-mode-engine";
 
 interface TodayViewProps {
   todayData: TodayPayload;
@@ -20,15 +44,167 @@ export const TodayView: React.FC<TodayViewProps> = ({
   onToggleTask,
 }) => {
   const t = translations[lang];
-  const [tasks, setTasks] = useState<StudyTask[]>(todayData.tasks);
+
+  // Completed task ids
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("tb_completed_task_ids");
+        if (stored) return new Set(JSON.parse(stored));
+      } catch {}
+    }
+    return new Set();
+  });
+
   const [selectedStudyTask, setSelectedStudyTask] = useState<StudyTask | null>(null);
 
+  const [streakDays, setStreakDays] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const s = localStorage.getItem("tb_streak_days");
+      if (s !== null) return parseInt(s, 10) || 0;
+    }
+    return todayData.streak_days || 0;
+  });
+
+  // Timetable and Syllabus state
+  const [timetable, setTimetable] = useState<ExamTimetableEntry[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("tb_exam_timetable");
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return [
+      {
+        id: "tt_default_01",
+        series: "school_exam",
+        subject_slug: "math",
+        subject_name_bn: "সাধারণ গণিত",
+        subject_name_en: "General Math",
+        date: new Date(Date.now() + 5 * 86400000).toISOString().split("T")[0],
+        start_time: "10:00",
+        end_time: "13:00",
+        marks_weight: 100,
+      },
+    ];
+  });
+
+  const [syllabusList, setSyllabusList] = useState<SubjectSyllabusInput[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("tb_exam_syllabus");
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return [
+      {
+        subject_slug: "math",
+        has_remaining_syllabus: true,
+        chapters: [
+          {
+            number: 2,
+            title_bn: "মুনাফা ও চক্রবৃদ্ধি মূলধন",
+            status: "partly",
+            estimated_hours: 4.0,
+            mastery_score: 0.35,
+            why_sheet_reason: "কেন: গতবার ৫টির মধ্যে ২টি সঠিক; আরও অনুশীলন দরকার।",
+          },
+          {
+            number: 3,
+            title_bn: "বীজগণিতীয় সূত্রাবলি ও প্রয়োগ",
+            status: "left",
+            estimated_hours: 5.0,
+            mastery_score: 0.4,
+          },
+        ],
+      },
+    ];
+  });
+
+  const [userChoice, setUserChoice] = useState<"raise_hours" | "prioritize" | "skim_only" | undefined>();
+  const [examPlan, setExamPlan] = useState<DayGapPlan | null>(null);
+
+  // Sync timetable and syllabus changes
+  const reloadExamPlan = () => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    let activeTt = timetable;
+    let activeSyl = syllabusList;
+
+    if (typeof window !== "undefined") {
+      try {
+        const storedTt = localStorage.getItem("tb_exam_timetable");
+        if (storedTt) activeTt = JSON.parse(storedTt);
+        const storedSyl = localStorage.getItem("tb_exam_syllabus");
+        if (storedSyl) activeSyl = JSON.parse(storedSyl);
+      } catch {}
+    }
+
+    setTimetable(activeTt);
+    setSyllabusList(activeSyl);
+
+    const generated = generateExamModeDayPlan({
+      targetDate: todayStr,
+      timetable: activeTt,
+      syllabus: activeSyl,
+      studentDailyHours: 6.0,
+      userChoice,
+      now: new Date(),
+    });
+
+    setExamPlan(generated);
+  };
+
+  useEffect(() => {
+    reloadExamPlan();
+
+    const handleUpdate = () => reloadExamPlan();
+    window.addEventListener("tb_exam_plan_updated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+    return () => {
+      window.removeEventListener("tb_exam_plan_updated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, [userChoice]);
+
+  // Phase detection
+  const currentPhase = detectPlannerPhase(timetable, new Date());
+  const isExamMode = currentPhase.is_exam_mode;
+
+  // Single Replan Handler (Freezes completed blocks)
+  const handleReplan = () => {
+    if (!examPlan) return;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const replanned = generateExamModeDayPlan({
+      targetDate: todayStr,
+      timetable,
+      syllabus: syllabusList,
+      studentDailyHours: 6.0,
+      userChoice,
+      frozenCompletedBlocks: examPlan.blocks,
+      now: new Date(),
+    });
+    setExamPlan(replanned);
+  };
+
+  const handleToggleBlock = (blockId: string) => {
+    setCompletedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(blockId)) next.delete(blockId);
+      else next.add(blockId);
+
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("tb_completed_task_ids", JSON.stringify(Array.from(next)));
+        } catch {}
+      }
+      return next;
+    });
+    onToggleTask(blockId, completedTaskIds.has(blockId) ? "pending" : "completed");
+  };
+
   const handleToggle = (task: StudyTask) => {
-    const nextStatus = task.status === "completed" ? "pending" : "completed";
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t))
-    );
-    onToggleTask(task.id, nextStatus);
+    const nextStatus: StudyTask["status"] = task.status === "completed" ? "pending" : "completed";
+    handleToggleBlock(task.id);
   };
 
   const handleStudySessionComplete = (
@@ -37,9 +213,17 @@ export const TodayView: React.FC<TodayViewProps> = ({
     note: string,
     quizScore: number
   ) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, status: "completed" } : t))
-    );
+    setCompletedTaskIds((prev) => {
+      const next = new Set(prev);
+      next.add(taskId);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("tb_completed_task_ids", JSON.stringify(Array.from(next)));
+        } catch {}
+      }
+      return next;
+    });
+
     onToggleTask(taskId, "completed");
     setSelectedStudyTask(null);
   };
@@ -56,18 +240,25 @@ export const TodayView: React.FC<TodayViewProps> = ({
     );
   }
 
-  const streakDisplay = lang === "bn" ? toBengaliDigits(todayData.streak_days) : todayData.streak_days;
-  const remainingMinutesDisplay =
-    lang === "bn" ? toBengaliDigits(todayData.remaining_minutes) : todayData.remaining_minutes;
+  // Determine badge label
+  let inlineBadgeLabel = currentPhase.badge_label_bn;
+  if (examPlan?.hours_to_next_exam !== undefined && examPlan.hours_to_next_exam <= 24 && examPlan.next_exam) {
+    inlineBadgeLabel = `পরীক্ষার আগের দিন: ${examPlan.next_exam.subject_name_bn}`;
+  }
+
+  const completedBlocksCount = (examPlan?.blocks || []).filter((b) => completedTaskIds.has(b.id)).length;
+  const totalBlocksCount = examPlan?.blocks.length || todayData.tasks.length || 1;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-      {/* Daily Overview Header */}
+      {/* 1. Daily Overview Header with Exam Mode Badge */}
       <div
         className="card"
         style={{
-          background: "linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(16, 185, 129, 0.08) 100%)",
-          border: "1px solid var(--color-border)",
+          background: isExamMode
+            ? "linear-gradient(135deg, rgba(99, 102, 241, 0.10) 0%, rgba(244, 63, 94, 0.08) 100%)"
+            : "linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(16, 185, 129, 0.08) 100%)",
+          border: isExamMode ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid var(--color-border)",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -78,35 +269,49 @@ export const TodayView: React.FC<TodayViewProps> = ({
       >
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Sparkles size={16} style={{ color: "var(--color-primary)" }} />
-            <span style={{ fontSize: "var(--text-xs)", fontWeight: 700, color: "var(--color-primary)" }}>
-              {lang === "bn" ? "দৈনিক ড্যাশবোর্ড" : "Daily Dashboard"}
+            <Sparkles size={16} style={{ color: isExamMode ? "#6366f1" : "var(--color-primary)" }} />
+            <span
+              style={{
+                fontSize: "var(--text-xs)",
+                fontWeight: 800,
+                color: isExamMode ? "#4f46e5" : "var(--color-primary)",
+                padding: "2px 8px",
+                borderRadius: "12px",
+                backgroundColor: isExamMode ? "#e0e7ff" : "var(--color-primary-surface)",
+              }}
+            >
+              {inlineBadgeLabel}
             </span>
           </div>
-          <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 2 }}>
+          <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, marginTop: 4 }}>
             {lang === "bn" ? "আজকের পড়াশোনার পরিকল্পনা ও অগ্রগতি" : "Today's Study Plan & Progress"}
           </div>
         </div>
 
-        <div
-          style={{
-            backgroundColor: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--space-2) var(--space-4)",
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600 }}>
-            {lang === "bn" ? "সাপ্তাহিক রুটিন" : "Weekly Schedule"}
-          </div>
-          <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: "var(--color-success)" }}>
-            {lang === "bn" ? "৭ দিনই সক্রিয় (কোনো অফ-ডে নেই)" : "Active All 7 Days"}
-          </div>
+        {/* Replan Trigger Button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={handleReplan}
+            className="btn-secondary touch-target"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: "12px",
+              fontWeight: 700,
+              padding: "6px 14px",
+              borderRadius: "10px",
+              cursor: "pointer",
+            }}
+            title="সম্পন্ন কাজ অপরিবর্তিত রেখে নতুন করে শিডিউল তৈরি করুন"
+          >
+            <RotateCcw size={14} />
+            <span>{lang === "bn" ? "পরিকল্পনা আবার বানাও" : "Replan"}</span>
+          </button>
         </div>
       </div>
 
-      {/* Top Banner: Streak and Exam Countdown */}
+      {/* 2. Top Banner: Suspended Streak Pressure & Next-Exam Countdown */}
       <div
         style={{
           display: "grid",
@@ -114,14 +319,14 @@ export const TodayView: React.FC<TodayViewProps> = ({
           gap: "var(--space-4)",
         }}
       >
-        {/* Streak card */}
+        {/* Streak card (Empathetic / Suspended during Exam Week) */}
         <div
           className="card"
           style={{
             display: "flex",
             alignItems: "center",
             gap: "var(--space-4)",
-            borderLeft: "4px solid var(--color-warning)",
+            borderLeft: isExamMode ? "4px solid #6366f1" : "4px solid var(--color-warning)",
           }}
         >
           <div
@@ -129,27 +334,29 @@ export const TodayView: React.FC<TodayViewProps> = ({
               width: 52,
               height: 52,
               borderRadius: "var(--radius-full)",
-              backgroundColor: "var(--color-warning-surface)",
-              color: "var(--color-warning)",
+              backgroundColor: isExamMode ? "#e0e7ff" : "var(--color-warning-surface)",
+              color: isExamMode ? "#4f46e5" : "var(--color-warning)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Flame size={28} />
+            <ShieldCheck size={28} />
           </div>
           <div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600 }}>
-              {t.growthMindset.streakBadge}
+              {isExamMode ? "পরীক্ষার মানসিক স্বস্তি (No Streak Guilt)" : t.growthMindset.streakBadge}
             </div>
-            <div style={{ fontSize: "var(--text-2xl)", fontWeight: 700 }}>
-              {streakDisplay} {t.growthMindset.streakDays}
+            <div style={{ fontSize: "var(--text-base)", fontWeight: 800, marginTop: 2 }}>
+              {isExamMode
+                ? "পরীক্ষা সপ্তাহে স্ট্রিকের চাপ নেই • প্রশান্ত মনে রিভিশন করো"
+                : `${toBengaliDigits(streakDays)} দিন সক্রিয়`}
             </div>
           </div>
         </div>
 
-        {/* Exam Countdown card */}
-        {todayData.exam_countdown && (
+        {/* Next-Exam Countdown & Explicit Gap Summary Line */}
+        {examPlan && (
           <div
             className="card"
             style={{
@@ -175,132 +382,220 @@ export const TodayView: React.FC<TodayViewProps> = ({
             </div>
             <div>
               <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", fontWeight: 600 }}>
-                {t.student.examCountdown}: {todayData.exam_countdown.exam_name}
+                {examPlan.next_exam ? examPlan.next_exam.subject_name_bn : "টার্গেট পরীক্ষা"}
               </div>
-              <div style={{ fontSize: "var(--text-2xl)", fontWeight: 700 }}>
-                {lang === "bn"
-                  ? toBengaliDigits(todayData.exam_countdown.days_left)
-                  : todayData.exam_countdown.days_left}{" "}
-                {t.student.daysLeft}
+              <div style={{ fontSize: "var(--text-lg)", fontWeight: 800, color: "var(--color-text)" }}>
+                {examPlan.gap_summary_line_bn}
+              </div>
+              <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: 2 }}>
+                ঘুম: {toBengaliNumber(examPlan.sleep_hours)} ঘণ্টা • বাফার: {toBengaliNumber(examPlan.buffer_hours)} ঘণ্টা • ৫০মি পড়া + ১০মি বিরতি
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Today's Tasks Header & Summary */}
+      {/* 3. Feasibility Warning Alert & 3 Explicit Choices */}
+      {examPlan?.feasibility_warning && (
+        <div
+          className="card"
+          style={{
+            borderLeft: "4px solid #f59e0b",
+            backgroundColor: "rgba(245, 158, 11, 0.08)",
+            padding: "var(--space-4)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-3)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <AlertTriangle size={18} style={{ color: "#d97706" }} />
+            <span style={{ fontSize: "var(--text-sm)", fontWeight: 800, color: "#b45309" }}>
+              {examPlan.feasibility_warning.message_bn}
+            </span>
+          </div>
+
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+            পরীক্ষার আগে সম্পূর্ণ সিলেবাস শেষ করার জন্য নিচের যেকোনো একটি কৌশল নির্বাচন করুন:
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+            {examPlan.feasibility_warning.options.map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setUserChoice(opt.id)}
+                className="touch-target"
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  border: userChoice === opt.id ? "2px solid #b45309" : "1px solid var(--color-border)",
+                  backgroundColor: userChoice === opt.id ? "#fef3c7" : "var(--color-surface)",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: "12px", fontWeight: 800, color: "#92400e" }}>{opt.title_bn}</div>
+                <div style={{ fontSize: "11px", color: "var(--color-text-muted)", marginTop: 2 }}>
+                  {opt.description_bn}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Blocks List Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 700 }}>{t.student.todayHeader}</h2>
+          <h2 style={{ fontSize: "var(--text-xl)", fontWeight: 700 }}>
+            {isExamMode ? "আজকের গ্যাপ মাইক্রো-প্ল্যান ব্লকসমূহ" : t.student.todayHeader}
+          </h2>
           <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
-            {t.growthMindset.timeSpent}: {remainingMinutesDisplay} {t.growthMindset.minutes}
+            সম্পন্ন: {toBengaliDigits(completedBlocksCount)}/{toBengaliDigits(examPlan?.blocks.length || 0)}টি সেশন •
+            নিট পড়ার সময়: {toBengaliNumber(examPlan?.net_study_hours || 6)} ঘণ্টা
           </p>
         </div>
       </div>
 
-      {/* Task List */}
+      {/* 5. Scheduled Study Blocks with Type Chips & Why-Sheet Explanations */}
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-        {tasks.length === 0 ? (
-          <div className="card" style={{ textAlign: "center", padding: "var(--space-8)" }}>
-            <p style={{ color: "var(--color-text-muted)" }}>{t.student.noTasksToday}</p>
-          </div>
-        ) : (
-          tasks.map((task) => {
-            const isCompleted = task.status === "completed";
-            const minDisplay =
-              lang === "bn" ? toBengaliDigits(task.estimated_minutes) : task.estimated_minutes;
+        {examPlan && examPlan.blocks.length > 0 ? (
+          examPlan.blocks.map((block) => {
+            const isCompleted = completedTaskIds.has(block.id);
+
+            // Chip styling
+            let chipBg = "#e0e7ff";
+            let chipColor = "#4338ca";
+            if (block.task_type === "remaining_syllabus") {
+              chipBg = "#ffe4e6";
+              chipColor = "#be123c"; // Crimson for "বাকি সিলেবাস"
+            } else if (block.task_type === "needs_practice") {
+              chipBg = "#fef3c7";
+              chipColor = "#b45309"; // Amber for "আরও অনুশীলন"
+            } else if (block.task_type === "formula_pass") {
+              chipBg = "#ecfdf5";
+              chipColor = "#047857"; // Emerald for "ফর্মুলা"
+            } else if (block.task_type === "light_review") {
+              chipBg = "#f3e8ff";
+              chipColor = "#6b21a8"; // Purple for "হালকা রিভিশন"
+            }
 
             return (
               <div
-                key={task.id}
-                className={`card ${isCompleted ? "badge-success" : ""}`}
+                key={block.id}
+                className="card"
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   gap: "var(--space-3)",
                   opacity: isCompleted ? 0.85 : 1,
+                  backgroundColor: isCompleted ? "var(--color-surface-hover)" : "var(--color-surface)",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)" }}>
                     <button
-                      onClick={() => handleToggle(task)}
+                      onClick={() => handleToggleBlock(block.id)}
                       className="touch-target"
                       style={{ padding: 0, color: isCompleted ? "var(--color-success)" : "var(--color-text-muted)" }}
-                      aria-label={isCompleted ? t.student.markIncomplete : t.student.markComplete}
+                      aria-label="সম্পন্ন হিসেবে চিহ্নিত করুন"
                     >
                       {isCompleted ? <CheckCircle2 size={24} /> : <Circle size={24} />}
                     </button>
+
                     <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                      {/* Meta Line: Subject, Time, and Type Chip */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span
-                          className="badge"
                           style={{
                             backgroundColor: "var(--color-primary-surface)",
                             color: "var(--color-primary)",
-                            fontSize: "var(--text-xs)",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "6px",
                           }}
                         >
-                          {task.subject}
+                          {block.subject_name_bn}
                         </span>
-                        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "flex", alignItems: "center", gap: 4 }}>
+
+                        {/* Block Type Chip */}
+                        <span
+                          style={{
+                            backgroundColor: chipBg,
+                            color: chipColor,
+                            fontSize: "11px",
+                            fontWeight: 800,
+                            padding: "2px 8px",
+                            borderRadius: "6px",
+                          }}
+                        >
+                          {block.type_chip_bn}
+                        </span>
+
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--color-text-muted)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            fontFamily: "monospace",
+                          }}
+                        >
                           <Clock size={12} />
-                          {minDisplay} {t.growthMindset.minutesAbbr}
+                          {block.start_time} - {block.end_time} ({toBengaliDigits(block.duration_minutes)} মি)
                         </span>
                       </div>
+
                       <h3
                         style={{
                           fontSize: "var(--text-base)",
-                          fontWeight: 600,
+                          fontWeight: 700,
                           marginTop: "var(--space-1)",
                           textDecoration: isCompleted ? "line-through" : "none",
                         }}
                       >
-                        {task.title}
+                        {block.chapter_title_bn}
                       </h3>
                     </div>
                   </div>
                 </div>
 
-                {/* Printed textbook citations (Rule 8: Printed Page != PDF index) */}
-                {task.printed_page_start && (
+                {/* Why-Sheet Pedagogic Reason (Rule 6: Explainability) */}
+                {block.why_sheet_reason && (
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: "var(--space-2)",
-                      fontSize: "var(--text-xs)",
+                      fontSize: "12px",
                       color: "var(--color-text-secondary)",
                       backgroundColor: "var(--color-surface-hover)",
                       padding: "var(--space-2) var(--space-3)",
                       borderRadius: "var(--radius-sm)",
+                      borderLeft: "3px solid #6366f1",
                     }}
                   >
-                    <BookOpen size={14} />
-                    <span>
-                      {task.book_title} — {t.student.printedPage}:{" "}
-                      {lang === "bn"
-                        ? `${toBengaliDigits(task.printed_page_start)} - ${toBengaliDigits(task.printed_page_end || task.printed_page_start)}`
-                        : `${task.printed_page_start} - ${task.printed_page_end || task.printed_page_start}`}
-                    </span>
+                    <HelpCircle size={14} style={{ color: "#6366f1", flexShrink: 0 }} />
+                    <span>{block.why_sheet_reason}</span>
                   </div>
                 )}
 
-                {/* Guidelines */}
-                {task.guidelines && (
-                  <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-                    <MathRenderer content={task.guidelines} />
+                {/* Math Exercise Reference if applicable */}
+                {block.math_exercise_label && (
+                  <div style={{ fontSize: "12px", color: "var(--color-primary)", fontWeight: 600 }}>
+                    📖 পাঠ্যবইয়ের অনুশীলন: {block.math_exercise_label} (নমুনা ৩-৫টি বহুনির্বাচনি ও সৃজনশীল প্রশ্ন)
                   </div>
                 )}
 
-                {/* Launch Study Session Room Button */}
+                {/* Action Bar */}
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
-                    marginTop: "var(--space-2)",
-                    paddingTop: "var(--space-3)",
+                    paddingTop: "var(--space-2)",
                     borderTop: "1px solid var(--color-border)",
                     flexWrap: "wrap",
                     gap: "var(--space-2)",
@@ -308,7 +603,22 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 >
                   <button
                     type="button"
-                    onClick={() => setSelectedStudyTask(task)}
+                    onClick={() => {
+                      const studyTaskAdapter: StudyTask = {
+                        id: block.id,
+                        subject: block.subject_name_bn,
+                        title: `${block.subject_name_bn}: ${block.chapter_title_bn}`,
+                        task_type: block.task_type === "remaining_syllabus" ? "study" : "revision",
+                        estimated_minutes: block.duration_minutes,
+                        status: isCompleted ? "completed" : "pending",
+                        guidelines: block.why_sheet_reason,
+                        chapter_title: block.chapter_title_bn,
+                        book_title: `${block.subject_name_bn} (NCTB)`,
+                        printed_page_start: 1,
+                        printed_page_end: 15,
+                      };
+                      setSelectedStudyTask(studyTaskAdapter);
+                    }}
                     className="btn-primary touch-target"
                     style={{
                       display: "flex",
@@ -322,25 +632,21 @@ export const TodayView: React.FC<TodayViewProps> = ({
                   >
                     <Play size={14} />
                     <span>
-                      {lang === "bn"
-                        ? isCompleted
-                          ? "পুনরায় স্টাডি সেশন দেখুন"
-                          : "পড়া শুরু করুন"
-                        : isCompleted
-                        ? "Review Study Session"
-                        : "Start Study Session"}
+                      {isCompleted ? "সেশন পর্যালোচনা" : "পড়া ও অনুশীলন শুরু করুন"}
                     </span>
                   </button>
 
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                    {isCompleted
-                      ? (lang === "bn" ? "আলহামদুলিল্লাহ, পড়া সম্পন্ন হয়েছে!" : "Alhamdulillah, Completed!")
-                      : (lang === "bn" ? "স্টপওয়াচ, লক্ষ্য ট্র্যাকিং ও কুইজ অন্তর্ভুক্ত" : "Includes stopwatch, split-targets & quiz")}
+                    {isCompleted ? "আলহামদুলিল্লাহ, এই ব্লক সম্পন্ন হয়েছে!" : "৫০ মিনিট মনোযোগ + ১০ মিনিট বিরতি"}
                   </span>
                 </div>
               </div>
             );
           })
+        ) : (
+          <div className="card" style={{ textAlign: "center", padding: "var(--space-8)" }}>
+            <p style={{ color: "var(--color-text-muted)" }}>{t.student.noTasksToday}</p>
+          </div>
         )}
       </div>
     </div>

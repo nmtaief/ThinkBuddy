@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import { Language, translations } from "@/lib/i18n";
 import { BookOpen, User, Users, Shield, ArrowRight, Smartphone, Sparkles, Moon, Sun, Globe } from "lucide-react";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
+import { SessionUser } from "@/lib/types";
 
 interface AuthViewProps {
   lang: Language;
@@ -10,6 +12,7 @@ interface AuthViewProps {
   onToggleLang: () => void;
   onToggleTheme: () => void;
   onLogin: (role: "student" | "parent", displayName: string) => Promise<void>;
+  onGoogleSuccess?: (user: SessionUser) => void;
   onOpenFirebaseModal: () => void;
 }
 
@@ -19,6 +22,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   onToggleLang,
   onToggleTheme,
   onLogin,
+  onGoogleSuccess,
   onOpenFirebaseModal,
 }) => {
   const t = translations[lang];
@@ -231,6 +235,37 @@ export const AuthView: React.FC<AuthViewProps> = ({
               <Users size={18} />
               <span>{lang === "bn" ? "অভিভাবক (Parent)" : "Parent"}</span>
             </button>
+          </div>
+
+          {/* Primary One-Click Google Sign-In */}
+          <div style={{ marginBottom: "var(--space-4)" }}>
+            <GoogleSignIn
+              role={selectedRole}
+              lang={lang}
+              onSuccess={(user) => {
+                if (onGoogleSuccess) {
+                  onGoogleSuccess(user);
+                } else {
+                  onLogin((user.role === "parent" ? "parent" : "student"), user.name);
+                }
+              }}
+            />
+          </div>
+
+          {/* Or divider */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-3)",
+              marginBottom: "var(--space-4)",
+            }}
+          >
+            <div style={{ flex: 1, height: 1, backgroundColor: "var(--color-border)" }} />
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+              {lang === "bn" ? "অথবা নাম দিয়ে প্রবেশ করো" : "or continue with name"}
+            </span>
+            <div style={{ flex: 1, height: 1, backgroundColor: "var(--color-border)" }} />
           </div>
 
           {/* Form */}

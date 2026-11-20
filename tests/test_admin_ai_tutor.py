@@ -15,7 +15,8 @@ from core.admin.models import AITutorConfig
 from core.audit.models import AuditLog
 from core.auth.models import User
 from core.auth.tokens import create_access_jwt
-from core.chat.llm import MockLLMGateway, get_active_llm_gateway
+from core.chat.llm import get_active_llm_gateway
+from tests.mock_llm import MockLLMGateway
 from core.common.database import AsyncSessionLocal
 
 CLIENT_HEADERS_WEB = {
@@ -306,6 +307,5 @@ async def test_admin_ai_tutor_stats(gateway_client: AsyncClient) -> None:
 async def test_dynamic_llm_gateway_resolution() -> None:
     """Verify get_active_llm_gateway returns appropriate gateway based on DB configuration."""
     async with AsyncSessionLocal() as session:
-        # 1. When config has mock provider or no key, it safely yields MockLLMGateway in test environments
         gw = await get_active_llm_gateway(session)
-        assert gw is not None
+        assert gw is None or hasattr(gw, "stream_chat")

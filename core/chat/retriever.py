@@ -68,17 +68,31 @@ class LexicalReranker(Reranker):
         if not candidates:
             return []
 
-        query_tokens = set(query.lower().split())
+        has_bengali = any("\u0980" <= c <= "\u09ff" for c in query)
+
+        stopwords = {
+            "what", "is", "a", "an", "the", "are", "tell", "me", "about", "can", "you",
+            "explain", "help", "with", "how", "why", "who", "which", "when", "where",
+            "ki", "konta", "kon", "er", "ta", "te", "kono", "বলো", "বলুন", "কী", "কি"
+        }
+        tokens = [t for t in query.lower().split() if t not in stopwords]
+        query_tokens = set(tokens) if tokens else set(query.lower().split())
 
         for chunk in candidates:
             chunk_tokens = set(chunk.text.lower().split())
-            if not query_tokens:
-                overlap_ratio = 0.0
-            else:
-                overlap_ratio = len(query_tokens & chunk_tokens) / len(query_tokens)
+            overlap_ratio = len(query_tokens & chunk_tokens) / len(query_tokens) if query_tokens else 0.0
 
-            # Blend base retrieval score with lexical token overlap
-            chunk.score = round(chunk.score * 0.7 + overlap_ratio * 0.3, 4)
+            if not has_bengali:
+                # Non-Bengali / Banglish query: rely on cross-lingual dense embedding without lexical discount
+                # Only boost if Latin terms match (e.g., technical or algebraic notation)
+                chunk.score = min(1.0, round(chunk.score + overlap_ratio * 0.10, 4))
+            else:
+                # Bengali query: boost on positive lexical overlap without harshly destroying semantic matches
+                if overlap_ratio > 0.0:
+                    chunk.score = min(1.0, round(chunk.score * 0.85 + overlap_ratio * 0.25, 4))
+                else:
+                    # Zero lexical overlap on Bengali query: apply mild damping
+                    chunk.score = round(chunk.score * 0.90, 4)
 
         return sorted(candidates, key=lambda c: c.score, reverse=True)
 
@@ -117,20 +131,36 @@ class ChatRetriever:
 
         # 1. Build curriculum filters
         filters: dict[str, Any] = {}
-        if student_profile:
+        if document_context and document_context.book_id:
+            filters["book_id"] = document_context.book_id
+        elif student_profile:
             if "class_level" in student_profile and student_profile["class_level"]:
                 filters["class_level"] = student_profile["class_level"]
             if "subject" in student_profile and student_profile["subject"]:
                 filters["subject"] = student_profile["subject"]
+            if "chapter" in student_profile and student_profile["chapter"]:
+                filters["chapter"] = student_profile["chapter"]
 
-        # 2. Retrieve candidates via vector store lexical / vector search
+        # 2. Retrieve candidates via vector store hybrid search (dense BGE-M3 + lexical tsvector RRF)
         search_results: list[SearchResult] = []
         try:
-            search_results = await self.vector_store.search_lexical(
-                query, limit=limit * 3, filters=filters
+            from rag.embedding import get_embedding_provider
+            emb_provider = get_embedding_provider()
+            query_vec = await emb_provider.embed_query(query)
+            search_results = await self.vector_store.search_hybrid(
+                query_text=query,
+                query_vector=query_vec,
+                limit=limit * 3,
+                filters=filters,
             )
         except Exception as ex:
-            logger.warning("Lexical search error, proceeding with empty results: %s", ex)
+            logger.warning("Hybrid search failed, falling back to lexical search: %s", ex)
+            try:
+                search_results = await self.vector_store.search_lexical(
+                    query, limit=limit * 3, filters=filters
+                )
+            except Exception as lex_ex:
+                logger.warning("Lexical search fallback error: %s", lex_ex)
 
         candidates = [
             RetrievedChunk(

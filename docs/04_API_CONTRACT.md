@@ -20,6 +20,7 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 
 ### Auth & identity
 - `POST /auth/exchange` – exchange provider token for backend session.
+- `POST /auth/google` – exchange verified Google OAuth2 ID token for backend session.
 - `POST /auth/refresh`, `POST /auth/logout`.
 - `GET /me`.
 - `POST /families`, `POST /families/{id}/students` (parent adds child).
@@ -76,6 +77,21 @@ Base: `https://api.thinkbuddy.<domain>/v1`. JSON over HTTPS. OpenAPI generated f
 - `POST /admin/ai-tutor/test-llm` – diagnostic ping to test LLM API connectivity, latency, and token response.
 - `POST /admin/ai-tutor/test-rag` – test RAG textbook chunk retrieval for a query and inspect similarity scores and printed pages.
 - `GET /admin/ai-tutor/stats` – get knowledge base statistics (indexed textbooks, chapters, chunks, and sessions).
+
+### Admin Analytics & Weakness Intelligence (`/admin/analytics/*`, role: admin)
+- `GET /admin/analytics/overview` – aggregate platform overview: total students, total signals, platform mastery average, mastery distribution (mastered, needs_practice, not_enough_data), subject weakness matrix, top struggling chapters, and persistent concept gaps.
+- `GET /admin/analytics/weakness-strength` – alias for `/admin/analytics/overview` with optional filters (`class_level`, `subject`).
+- `GET /admin/analytics/students` – paginated list of enrolled students with class, declared weak/focus subjects, overall mastery score, confidence, and due revision items.
+- `GET /admin/analytics/students/{student_id}` – fine-grained student mastery profile: per-chapter breakdown, top 5 weaknesses, top 5 strengths, and recent learning signals.
+- `GET /admin/analytics/usage` – LLM Chatbot token telemetry: total tokens in/out, average latency (ms), estimated cost in USD and BDT, model breakdowns, and daily usage trends.
+- `GET /admin/analytics/signals` – raw learning signals stream with optional filtering by `student_id` and `source`.
+- `POST /admin/analytics/recompute` – trigger background recomputation of student mastery incorporating exponential recency decay.
+
+### Curriculum & Onboarding Planning
+- `GET /curriculum/subjects` – list NCTB catalog subjects for given `class_level` and `group` including full chapter rosters, difficulty weights, and estimated hours.
+- `POST /planner/calculate-allocation` – calculate mathematically balanced study and revision dataset (minutes/subject, Leitner intervals, focus/weakness boosts, chapter completion vs new study splits).
+- `POST /planner/ai-review-and-plan` – AI review & generator endpoint that evaluates feasibility of exam deadlines and chapter workloads, or parses free-form natural language goals into a structured study schedule.
+- `POST /students/onboarding` – submit full student onboarding setup (class, medium, group, exam target, daily minutes, weak & focus subjects, chapter syllabus statuses).
 
 ### Quiz & Assessments (P04)
 - `POST /students/{id}/quizzes` – create quiz definition for student (student, linked parent, or admin).

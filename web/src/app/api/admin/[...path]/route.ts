@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BACKEND_GATEWAY_URL } from "@/lib/session";
+import crypto from "crypto";
+import { BACKEND_GATEWAY_URL, getSession } from "@/lib/session";
 
-const DEV_ADMIN_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI4NTYzYTJiOWQ3ODE0OTFjOWEyYWEzMTI3NDM2NzU2MyIsInN1YiI6ImE0YzU0NTU1LWU1NzEtNDA1Ny04Nzc4LWE5ZjhmMDdkMGEwYSIsInJvbGUiOiJhZG1pbiIsImV4cCI6MTc5NDIxNTY4NSwiaWF0IjoxNzk0MjE0Nzg1LCJ0eXBlIjoiYWNjZXNzIn0.dpFpn4xK5jnfP8QtXRT-5POrI50-rGjcrgOm8FFrX5A";
+function getAdminToken(): string | null {
+  const secret = process.env.JWT_SECRET_KEY;
+  if (!secret) return null;
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({
+      jti: crypto.randomUUID(),
+      sub: "b7bca8e8-e818-458d-93da-ac58712d07f1",
+      role: "admin",
+      exp: now + 3600,
+      iat: now,
+      type: "access",
+    })
+  ).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
+  return `${header}.${payload}.${sig}`;
+}
 
 function hasPathTraversal(pathSegments: string[]): boolean {
   for (const seg of pathSegments) {
@@ -25,6 +42,17 @@ async function handleAdminProxy(
 ) {
   const { path } = await params;
 
+  // 1. Enforce admin role authentication
+  const session = await getSession();
+  const authHeader = req.headers.get("authorization");
+  const isAuthorizedAdmin = session?.user?.role === "admin" || (authHeader && authHeader.startsWith("Bearer "));
+  if (!isAuthorizedAdmin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHORIZED_ADMIN", message: "Administrative privileges required." } },
+      { status: 403 }
+    );
+  }
+
   if (hasPathTraversal(path)) {
     return NextResponse.json(
       { error: { code: "PATH_TRAVERSAL_DETECTED", message: "Invalid path sequence" } },
@@ -33,16 +61,19 @@ async function handleAdminProxy(
   }
 
   const subPath = path.join("/");
-  // Only permit ai-tutor administrative endpoints through this proxy
-  if (!subPath.startsWith("ai-tutor")) {
+  // Permit ai-tutor, analytics, and administrative endpoints through this proxy
+  const allowedPrefixes = ["ai-tutor", "analytics", "content", "users", "privacy"];
+  const isAllowed = allowedPrefixes.some((p) => subPath.startsWith(p));
+  if (!isAllowed) {
     return NextResponse.json(
-      { error: { code: "FORBIDDEN_PATH", message: "Only ai-tutor admin routes are permitted" } },
+      { error: { code: "FORBIDDEN_PATH", message: "Path is not an allowed admin route" } },
       { status: 403 }
     );
   }
 
   const targetUrl = `${BACKEND_GATEWAY_URL}/v1/admin/${subPath}`;
-  const authHeader = req.headers.get("authorization") || `Bearer ${DEV_ADMIN_TOKEN}`;
+  const adminToken = getAdminToken();
+  const effectiveAuthHeader = authHeader || (adminToken ? `Bearer ${adminToken}` : (session ? `Bearer ${session.accessToken}` : ""));
 
   const forwardHeaders: HeadersInit = {
     "X-Client-Platform": req.headers.get("x-client-platform") || "web",
@@ -50,7 +81,7 @@ async function handleAdminProxy(
     "X-App-Version": "1.0.0",
     "X-Device-Id": "dev-admin-web",
     "Accept-Language": req.headers.get("accept-language") || "bn",
-    Authorization: authHeader,
+    Authorization: effectiveAuthHeader,
   };
 
   let body: BodyInit | undefined = undefined;

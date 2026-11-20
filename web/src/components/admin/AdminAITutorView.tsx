@@ -22,7 +22,9 @@ import {
   Globe,
   Search,
   CheckCircle,
+  Brain,
 } from "lucide-react";
+import AnalyticsDashboard from "./AnalyticsDashboard";
 
 interface AITutorConfig {
   id: string;
@@ -90,12 +92,12 @@ const PROVIDERS: ProviderOption[] = [
     accentGradient: "from-blue-600 to-indigo-600",
     borderActive: "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20",
     recommendedModels: [
-      { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash", tag: "FREE" },
-      { id: "google/gemini-flash-1.5", name: "Gemini 1.5 Flash", tag: "FAST" },
-      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", tag: "SMART" },
-      { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", tag: "POPULAR" },
-      { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B", tag: "OPEN" },
+      { id: "openrouter/auto", name: "Auto Router (Free/Smart)", tag: "RECOMMENDED" },
+      { id: "openrouter/free", name: "OpenRouter Free ($0 Balance)", tag: "100% FREE" },
+      { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", tag: "FAST" },
+      { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B", tag: "SMART" },
       { id: "deepseek/deepseek-chat", name: "DeepSeek V3", tag: "CODE" },
+      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", tag: "NUANCED" },
     ],
   },
   {
@@ -176,7 +178,7 @@ const PROVIDERS: ProviderOption[] = [
 ];
 
 export const AdminAITutorView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"llm" | "rag" | "diagnostics" | "stats">("llm");
+  const [activeTab, setActiveTab] = useState<"llm" | "analytics" | "rag" | "diagnostics" | "stats">("llm");
   const [config, setConfig] = useState<AITutorConfig | null>(null);
   const [stats, setStats] = useState<RAGStats | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -200,7 +202,7 @@ export const AdminAITutorView: React.FC = () => {
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState<boolean>(false);
   const [embeddingModel, setEmbeddingModel] = useState<string>("bge-m3");
   const [embeddingDimensions, setEmbeddingDimensions] = useState<number>(1024);
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.45);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.10);
   const [maxChunks, setMaxChunks] = useState<number>(4);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
 
@@ -475,6 +477,19 @@ export const AdminAITutorView: React.FC = () => {
         </div>
       </div>
 
+      {/* AI Not Configured Alert Banner */}
+      {!config?.has_api_key && (
+        <div className="flex items-center gap-3 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-sm shadow-sm">
+          <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+          <div>
+            <div className="font-semibold">AI Not Configured</div>
+            <div className="text-xs text-amber-800 dark:text-amber-300">
+              Student chat will display &quot;একটু সমস্যা হয়েছে, আবার চেষ্টা করো&quot; until an active OpenRouter API key is saved.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notifications */}
       {saveSuccess && (
         <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-sm shadow-sm animate-in fade-in">
@@ -501,7 +516,19 @@ export const AdminAITutorView: React.FC = () => {
           }`}
         >
           <Key className="w-4 h-4" />
-          LLM & OpenRouter API
+          Chatbot API & Models
+        </button>
+
+        <button
+          onClick={() => setActiveTab("analytics")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+            activeTab === "analytics"
+              ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/80 dark:border-slate-700"
+              : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+          }`}
+        >
+          <Brain className="w-4 h-4 text-indigo-500" />
+          Weakness & Strength Pipeline
         </button>
 
         <button
@@ -601,7 +628,7 @@ export const AdminAITutorView: React.FC = () => {
                   OpenRouter Unified Gateway Active
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-400">
-                  You can use Gemini 2.0 Flash (Free), Claude 3.5 Sonnet, GPT-4o, Llama 3.3 or DeepSeek with a single OpenRouter key.
+                  Select <strong className="text-blue-500">openrouter/auto</strong> or <strong className="text-blue-500">openai/gpt-4o-mini</strong> with your OpenRouter key for high availability. Note: Standalone free models (<code className="font-mono">:free</code>) are subject to upstream shared pool rate limits.
                 </p>
               </div>
               <a
@@ -799,6 +826,11 @@ export const AdminAITutorView: React.FC = () => {
         </form>
       )}
 
+      {/* TAB: WEAKNESS & STRENGTH INTELLIGENCE PIPELINE */}
+      {activeTab === "analytics" && (
+        <AnalyticsDashboard />
+      )}
+
       {/* TAB 2: RAG & VECTOR RETRIEVAL */}
       {activeTab === "rag" && (
         <form onSubmit={handleSave} className="space-y-6">
@@ -890,9 +922,9 @@ export const AdminAITutorView: React.FC = () => {
               </div>
               <input
                 type="range"
-                min="0.2"
+                min="0.05"
                 max="0.8"
-                step="0.05"
+                step="0.01"
                 value={confidenceThreshold}
                 onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
                 className="w-full accent-blue-600 cursor-pointer"

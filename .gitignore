@@ -76,8 +76,15 @@ backups/
 .DS_Store
 Thumbs.db
 
-# OpenTelemetry / debug logs
-*.log
+# Private rendered textbook images (Pass 15 privacy rule)
+private_rendered_math/
+audit_math/private_rendered_math/
+audit_math/scratch*/
+scratch/
+*.png
+*.jpg
+*.jpeg
+
 
 google-services.json
 *.keystore

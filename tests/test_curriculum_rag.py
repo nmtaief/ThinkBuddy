@@ -192,7 +192,7 @@ async def test_invalid_chunks_excluded_from_retrieval() -> None:
         # Check DB flags for chunk 7 (low OCR) and chunk 8 (truncated)
         res_chunks = await session.execute(
             select(Chunk.chunk_index, Chunk.retrievable, Chunk.validation_flags)
-            .where(Chunk.chunk_index.in_([7, 8]))
+            .where(Chunk.book_id == SAMPLE_BOOK_ID, Chunk.chunk_index.in_([7, 8]))
             .order_by(Chunk.chunk_index)
         )
         rows = res_chunks.fetchall()
@@ -214,7 +214,7 @@ async def test_invalid_chunks_excluded_from_retrieval() -> None:
             limit=5,
         )
         # None of the retrieved hits should be chunk 7 or 8
-        stmt_bad = select(Chunk.id).where(Chunk.chunk_index.in_([7, 8]))
+        stmt_bad = select(Chunk.id).where(Chunk.book_id == SAMPLE_BOOK_ID, Chunk.chunk_index.in_([7, 8]))
         bad_ids = set((await session.execute(stmt_bad)).scalars().all())
         for hit in hits:
             assert hit.chunk_id not in bad_ids
@@ -263,7 +263,7 @@ async def test_hybrid_retrieval_bangla_and_english() -> None:
         # 1. Bangla query: Algebraic formulas
         q_bn = "বীজগণিতীয় সূত্রাবলি (a + b)^2 এর বিস্তার"
         v_bn = await provider.embed_query(q_bn)
-        hits_bn = await store.search_hybrid(q_bn, v_bn, limit=3)
+        hits_bn = await store.search_hybrid(q_bn, v_bn, limit=3, filters={"book_id": SAMPLE_BOOK_ID})
         assert len(hits_bn) > 0
         top_bn = hits_bn[0]
         assert top_bn.chapter_number == 2
@@ -273,7 +273,7 @@ async def test_hybrid_retrieval_bangla_and_english() -> None:
         # 2. English query: Linear equations
         q_en = "How to solve linear equations in algebra?"
         v_en = await provider.embed_query(q_en)
-        hits_en = await store.search_hybrid(q_en, v_en, limit=3)
+        hits_en = await store.search_hybrid(q_en, v_en, limit=3, filters={"book_id": SAMPLE_BOOK_ID})
         assert len(hits_en) > 0
         top_en = hits_en[0]
         assert top_en.chapter_number == 2
@@ -408,7 +408,7 @@ from sqlalchemy import select
 
 from core.auth.models import User
 from core.auth.tokens import create_access_jwt
-from core.chat.llm import MockLLMGateway
+from tests.mock_llm import MockLLMGateway
 from core.chat.models import ChatCitation, ChatIdempotencyRecord, UsageCounter
 from core.chat.orchestrator import ChatOrchestrator
 from core.chat.retriever import ChatRetriever, RetrievedChunk
@@ -1287,7 +1287,7 @@ def test_mock_and_fake_guards_fail_closed_on_non_local(
 ) -> None:
     """Verifies that Mock and Fake components strictly load ONLY when ENV=local and fail closed on any other value."""
     from core.auth.provider import FakeAuthProvider
-    from core.chat.llm import MockLLMGateway
+    from tests.mock_llm import MockLLMGateway
     from core.common.config import settings as app_settings
 
     # When ENV is set to any non-local value (prod, dev, test, empty, typos):
@@ -1306,7 +1306,7 @@ def test_mock_and_fake_guards_fail_closed_on_non_local(
 def test_mock_and_fake_guards_succeed_when_local(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that MockLLMGateway and FakeAuthProvider succeed when ENV=local."""
     from core.auth.provider import FakeAuthProvider
-    from core.chat.llm import MockLLMGateway
+    from tests.mock_llm import MockLLMGateway
     from core.common.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "ENV", "local")

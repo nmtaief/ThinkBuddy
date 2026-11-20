@@ -28,7 +28,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.chat.llm import LLMGateway, MockLLMGateway
+from core.chat.llm import LLMGateway
 from core.chat.retriever import CONFIDENCE_THRESHOLD, ChatRetriever
 from core.chat.schemas import (
     ChatCitationItem,
@@ -384,6 +384,75 @@ class ChatOrchestrator:
                 )
             return
 
+        # 4b. Authoritative Deterministic Math Engine
+        from core.chat.math_engine import (
+            parse_math_query,
+            lookup_math_item,
+            format_math_engine_response,
+        )
+
+        stream_math_intent = parse_math_query(
+            text=payload.content,
+            default_class=payload.class_override or (student_profile.get("class_level") if student_profile else 8),
+        )
+
+        if stream_math_intent.is_math_query:
+            math_res = await lookup_math_item(self.db, stream_math_intent)
+            if math_res.status in ["single_match", "multiple_matches"] or (math_res.status == "not_found" and (stream_math_intent.question_no or stream_math_intent.exercise_label)):
+                res_text = format_math_engine_response(math_res)
+                meta_json = json.dumps({"message_id": str(message_id), "retrieval_confidence": 1.0 if math_res.status == "single_match" else 0.8})
+                yield f"event: meta\ndata: {meta_json}\n\n"
+                yield f"event: token\ndata: {json.dumps({'delta': res_text}, ensure_ascii=False)}\n\n"
+
+                cits = []
+                if math_res.status == "single_match" and math_res.item:
+                    it = math_res.item
+                    cit = {
+                        "chunk_id": str(uuid.uuid4()),
+                        "book_title": f"গণিত ({'অষ্টম' if it['class_level'] == 8 else 'নবম-দশম'} শ্রেণি)",
+                        "chapter_title": f"{it['exercise_label']} (প্রশ্ন {it['question_no_display']})",
+                        "chapter_number": it["chapter_number"],
+                        "printed_page": it["printed_page"],
+                    }
+                    cits.append(cit)
+                    yield f"event: citation\ndata: {json.dumps(cit, ensure_ascii=False)}\n\n"
+
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                done_payload = {
+                    "tokens_in": 35,
+                    "tokens_out": len(res_text.split()),
+                    "latency_ms": latency_ms,
+                    "model": "math-engine-v2",
+                }
+                yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
+
+                await self.chat_service.save_turn(
+                    session_id=session.id,
+                    student_id=student_id,
+                    user_content=payload.content,
+                    assistant_content=res_text,
+                    citations=cits,
+                    retrieval_confidence=1.0 if math_res.status == "single_match" else 0.8,
+                    tokens_in=35,
+                    tokens_out=len(res_text.split()),
+                    latency_ms=latency_ms,
+                    model="math-engine-v2",
+                    language=language,
+                )
+                if idempotency_key:
+                    await self.set_cached_turn(
+                        student_id=student_id,
+                        session_id=session.id,
+                        key=idempotency_key,
+                        turn_data={
+                            "meta": {"message_id": str(message_id), "retrieval_confidence": 1.0 if math_res.status == "single_match" else 0.8},
+                            "content": res_text,
+                            "citations": cits,
+                            "done": done_payload,
+                        },
+                    )
+                return
+
         # 5. Hybrid Retrieval with Boosting & Reranking
         chunks, confidence = await self.retriever.retrieve(
             query=payload.content,
@@ -623,6 +692,90 @@ class ChatOrchestrator:
                     },
                 )
             return resp
+
+        # 2b. Authoritative Deterministic Math Engine
+        from core.chat.math_engine import (
+            parse_math_query,
+            lookup_math_item,
+            format_math_engine_response,
+        )
+
+        json_math_intent = parse_math_query(
+            text=payload.content,
+            default_class=payload.class_override or (student_profile.get("class_level") if student_profile else 8),
+        )
+
+        if json_math_intent.is_math_query:
+            math_res = await lookup_math_item(self.db, json_math_intent)
+            if math_res.status in ["single_match", "multiple_matches"] or (math_res.status == "not_found" and (json_math_intent.question_no or json_math_intent.exercise_label)):
+                res_text = format_math_engine_response(math_res)
+                cits = []
+                if math_res.status == "single_match" and math_res.item:
+                    it = math_res.item
+                    cit = {
+                        "chunk_id": str(uuid.uuid4()),
+                        "book_title": f"গণিত ({'অষ্টম' if it['class_level'] == 8 else 'নবম-দশম'} শ্রেণি)",
+                        "chapter_title": f"{it['exercise_label']} (প্রশ্ন {it['question_no_display']})",
+                        "chapter_number": it["chapter_number"],
+                        "printed_page": it["printed_page"],
+                    }
+                    cits.append(cit)
+
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                tokens_in = 35
+                tokens_out = len(res_text.split())
+
+                _, asst_msg = await self.chat_service.save_turn(
+                    session_id=session.id,
+                    student_id=student_id,
+                    user_content=payload.content,
+                    assistant_content=res_text,
+                    citations=cits,
+                    retrieval_confidence=1.0 if math_res.status == "single_match" else 0.8,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    latency_ms=latency_ms,
+                    model="math-engine-v2",
+                    language=language,
+                )
+
+                citation_items = [
+                    ChatCitationItem(
+                        chunk_id=uuid.UUID(c["chunk_id"]),
+                        book_title=c.get("book_title", ""),
+                        chapter_title=c.get("chapter_title", ""),
+                        chapter_number=c.get("chapter_number"),
+                        printed_page=c.get("printed_page"),
+                        score=1.0,
+                    )
+                    for c in cits
+                ]
+
+                resp = ChatMessageResponse(
+                    id=asst_msg.id,
+                    session_id=session.id,
+                    role="assistant",
+                    content=res_text,
+                    language=language,
+                    model="math-engine-v2",
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    latency_ms=latency_ms,
+                    retrieval_confidence=1.0 if math_res.status == "single_match" else 0.8,
+                    citations=citation_items,
+                    created_at=asst_msg.created_at,
+                )
+                if idempotency_key:
+                    await self.set_cached_turn(
+                        student_id=student_id,
+                        session_id=session.id,
+                        key=idempotency_key,
+                        turn_data={
+                            "type": "json",
+                            "response": resp.model_dump(mode="json"),
+                        },
+                    )
+                return resp
 
         # 3. Retrieval
         chunks, confidence = await self.retriever.retrieve(

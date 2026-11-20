@@ -14,7 +14,6 @@ import {
   Users,
   Sliders,
   Sparkles,
-  GitPullRequest,
   CheckCircle,
   FileText,
   Bell,
@@ -32,13 +31,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, currentTab, onSelectTab,
 
   const studentLinks = [
     { id: "today", label: t.nav.today, icon: Calendar },
+    { id: "onboarding", label: lang === "bn" ? "সিলেবাস ও পরীক্ষার রুটিন" : "Syllabus & Routine", icon: Sparkles },
     { id: "plan", label: t.nav.plan, icon: Clock },
     { id: "revision", label: t.nav.revision, icon: RotateCcw },
     { id: "quiz", label: t.nav.quiz, icon: HelpCircle },
     { id: "broad-answer", label: t.student.broadAnswerTitle || "রচনামূলক", icon: FileText },
     { id: "chat", label: t.nav.chat, icon: MessageSquare },
     { id: "progress", label: t.nav.progress, icon: BarChart2 },
-    { id: "change-request", label: t.nav.changeRequest, icon: GitPullRequest },
   ];
 
   const parentLinks = [
@@ -47,7 +46,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ role, currentTab, onSelectTab,
     { id: "study-setup", label: t.nav.studySetup, icon: Sliders },
     { id: "suggestions", label: t.nav.suggestions, icon: Sparkles },
     { id: "auto-adjustments", label: t.nav.autoAdjustments, icon: CheckCircle },
-    { id: "change-requests", label: t.nav.changeRequest, icon: GitPullRequest },
     { id: "notifications", label: t.nav.notifications || "নোটিফিকেশন", icon: Bell },
   ];
 

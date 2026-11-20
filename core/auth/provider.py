@@ -160,8 +160,87 @@ class FirebaseAuthProvider:
             raise ValueError(msg) from None
 
 
+class GoogleAuthProvider:
+    """Production identity verification via Google OAuth2 ID Token.
+
+    Verifies JWT signature against Google's public JWKS certificates
+    (https://www.googleapis.com/oauth2/v3/certs), verifying issuer, expiry,
+    and audience.
+    """
+
+    GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+    GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
+
+    def __init__(self, client_id: str | None = None) -> None:
+        self.client_id = client_id or getattr(settings, "GOOGLE_CLIENT_ID", None)
+        self._jwks_client = None
+
+    def _get_jwks_client(self):
+        if self._jwks_client is None:
+            import jwt
+            self._jwks_client = jwt.PyJWKClient(self.GOOGLE_JWKS_URL)
+        return self._jwks_client
+
+    async def verify_token(self, id_token: str) -> AuthProviderUser:
+        token = id_token.strip()
+        if not token:
+            msg = "Missing Google ID token."
+            raise ValueError(msg)
+
+        # In local dev environment, allow fake:google: test tokens
+        if settings.is_local and (token.startswith("fake:google:") or token.startswith("fake:")):
+            fake_prov = FakeAuthProvider()
+            return await fake_prov.verify_token(token)
+
+        try:
+            import jwt
+
+            jwks_client = self._get_jwks_client()
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            options = {"verify_aud": bool(self.client_id)}
+            decoded = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self.client_id if self.client_id else None,
+                options=options,
+            )
+            iss = decoded.get("iss", "")
+            if iss not in self.GOOGLE_ISSUERS:
+                msg = f"Invalid Google ID token issuer: {iss}"
+                raise ValueError(msg)
+
+            sub = decoded.get("sub")
+            if not sub:
+                msg = "Missing subject (sub) in Google ID token."
+                raise ValueError(msg)
+
+            email = decoded.get("email")
+            display_name = decoded.get("name") or (email.split("@")[0] if email else "Google User")
+
+            return AuthProviderUser(
+                uid=f"google_{sub}",
+                provider="google",
+                email=email,
+                display_name=display_name,
+                auth_time=decoded.get("iat"),
+            )
+        except Exception as exc:
+            msg = f"Google ID token verification failed: {exc}"
+            raise ValueError(msg) from exc
+
+
 _fake_provider: FakeAuthProvider | None = None
 _firebase_provider: FirebaseAuthProvider | None = None
+_google_provider: GoogleAuthProvider | None = None
+
+
+def get_google_auth_provider() -> GoogleAuthProvider:
+    """Factory returning Google Auth provider singleton."""
+    global _google_provider
+    if _google_provider is None:
+        _google_provider = GoogleAuthProvider()
+    return _google_provider
 
 
 def get_auth_provider() -> AuthProvider:

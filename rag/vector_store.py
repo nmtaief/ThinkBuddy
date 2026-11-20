@@ -80,6 +80,15 @@ class PgVectorStore(VectorStore):
         filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         """Execute hybrid search using Reciprocal Rank Fusion (RRF) over dense and lexical hits."""
+        from core.common.config import settings
+        if settings.EMBEDDING_PROVIDER.lower() in ("mock", "test"):
+            logger.warning(
+                "Dense vector search disabled: EMBEDDING_PROVIDER is '%s'. "
+                "Falling back to pure lexical retrieval to prevent mock vector noise.",
+                settings.EMBEDDING_PROVIDER
+            )
+            return await self.search_lexical(query_text, limit=limit, filters=filters)
+
         # 1. Fetch dense candidates
         dense_hits = await self.search_vector(query_vector, limit=limit * 3, filters=filters)
 
@@ -139,6 +148,14 @@ class PgVectorStore(VectorStore):
             if "subject" in filters:
                 where_clauses.append("b.subject = :subject")
                 params["subject"] = filters["subject"]
+            if "chapter" in filters and filters["chapter"]:
+                try:
+                    ch_num = int(filters["chapter"])
+                    where_clauses.append("ch.number = :filter_chapter_num")
+                    params["filter_chapter_num"] = ch_num
+                except (ValueError, TypeError):
+                    where_clauses.append("ch.title ILIKE :filter_chapter_title")
+                    params["filter_chapter_title"] = f"%{filters['chapter']}%"
             if "printed_page" in filters:
                 where_clauses.append("c.printed_page = :printed_page")
                 params["printed_page"] = filters["printed_page"]
@@ -198,12 +215,89 @@ class PgVectorStore(VectorStore):
         filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         """Perform lexical full-text (tsvector) and trigram similarity search."""
-        cleaned_query = query_text.strip()
+        import re
+        from rag.bengali_normalizer import normalize_text, expand_query_for_tsquery
+
+        cleaned_query = normalize_text(query_text)
         if not cleaned_query:
             return []
 
+        # Extract page number mention (e.g. "page 58", "pg 58", "পৃষ্ঠা ৫৮", "৫৮ নং পৃষ্ঠা")
+        page_match = re.search(r'(?:page|pg|পৃষ্ঠা|পেইজ)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        if not page_match:
+            page_match = re.search(r'\b(\d+)\s*(?:নং\s*)?(?:পৃষ্ঠা|page)\b', cleaned_query, re.IGNORECASE)
+        ext_page = int(page_match.group(1)) if page_match else -1
+
+        # Extract chapter number mention (e.g. "chapter 2", "ch 2", "first chapter", "1st chapter", "অধ্যায় ২", "প্রথম অধ্যায়")
+        ordinals = {
+            "first": 1, "1st": 1, "প্রথম": 1, "১ম": 1,
+            "second": 2, "2nd": 2, "দ্বিতীয়": 2, "দ্বিতীয়": 2, "২য়": 2,
+            "third": 3, "3rd": 3, "তৃতীয়": 3, "তৃতীয়": 3, "৩য়": 3,
+            "fourth": 4, "4th": 4, "চতুর্থ": 4, "৪র্থ": 4,
+            "fifth": 5, "5th": 5, "পঞ্চম": 5, "৫ম": 5,
+            "sixth": 6, "6th": 6, "ষষ্ঠ": 6, "৬ষ্ঠ": 6,
+            "seventh": 7, "7th": 7, "সপ্তম": 7, "৭ম": 7,
+            "eighth": 8, "8th": 8, "অষ্টম": 8, "৮ম": 8,
+            "ninth": 9, "9th": 9, "নবম": 9, "৯ম": 9,
+            "tenth": 10, "10th": 10, "দশম": 10, "১০ম": 10,
+            "eleventh": 11, "11th": 11, "একাদশ": 11, "১১শ": 11,
+            "twelfth": 12, "12th": 12, "দ্বাদশ": 12, "১২শ": 12,
+            "thirteenth": 13, "13th": 13, "ত্রয়োদশ": 13, "১৩শ": 13,
+            "fourteenth": 14, "14th": 14, "চতুর্দশ": 14, "১৪শ": 14,
+        }
+        chap_match = re.search(r'(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        if not chap_match:
+            chap_match = re.search(r'\b(\d+)\s*(?:নং\s*)?(?:অধ্যায়|অধ্যায়|chapter|ch)\b', cleaned_query, re.IGNORECASE)
+        ext_chapter = int(chap_match.group(1)) if chap_match else -1
+        if ext_chapter == -1 and re.search(r'(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)', cleaned_query, re.IGNORECASE):
+            for word, ch_num in ordinals.items():
+                if re.search(rf'(?:\b{word}\s*(?:অধ্যায়|অধ্যায়|chapter|ch)?\b|(?:chapter|ch|অধ্যায়|অধ্যায়)\s*{word}\b)', cleaned_query, re.IGNORECASE):
+                    ext_chapter = ch_num
+                    break
+
+        if ext_chapter == -1:
+            ex_match = re.search(r'(?:অনুশীলনী|onushiloni|exercise|ex)\s*(\d+(?:\.\d+)?)', cleaned_query, re.IGNORECASE)
+            if ex_match:
+                try:
+                    ext_chapter = int(ex_match.group(1).split('.')[0])
+                except (ValueError, TypeError):
+                    pass
+            else:
+                dec_match = re.search(r'\b(\d+)\.\d+\b', cleaned_query)
+                if dec_match:
+                    try:
+                        ext_chapter = int(dec_match.group(1))
+                    except (ValueError, TypeError):
+                        pass
+
+        # Extract class level mention (e.g. "class 8", "class 7", "৮ম শ্রেণি")
+        class_match = re.search(r'(?:class|শ্রেণি|শ্রেণী)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        ext_class = int(class_match.group(1)) if class_match else -1
+
+        # Generic Bengali morphological inflection expansion for tsquery
+        expanded_tsquery = expand_query_for_tsquery(cleaned_query)
+
+        # Filter out conversational stopwords for full-text lexical queries
+        stopwords = {
+            "can", "you", "explain", "me", "tell", "about", "what", "is", "please",
+            "help", "with", "the", "a", "an", "book", "of", "in", "for", "to", "how",
+            "er", "kon", "konta", "ta", "ki", "je", "te", "kono", "kobe", "kemon",
+            "বলো", "বলুন", "আমাকে", "একটু", "সম্পর্কে", "কী", "কি", "বোঝাও", "বুঝিয়ে",
+            "দাও", "হলো", "বলতে", "বোঝায়"
+        }
+        raw_words = [w for w in re.findall(r'[\w]+', cleaned_query) if w.lower() not in stopwords]
+        clean_q = " ".join(raw_words) if raw_words else cleaned_query
+
         where_clauses = ["c.retrievable = true"]
-        params: dict[str, Any] = {"q": cleaned_query, "lim": limit}
+        params: dict[str, Any] = {
+            "q": cleaned_query,
+            "clean_q": clean_q,
+            "expanded_tsquery": expanded_tsquery,
+            "ext_page": ext_page,
+            "ext_chapter": ext_chapter,
+            "ext_class": ext_class,
+            "lim": limit,
+        }
 
         if filters:
             if "book_id" in filters:
@@ -215,16 +309,26 @@ class PgVectorStore(VectorStore):
             if "class_level" in filters:
                 where_clauses.append("b.class_level = :class_level")
                 params["class_level"] = filters["class_level"]
+            elif ext_class > 0:
+                where_clauses.append("(b.class_level = :ext_class OR :ext_class = -1)")
             if "subject" in filters:
                 where_clauses.append("b.subject = :subject")
                 params["subject"] = filters["subject"]
+            if "chapter" in filters and filters["chapter"]:
+                try:
+                    ch_num = int(filters["chapter"])
+                    where_clauses.append("ch.number = :filter_chapter_num")
+                    params["filter_chapter_num"] = ch_num
+                except (ValueError, TypeError):
+                    where_clauses.append("ch.title ILIKE :filter_chapter_title")
+                    params["filter_chapter_title"] = f"%{filters['chapter']}%"
             if "printed_page" in filters:
                 where_clauses.append("c.printed_page = :printed_page")
                 params["printed_page"] = filters["printed_page"]
 
         where_sql = " AND ".join(where_clauses)
 
-        # Combines ts_rank with trigram similarity for high-recall Unicode and Bangla search
+        # Combines page match, ts_rank, and trigram similarity for high-recall Unicode and Bangla search
         lexical_template = """
             SELECT
                 c.id AS chunk_id,
@@ -239,14 +343,30 @@ class PgVectorStore(VectorStore):
                 c.text,
                 c.language,
                 (
-                    similarity(c.text, :q) * 0.7
-                    + COALESCE(ts_rank_cd(c.tsv, plainto_tsquery('simple', :q)), 0) * 0.3
+                    CASE WHEN c.printed_page = :ext_page AND :ext_page > 0 THEN 0.85 ELSE 0.0 END
+                    + (CASE WHEN ch.number = :ext_chapter AND :ext_chapter > 0 THEN 0.85 ELSE 0.0 END)
+                    + (CASE WHEN (LOWER(b.title) LIKE '%বিজ্ঞান%' OR LOWER(b.subject) LIKE '%science%') AND (LOWER(:q) LIKE '%science%' OR LOWER(:q) LIKE '%বিজ্ঞান%') THEN 0.35 ELSE 0.0 END)
+                    + (CASE WHEN (LOWER(b.title) LIKE '%গণিত%' OR LOWER(b.subject) LIKE '%math%') AND (LOWER(:q) LIKE '%math%' OR LOWER(:q) LIKE '%গণিত%') THEN 0.35 ELSE 0.0 END)
+                    + (CASE WHEN :expanded_tsquery != '' AND c.tsv @@ to_tsquery('simple', :expanded_tsquery) THEN 0.90
+                            WHEN c.tsv @@ plainto_tsquery('simple', :clean_q) OR c.tsv @@ plainto_tsquery('simple', :q) THEN 0.75
+                            ELSE 0.0 END)
+                    + word_similarity(:clean_q, c.text) * 0.8
+                    + word_similarity(:q, c.text) * 0.4
+                    + COALESCE(ts_rank_cd(c.tsv, plainto_tsquery('simple', :clean_q)), 0) * 0.5
                 ) AS lexical_score
             FROM chunks c
             JOIN books b ON b.id = c.book_id
             JOIN chapters ch ON ch.id = c.chapter_id
             WHERE __WHERE_CLAUSE__
-              AND (similarity(c.text, :q) > 0.05 OR c.tsv @@ plainto_tsquery('simple', :q))
+              AND (
+                (c.printed_page = :ext_page AND :ext_page > 0)
+                OR (ch.number = :ext_chapter AND :ext_chapter > 0)
+                OR word_similarity(:clean_q, c.text) > 0.15
+                OR word_similarity(:q, c.text) > 0.15
+                OR (:expanded_tsquery != '' AND c.tsv @@ to_tsquery('simple', :expanded_tsquery))
+                OR c.tsv @@ plainto_tsquery('simple', :clean_q)
+                OR c.tsv @@ plainto_tsquery('simple', :q)
+              )
             ORDER BY lexical_score DESC
             LIMIT :lim
         """

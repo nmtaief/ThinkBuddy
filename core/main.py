@@ -1,9 +1,12 @@
 """ThinkBuddy Core Service application entrypoint."""
 
 import os
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -16,6 +19,8 @@ from core.common.metrics import metrics_endpoint, metrics_middleware
 from core.common.redis import check_redis_ready, close_redis
 from core.common.sentry import init_sentry
 from core.common.telemetry import setup_telemetry
+from core.common.database import get_db_session
+from rag.embedding import verify_embedding_compatibility
 
 # Setup structured logging
 setup_logging(service_name=settings.OTEL_SERVICE_NAME, log_level=settings.LOG_LEVEL)
@@ -39,6 +44,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         enabled=settings.OTEL_ENABLED,
         endpoint=settings.OTEL_EXPORTER_OTLP_ENDPOINT,
     )
+    # Fail-loud check for RAG vector embedding dimensions and model compatibility
+    app.state.vector_search_enabled = False
+    app.state.embedding_model_loaded = False
+    app.state.embedding_error = None
+
+    try:
+        async for session in get_db_session():
+            await verify_embedding_compatibility(session)
+            app.state.vector_search_enabled = True
+            app.state.embedding_model_loaded = True
+            logger.info("RAG vector embeddings and BGE-M3 model verified successfully.")
+            break
+    except Exception as ex:
+        app.state.vector_search_enabled = False
+        app.state.embedding_model_loaded = False
+        app.state.embedding_error = str(ex)
+        logger.critical(
+            "CRITICAL: RAG embedding check failed: %s. Vector search is DISABLED. Mock embeddings forbidden.",
+            ex,
+            exc_info=True,
+        )
     yield
     await close_redis()
 
@@ -90,6 +116,59 @@ async def readyz() -> JSONResponse:
 
     status_code = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/health", tags=["Health"])
+async def comprehensive_health() -> JSONResponse:
+    """Comprehensive health endpoint reporting embedding model, DB, and LLM reachability."""
+    db_ok, db_msg = await check_database_ready()
+    emb_loaded = bool(getattr(app.state, "embedding_model_loaded", False))
+    vec_enabled = bool(getattr(app.state, "vector_search_enabled", False))
+    emb_err = getattr(app.state, "embedding_error", None)
+
+    # Check LLM reachability (without leaking key)
+    llm_reachable = False
+    llm_detail = "unconfigured"
+    try:
+        from core.chat.llm import get_active_llm_gateway
+        async for session in get_db_session():
+            gw = await get_active_llm_gateway(session)
+            if gw:
+                import httpx
+                headers = {"Authorization": f"Bearer {gw.api_key}"} if getattr(gw, "api_key", None) else {}
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    # Check Ollama / local or OpenRouter
+                    if "11434" in str(gw.api_base) or "ollama" in str(gw.api_base):
+                        resp = await client.get(f"{gw.api_base}/models", headers=headers)
+                    else:
+                        resp = await client.get(f"{gw.api_base}/auth/key", headers=headers)
+                    if resp.status_code == 200:
+                        llm_reachable = True
+                        llm_detail = "reachable"
+                    elif resp.status_code == 401:
+                        llm_detail = "expired_api_key"
+                    else:
+                        llm_detail = f"http_{resp.status_code}"
+            break
+    except Exception as ex:
+        llm_detail = f"error: {str(ex)[:100]}"
+
+    is_healthy = db_ok and emb_loaded and llm_reachable
+    status_str = "healthy" if is_healthy else "degraded"
+
+    payload = {
+        "status": status_str,
+        "service": "core",
+        "db_reachable": db_ok,
+        "db_detail": db_msg,
+        "embedding_model_loaded": emb_loaded,
+        "vector_search_enabled": vec_enabled,
+        "embedding_error": emb_err,
+        "llm_reachable": llm_reachable,
+        "llm_status": llm_detail,
+    }
+    code = status.HTTP_200_OK if db_ok else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(status_code=code, content=payload)
 
 
 # Include domain modules with internal service token protection
