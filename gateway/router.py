@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.auth.router import (
     AuthExchangeRequest,
+    GoogleAuthRequest,
     RefreshTokenRequest,
     TokenResponse,
     UserResponse,
@@ -319,6 +320,30 @@ async def exchange_auth_token(payload: AuthExchangeRequest, request: Request) ->
     return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
 
 
+@router.post("/auth/google", response_model=TokenResponse, tags=["Auth"])
+async def exchange_google_token(payload: GoogleAuthRequest, request: Request) -> Response:
+    """Exchange Google OAuth2 ID token credential for ThinkBuddy session tokens."""
+    trusted_ip = get_trusted_client_ip(request)
+    ip_key = f"rl:auth_google:ip:{trusted_ip}"
+    allowed, retry_after = await RateLimiter.check_rate_limit(
+        ip_key, max_requests=10, window_seconds=60
+    )
+    if not allowed:
+        req_id = request_id_ctx.get() or ""
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many authentication attempts. Please try again later.",
+                    "request_id": req_id,
+                }
+            },
+        )
+    return await forward_to_core(request, json_body=payload.model_dump(mode="json"))
+
+
 @router.post("/auth/refresh", response_model=TokenResponse, tags=["Auth"])
 async def refresh_auth_token(payload: RefreshTokenRequest, request: Request) -> Response:
     """Rotate refresh token and issue a new access token."""
@@ -535,6 +560,30 @@ async def update_device(
 @router.get("/books", response_model=BookListResponse, tags=["Curriculum"])
 async def list_books(request: Request) -> Response:
     """Retrieve list of curriculum textbooks."""
+    return await forward_to_core(request)
+
+
+@router.get("/curriculum/subjects", tags=["Curriculum"])
+async def get_curriculum_subjects(request: Request) -> Response:
+    """Retrieve NCTB curriculum subject catalog with chapter and difficulty metadata."""
+    return await forward_to_core(request)
+
+
+@router.post("/planner/calculate-allocation", tags=["Planner"])
+async def calculate_planner_allocation(request: Request) -> Response:
+    """Calculate balanced study and revision dataset preview."""
+    return await forward_to_core(request)
+
+
+@router.post("/planner/ai-review-and-plan", tags=["Planner"])
+async def ai_review_and_plan_gateway(request: Request) -> Response:
+    """Review student study setup with LLM, parse natural text, and generate balanced plan."""
+    return await forward_to_core(request)
+
+
+@router.post("/students/onboarding", tags=["Planner"])
+async def submit_student_onboarding(request: Request) -> Response:
+    """Submit student self-onboarding: configure syllabus, exams, study budget, weak/focus subjects."""
     return await forward_to_core(request)
 
 
