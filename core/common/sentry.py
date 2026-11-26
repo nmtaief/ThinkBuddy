@@ -58,7 +58,7 @@ def sentry_before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str,
     if "user" in event and isinstance(event["user"], dict):
         event["user"] = {
             "id": event["user"].get("id"),
-            "ip_address": "0.0.0.0",  # Anonymized
+            "ip_address": "0.0.0.0",  # nosec B104 - anonymized IP
         }
 
     # 3. Scrub breadcrumbs

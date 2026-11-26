@@ -209,14 +209,24 @@ async def exchange_token(
             )
             db.add(profile)
 
-            audit = AuditLog(
-                id=uuid.uuid4(),
-                actor_id=user.id,
-                action="family.student_registered_via_link",
-                target_type="parent_student_link",
-                target_id=str(link.id),
-                meta={"parent_id": str(link.parent_id), "student_id": str(user.id)},
-            )
+            if link is not None:
+                audit = AuditLog(
+                    id=uuid.uuid4(),
+                    actor_id=user.id,
+                    action="family.student_registered_via_link",
+                    target_type="parent_student_link",
+                    target_id=str(link.id),
+                    meta={"parent_id": str(link.parent_id), "student_id": str(user.id)},
+                )
+            else:
+                audit = AuditLog(
+                    id=uuid.uuid4(),
+                    actor_id=user.id,
+                    action="student.self_registered",
+                    target_type="user",
+                    target_id=str(user.id),
+                    meta={"student_id": str(user.id)},
+                )
             db.add(audit)
             await db.flush()
 
