@@ -258,6 +258,89 @@ class CoreSettings(BaseSettings):
         description="Minimum OCR quality threshold (0.0 to 1.0) for chunk retrievability",
     )
 
+    # Decoupled RAG (Qdrant Hybrid Vector Store & Syllabus Index)
+    QDRANT_URL: str = Field(
+        default="http://127.0.0.1:6333",
+        description="Qdrant vector database URL (http://127.0.0.1:6333 or :memory: for tests)",
+    )
+    QDRANT_API_KEY: str | None = Field(
+        default=None,
+        description="Optional Qdrant API key",
+    )
+    QDRANT_COLLECTION_NAME: str = Field(
+        default="thinkbuddy_books_hybrid",
+        description="Qdrant hybrid collection name for two-layer textbook chunks",
+    )
+    SYLLABUS_INDEX_PATH: str = Field(
+        default="data/syllabus_index.json",
+        description="Path to the structural syllabus map JSON store",
+    )
+    RAG_RERANKER_ENABLED: str | bool = Field(
+        default="auto",
+        description="Stage-2 Cross-Encoder reranking mode: 'auto' (GPU/MPS only), 'true', or 'false'",
+    )
+    RAG_RERANKER_MODEL: str = Field(
+        default="BAAI/bge-reranker-v2-m3",
+        description="Cross-Encoder reranker model identifier",
+    )
+    RAG_RERANKER_CANDIDATE_K: int = Field(
+        default=25,
+        description="Number of Stage-1 RRF candidates to fetch before reranking",
+    )
+    RAG_TOOL_TIMEOUT_SEC: float = Field(
+        default=8.0,
+        description="Per-tool execution timeout in seconds for decoupled tool loops",
+    )
+    RAG_MAX_TOOL_ITERATIONS: int = Field(
+        default=4,
+        description="Maximum tool-calling iterations per LLM turn",
+    )
+
+    # Multi-Provider LLM API Keys (Gemini, DeepSeek, Claude)
+    GEMINI_API_KEY: str | None = Field(
+        default=None,
+        description="Google Gemini API key for google-genai SDK",
+    )
+    DEEPSEEK_API_KEY: str | None = Field(
+        default=None,
+        description="DeepSeek API key for OpenAI-compatible SDK",
+    )
+    ANTHROPIC_API_KEY: str | None = Field(
+        default=None,
+        description="Anthropic Claude API key for anthropic SDK",
+    )
+    DEFAULT_LLM_PROVIDER: str = Field(
+        default="gemini",
+        description="Default decoupled tool-calling LLM provider (gemini, deepseek, claude)",
+    )
+    GEMINI_TRANSCRIBE_MODEL: str = Field(
+        default="gemini-3.5-transcribe",
+        description="Primary Gemini speech-to-text model",
+    )
+    GEMINI_TRANSCRIBE_FALLBACK_MODEL: str = Field(
+        default="gemini-3.5-flash-lite",
+        description="Fallback Gemini multimodal model for audio transcription",
+    )
+    GEMINI_TTS_MODEL: str = Field(
+        default="gemini-3.8-flash-lite-tts",
+        description="Gemini text-to-speech model for Buddy mascot voice replies",
+    )
+    GEMINI_TTS_VOICE: str = Field(
+        default="Puck",
+        description="Gemini TTS voice name",
+    )
+    VOICE_MAX_AUDIO_BYTES: int = Field(
+        default=10_485_760,
+        description="Maximum uploaded audio size in bytes (10 MB)",
+    )
+    CORS_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            "https://thinkbuddy-web.vercel.app",
+            "http://localhost:3000",
+        ],
+        description="Allowed CORS origins for frontend web clients",
+    )
+
     @property
     def is_local(self) -> bool:
         """Return True only if running in local environment (ENV=local)."""

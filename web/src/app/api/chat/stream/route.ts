@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getSession, BACKEND_GATEWAY_URL } from "@/lib/session";
 
+export const maxDuration = 60;
+
 const EPHEMERAL_DEV_SECRET = crypto.randomBytes(32).toString("hex");
 
 function getStudentToken(studentId?: string): string {
@@ -27,9 +29,20 @@ function getStudentToken(studentId?: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const configuredBackendUrl = process.env.BACKEND_GATEWAY_URL || process.env.CORE_INTERNAL_URL || BACKEND_GATEWAY_URL;
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!configuredBackendUrl || configuredBackendUrl.includes("localhost") || configuredBackendUrl.includes("127.0.0.1"))
+  ) {
+    return NextResponse.json(
+      { error: { code: "BACKEND_URL_MISCONFIGURED", message: "BACKEND_GATEWAY_URL must be configured in production." } },
+      { status: 500 }
+    );
+  }
+
   const session = await getSession();
   const body = await req.json();
-  const { session_id, message, class_override, image_data, retry_message_id } = body;
+  const { session_id, message, class_override, image_data, retry_message_id, provider } = body;
 
   const rawFormFactor = req.headers.get("x-client-form-factor") || "desktop";
   const formFactor =
@@ -51,6 +64,7 @@ export async function POST(req: NextRequest) {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
     Authorization: `Bearer ${studentToken}`,
+    "ngrok-skip-browser-warning": "1",
   };
 
   // Ensure valid chat session UUID
@@ -91,16 +105,19 @@ export async function POST(req: NextRequest) {
             class_override: class_override ? parseInt(class_override, 10) : undefined,
             image_data: image_data || undefined,
             retry_message_id: retry_message_id || undefined,
+            provider: provider || undefined,
           }),
+          signal: req.signal,
         }
       );
 
       if (backendRes.ok && backendRes.body) {
         return new NextResponse(backendRes.body, {
           headers: {
-            "Content-Type": "text/event-stream",
+            "Content-Type": "text/event-stream; charset=utf-8",
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
           },
         });
       }

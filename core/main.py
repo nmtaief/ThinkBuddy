@@ -9,6 +9,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from core.common.auth import verify_internal_service_token
@@ -82,6 +83,14 @@ app = FastAPI(
 )
 
 # Correlation ID and structured HTTP logging middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"https://thinkbuddy-web-.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestIDMiddleware)
 app.middleware("http")(metrics_middleware)
 
@@ -96,6 +105,59 @@ async def get_metrics() -> Any:
 async def healthz() -> dict[str, str]:
     """Liveness probe. Returns 200 OK if service process is alive."""
     return {"status": "ok", "service": "core"}
+
+
+@app.get("/health/rag", tags=["Health"])
+async def health_rag() -> JSONResponse:
+    """Decoupled RAG health check reporting Qdrant, SyllabusIndex, Reranker, and LLM providers."""
+    qdrant_connected = False
+    qdrant_points_count = 0
+    try:
+        from rag.qdrant_store import get_qdrant_store
+
+        q_store = get_qdrant_store()
+        info = q_store.client.get_collection(q_store.collection_name)
+        qdrant_connected = True
+        qdrant_points_count = int(info.points_count or 0)
+    except Exception as exc:
+        logger.warning("RAG health check Qdrant error: %s", exc)
+
+    syllabus_chapters_count = 0
+    try:
+        from rag.syllabus_index import get_syllabus_index_store
+
+        s_store = get_syllabus_index_store()
+        s_store.load()
+        syllabus_chapters_count = len(s_store.list_entries())
+    except Exception as exc:
+        logger.warning("RAG health check SyllabusIndex error: %s", exc)
+
+    reranker_active = False
+    try:
+        from rag.reranker import get_reranker
+
+        reranker_active = bool(get_reranker().enabled)
+    except Exception:
+        reranker_active = False
+
+    configured_providers: list[str] = []
+    if settings.GEMINI_API_KEY and settings.GEMINI_API_KEY.strip():
+        configured_providers.append("gemini")
+    if settings.DEEPSEEK_API_KEY and settings.DEEPSEEK_API_KEY.strip():
+        configured_providers.append("deepseek")
+    if settings.ANTHROPIC_API_KEY and settings.ANTHROPIC_API_KEY.strip():
+        configured_providers.append("claude")
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if qdrant_connected else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "qdrant_connected": qdrant_connected,
+            "qdrant_points_count": qdrant_points_count,
+            "syllabus_chapters_count": syllabus_chapters_count,
+            "reranker_active": reranker_active,
+            "configured_providers": configured_providers,
+        },
+    )
 
 
 @app.get("/readyz", tags=["Health"])
@@ -191,8 +253,11 @@ from core.progress.router import router as progress_router  # noqa: E402
 from core.questions.router import router as questions_router  # noqa: E402
 from core.quiz.admin_router import router as quiz_admin_router  # noqa: E402
 from core.quiz.router import router as quiz_router  # noqa: E402
+from core.quiz.question_bank_router import router as question_bank_router  # noqa: E402
+from core.rag_tools.router import router as rag_tools_router  # noqa: E402
 from core.reviews.router import router as reviews_router  # noqa: E402
 from core.revision.router import router as revision_router  # noqa: E402
+from core.voice.router import router as voice_router  # noqa: E402
 
 internal_routers = [
     auth_router,
@@ -203,6 +268,8 @@ internal_routers = [
     questions_router,
     quiz_router,
     quiz_admin_router,
+    question_bank_router,
+    rag_tools_router,
     reviews_router,
     chat_router,
     progress_router,
@@ -214,6 +281,7 @@ internal_routers = [
     entitlements_router,
     admin_router,
     audit_router,
+    voice_router,
 ]
 
 

@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { ChatMessage, ChatCitation } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { MathRenderer } from "@/components/MathRenderer";
+import { BuddyMascot } from "@/components/student/BuddyMascot";
+import { useVoiceBuddy } from "@/hooks/useVoiceBuddy";
 import {
   analyzeEnglishWriting,
   enqueueVocabWordIntoRevision,
@@ -26,6 +28,10 @@ import {
   BookmarkPlus,
   ArrowRight,
   Award,
+  Mic,
+  Square,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 
 interface AIChatViewProps {
@@ -60,6 +66,16 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
   const [chatMode, setChatMode] = useState<"curriculum" | "english_writing">("curriculum");
   const [savedVocabWords, setSavedVocabWords] = useState<Record<string, boolean>>({});
   const [selectedClass, setSelectedClass] = useState<number>(8);
+  const [selectedProvider, setSelectedProvider] = useState<"gemini" | "deepseek" | "claude">("gemini");
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
+  const [buddyVoiceEnabled, setBuddyVoiceEnabled] = useState<boolean>(true);
+  const [autoSendVoice, setAutoSendVoice] = useState<boolean>(false);
+  const [justCompleted, setJustCompleted] = useState<boolean>(false);
+
+  const voice = useVoiceBuddy({
+    onTranscriptUpdate: (txt) => setInput(txt),
+    autoSend: autoSendVoice,
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "m_welcome",
@@ -214,6 +230,7 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
           class_override: selectedClass,
           image_data: currentImg || undefined,
           retry_message_id: retryIdToSend || undefined,
+          provider: selectedProvider,
         }),
         signal: controller.signal,
       });
@@ -259,7 +276,10 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
 
               if (eventType === "meta") {
                 if (data.session_id) setChatSessionId(data.session_id);
+              } else if (eventType === "status") {
+                if (data.status) setToolStatus(data.status);
               } else if (eventType === "token") {
+                setToolStatus(null);
                 const deltaText = data.text || data.delta || "";
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -285,7 +305,10 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
                       : msg
                   )
                 );
+              } else if (eventType === "done") {
+                setToolStatus(null);
               } else if (eventType === "error") {
+                setToolStatus(null);
                 const rawMsg = data.message || "";
                 const retryMsgId = data.retry_message_id;
                 const isTechnical =
@@ -338,6 +361,7 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
       }
     } finally {
       setIsStreaming(false);
+      setToolStatus(null);
       abortControllerRef.current = null;
       setMessages((prev) =>
         prev.map((msg) => (msg.id === assistantMessageId ? { ...msg, isStreaming: false } : msg))
@@ -495,6 +519,57 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
             <option value={9}>{lang === "bn" ? "৯ম শ্রেণি (SSC)" : "Class 9 (SSC)"}</option>
             <option value={10}>{lang === "bn" ? "১০ম শ্রেণি (SSC)" : "Class 10 (SSC)"}</option>
           </select>
+
+          {/* Multi-Provider LLM Selector */}
+          <select
+            aria-label="LLM Provider"
+            value={selectedProvider}
+            onChange={(e) => setSelectedProvider(e.target.value as "gemini" | "deepseek" | "claude")}
+            style={{
+              fontSize: "var(--text-xs)",
+              padding: "4px 8px",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-surface)",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            <option value="gemini">Gemini</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="claude">Claude</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (voice.isSpeaking) voice.stopSpeaking();
+              setBuddyVoiceEnabled((v) => !v);
+            }}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: "var(--text-xs)",
+              padding: "4px 8px",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--color-border)",
+              backgroundColor: buddyVoiceEnabled ? "rgba(16, 185, 129, 0.12)" : "var(--color-surface)",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+            }}
+            title="Toggle Buddy Voice"
+          >
+            {buddyVoiceEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            <span>{buddyVoiceEnabled ? "Voice On" : "Voice Off"}</span>
+          </button>
+
+          <BuddyMascot
+            state={voice.deriveMascotState(isStreaming, toolStatus, justCompleted)}
+            audioLevel={voice.audioLevel}
+            statusText={toolStatus}
+            size={42}
+          />
         </div>
       </div>
     </div>
@@ -556,11 +631,51 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
                   lineHeight: 1.6,
                 }}
               >
+                {msg.isStreaming && !msg.text && toolStatus && (
+                  <div
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--color-text-muted)",
+                      fontStyle: "italic",
+                      marginBottom: 4,
+                    }}
+                  >
+                    {toolStatus}
+                  </div>
+                )}
+
                 <MathRenderer content={msg.text} />
 
                 {/* Progressive streaming dots */}
                 {msg.isStreaming && (
                   <span style={{ marginLeft: 4, opacity: 0.6 }}>...</span>
+                )}
+
+                {!isUser && !msg.isStreaming && msg.text && (
+                  <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        voice.isSpeaking
+                          ? voice.stopSpeaking()
+                          : voice.speakText(msg.text, "friendly", lang === "bn" ? "bn" : "en")
+                      }
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: "var(--text-xs)",
+                        color: "var(--color-text-muted)",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      <Volume2 size={13} />
+                      <span>{voice.isSpeaking ? (lang === "bn" ? "থামাও" : "Stop") : (lang === "bn" ? "শোনো" : "Listen")}</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* Friendly Inline Retry Button */}
@@ -931,6 +1046,71 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
           backgroundColor: "var(--color-surface)",
         }}
       >
+        {/* Voice Mic Control */}
+        {voice.isRecording ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: "var(--text-xs)", color: "#EF4444", fontWeight: 600 }}>
+              ● {voice.recordingSeconds}s
+            </span>
+            <button
+              type="button"
+              onClick={voice.stopRecording}
+              aria-label="Stop recording"
+              style={{
+                padding: "6px 10px",
+                borderRadius: "var(--radius-md)",
+                backgroundColor: "#EF4444",
+                color: "#fff",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              <Square size={12} />
+              <span>Stop</span>
+            </button>
+            <button
+              type="button"
+              onClick={voice.cancelRecording}
+              aria-label="Cancel recording"
+              style={{
+                padding: "6px 8px",
+                borderRadius: "var(--radius-md)",
+                backgroundColor: "var(--color-surface-hover)",
+                color: "var(--color-text-secondary)",
+                border: "1px solid var(--color-border)",
+                cursor: "pointer",
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={voice.startRecording}
+            disabled={isStreaming || voice.isTranscribing}
+            aria-label="Start voice recording"
+            title={voice.isTranscribing ? "Transcribing..." : "Speak to Buddy"}
+            style={{
+              padding: "8px",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-surface-hover)",
+              color: "var(--color-text-primary)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Mic size={16} />
+          </button>
+        )}
         {/* Hidden Camera/Photo Input */}
         <input
           type="file"
