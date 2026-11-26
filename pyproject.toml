@@ -2,6 +2,9 @@
 requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["core*", "gateway*", "rag*", "workers*"]
+
 [project]
 name = "thinkbuddy"
 version = "0.1.0"
@@ -31,6 +34,11 @@ dependencies = [
     "minio>=7.2.0",
     "packaging>=24.0",
     "sentence-transformers>=3.0.0",
+    "qdrant-client>=1.12.0",
+    "google-genai>=1.0.0",
+    "openai>=1.50.0",
+    "anthropic>=0.40.0",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
