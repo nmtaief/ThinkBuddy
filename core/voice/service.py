@@ -108,7 +108,7 @@ class VoiceService:
         subject: str | None = None,
         topic_hint: str | None = None,
     ) -> dict[str, Any]:
-        """Transcribe audio via gemini-3.5-transcribe (smart mode) with fallback to gemini-3.5-flash-lite."""
+        """Transcribe audio via gemini-3.5-transcribe with fallback to gemini-3.5-flash-lite."""
         from google.genai import types
 
         client = self._get_client()

@@ -33,12 +33,16 @@ async def test_voice_transcribe_primary_and_fallback(monkeypatch: pytest.MonkeyP
             return py_types.SimpleNamespace(text="কোষ বিভাজন কী?")
 
     primary_svc = VoiceService(
-        gemini_client=py_types.SimpleNamespace(aio=py_types.SimpleNamespace(models=FakePrimaryModels()))
+        gemini_client=py_types.SimpleNamespace(
+            aio=py_types.SimpleNamespace(models=FakePrimaryModels())
+        )
     )
     monkeypatch.setattr(vr_mod, "get_voice_service", lambda: primary_svc)
     headers = {"X-Internal-Service-Token": settings.INTERNAL_SERVICE_TOKEN}
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r1 = await client.post(
             "/v1/voice/transcribe",
             files={"audio": ("test.webm", b"fake-audio-bytes", "audio/webm")},
@@ -65,11 +69,15 @@ async def test_voice_transcribe_primary_and_fallback(monkeypatch: pytest.MonkeyP
             return py_types.SimpleNamespace(text="Pythagoras theorem")
 
     fb_svc = VoiceService(
-        gemini_client=py_types.SimpleNamespace(aio=py_types.SimpleNamespace(models=FakeFallbackModels()))
+        gemini_client=py_types.SimpleNamespace(
+            aio=py_types.SimpleNamespace(models=FakeFallbackModels())
+        )
     )
     monkeypatch.setattr(vr_mod, "get_voice_service", lambda: fb_svc)
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r2 = await client.post(
             "/v1/voice/transcribe",
             files={"audio": ("test.webm", b"fake-audio-bytes", "audio/webm")},
@@ -90,7 +98,9 @@ async def test_voice_speak_tts_and_503_browser_fallback(monkeypatch: pytest.Monk
                 inline_data=py_types.SimpleNamespace(data=b"RIFFWAVE", mime_type="audio/wav")
             )
             return py_types.SimpleNamespace(
-                candidates=[py_types.SimpleNamespace(content=py_types.SimpleNamespace(parts=[part]))]
+                candidates=[
+                    py_types.SimpleNamespace(content=py_types.SimpleNamespace(parts=[part]))
+                ]
             )
 
     tts_svc = VoiceService(
@@ -99,7 +109,9 @@ async def test_voice_speak_tts_and_503_browser_fallback(monkeypatch: pytest.Monk
     monkeypatch.setattr(vr_mod, "get_voice_service", lambda: tts_svc)
     headers = {"X-Internal-Service-Token": settings.INTERNAL_SERVICE_TOKEN}
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r_ok = await client.post(
             "/v1/voice/speak",
             json={"text": "শাবাশ!", "mood": "celebrating", "language": "bn"},
@@ -111,7 +123,9 @@ async def test_voice_speak_tts_and_503_browser_fallback(monkeypatch: pytest.Monk
     # Missing API key -> 503 browser_tts fallback
     monkeypatch.setattr(settings, "GEMINI_API_KEY", None)
     monkeypatch.setattr(vr_mod, "get_voice_service", lambda: VoiceService())
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         r_fb = await client.post(
             "/v1/voice/speak",
             json={"text": "Hello", "mood": "friendly", "language": "en"},

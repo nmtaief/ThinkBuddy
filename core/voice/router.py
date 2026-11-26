@@ -39,7 +39,10 @@ async def transcribe_voice(
     if raw_mime not in ALLOWED_AUDIO_MIMES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "INVALID_AUDIO_MIME", "message": f"Unsupported audio MIME type: {raw_mime}"},
+            detail={
+                "code": "INVALID_AUDIO_MIME",
+                "message": f"Unsupported audio MIME type: {raw_mime}",
+            },
         )
 
     audio_bytes = await audio.read()
