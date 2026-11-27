@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { ChatMessage, ChatCitation } from "@/lib/types";
 import { Language, translations, toBengaliDigits } from "@/lib/i18n";
 import { MathRenderer } from "@/components/MathRenderer";
-import { BuddyMascot } from "@/components/student/BuddyMascot";
+import { ThinkBuddyMascot, StaticMascotAvatar, MascotState } from "@/components/student/ThinkBuddyMascot";
 import { useVoiceBuddy } from "@/hooks/useVoiceBuddy";
 import {
   analyzeEnglishWriting,
@@ -69,6 +69,7 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
   const [selectedProvider, setSelectedProvider] = useState<"gemini" | "deepseek" | "claude">("gemini");
   const [toolStatus, setToolStatus] = useState<string | null>(null);
   const [buddyVoiceEnabled, setBuddyVoiceEnabled] = useState<boolean>(true);
+  const [showMascot, setShowMascot] = useState<boolean>(true);
   const [autoSendVoice, setAutoSendVoice] = useState<boolean>(false);
   const [justCompleted, setJustCompleted] = useState<boolean>(false);
 
@@ -564,12 +565,29 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
             <span>{buddyVoiceEnabled ? "Voice On" : "Voice Off"}</span>
           </button>
 
-          <BuddyMascot
-            state={voice.deriveMascotState(isStreaming, toolStatus, justCompleted)}
-            audioLevel={voice.audioLevel}
-            statusText={toolStatus}
-            size={42}
-          />
+          <button
+            type="button"
+            onClick={() => setShowMascot((v) => !v)}
+            className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            title="মাস্কট চালু/বন্ধ করুন"
+          >
+            {showMascot ? "মাস্কট চালু" : "মাস্কট বন্ধ"}
+          </button>
+
+          {showMascot && (
+            <ThinkBuddyMascot
+              state={(() => {
+                const s = voice.deriveMascotState(isStreaming, toolStatus, justCompleted);
+                if (s === "celebrating") return "happy" as MascotState;
+                if (s === "transcribing") return "thinking" as MascotState;
+                return s as MascotState;
+              })()}
+              mouthLevel={voice.audioLevel}
+              micLevel={voice.audioLevel}
+              size={44}
+              showCaption={false}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -617,7 +635,7 @@ export const AIChatView: React.FC<AIChatViewProps> = ({ lang }) => {
                     marginTop: 2,
                   }}
                 >
-                  <Bot size={18} />
+                  <StaticMascotAvatar size={30} />
                 </div>
               )}
 
