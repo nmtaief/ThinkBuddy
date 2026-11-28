@@ -7,8 +7,12 @@ Conforms strictly to:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from typing import Annotated, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
@@ -164,7 +168,10 @@ async def start_quiz_attempt(
     if not current_user.has_parental_consent:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": "Parental consent is required to process minor student data. Processing is suspended.",
+            },
         )
     service = QuizService(db)
     return await service.start_attempt(
@@ -172,7 +179,9 @@ async def start_quiz_attempt(
         student_id=current_user.id,
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
-        integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
+        integrity_verdict=payload.integrity_token
+        or payload.integrity_verdict
+        or x_device_integrity,
         headers=dict(request.headers),
         attempt_id=payload.attempt_id,
     )
@@ -209,14 +218,19 @@ async def attest_quiz_attempt(
     if not current_user.has_parental_consent:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to process minor student data. Processing is suspended."},
+            detail={
+                "code": "CONSENT_WITHDRAWN",
+                "message": "Parental consent is required to process minor student data. Processing is suspended.",
+            },
         )
     return await service.start_attempt(
         quiz_id=attempt.quiz_id,
         student_id=current_user.id,
         client_platform=x_client_platform,
         device_id=payload.device_id or x_device_id,
-        integrity_verdict=payload.integrity_token or payload.integrity_verdict or x_device_integrity,
+        integrity_verdict=payload.integrity_token
+        or payload.integrity_verdict
+        or x_device_integrity,
         headers=dict(request.headers),
         attempt_id=attempt_id,
     )
@@ -258,7 +272,9 @@ async def answer_quiz_item(
     except HTTPException:
         raise
     except (TimeoutError, asyncio.TimeoutError) as exc:
-        logger.warning("Database timeout during quiz item answer (%s); returning retryable 503", exc)
+        logger.warning(
+            "Database timeout during quiz item answer (%s); returning retryable 503", exc
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             headers={"Retry-After": "1"},
@@ -271,7 +287,10 @@ async def answer_quiz_item(
     except Exception as exc:
         err_str = str(exc).lower()
         if any(term in err_str for term in ("timeout", "deadlock", "connection", "lock", "pool")):
-            logger.warning("Transient database contention during quiz answer (%s); returning retryable 503", exc)
+            logger.warning(
+                "Transient database contention during quiz answer (%s); returning retryable 503",
+                exc,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 headers={"Retry-After": "1"},
@@ -351,7 +370,10 @@ async def submit_quiz_attempt(
     except Exception as exc:
         err_str = str(exc).lower()
         if any(term in err_str for term in ("timeout", "deadlock", "connection", "lock", "pool")):
-            logger.warning("Transient database contention during quiz submit (%s); returning retryable 503", exc)
+            logger.warning(
+                "Transient database contention during quiz submit (%s); returning retryable 503",
+                exc,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 headers={"Retry-After": "1"},

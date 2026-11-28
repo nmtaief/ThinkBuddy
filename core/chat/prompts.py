@@ -14,7 +14,19 @@ from __future__ import annotations
 
 from typing import Any
 
-BUDDY_PROMPT_VERSION = "2.2.0-tutor-exercises"
+BUDDY_PROMPT_VERSION = "2.3.0-decoupled-rag"
+
+DECOUPLED_RAG_SYSTEM_INSTRUCTIONS = r"""=== DECOUPLED RETRIEVAL-AS-A-TOOL WORKFLOW ===
+You operate with a Decoupled Retrieval-as-a-Tool architecture. Use the 3 specialized curriculum tools strictly to understand NCTB/HSC syllabus scope, exact Bangla & English textbook terminology, and question styles:
+1. Always call `get_syllabus_scope` first when a student asks about a topic to verify HSC/NCTB chapter boundaries, allowed subtopics, and permitted formulas before explaining.
+2. Call `get_topic_concepts` to align with exact textbook definitions, notation, and Bangla/English terms.
+3. Call `get_book_questions` when quizzing the student, designing CQ/MCQ/Gyanmulok/Anudhabon practice problems, or giving hints on homework.
+
+=== STRICT NON-VERBATIM & ANTI-REGURGITATION GUARDRAILS ===
+- NEVER quote or dump textbook paragraphs verbatim.
+- NEVER output direct solutions to exercise questions unless the student explicitly asks for a step-by-step walkthrough after attempting the problem first.
+- Always synthesize explanations in warm, natural, student-friendly Bangla/English using the 'তুমি' persona, and generate original parallel practice questions that match the retrieved NCTB/HSC style.
+"""
 
 BUDDY_SYSTEM_TEMPLATE = r"""You are Buddy (সহায়ক এআই), the friendly, encouraging, and intelligent AI study companion and tutor for school students in Bangladesh following the NCTB curriculum. You act like a kind, supportive, and knowledgeable older sibling (বড় ভাই বা আপু) who explains concepts clearly, guides homework step-by-step, and makes learning stress-free.
 
@@ -128,7 +140,11 @@ def build_system_prompt(
     class_level = profile.get("class_level", 8)
     medium = profile.get("medium", "bn")
     medium_desc = "Bangla Version (বাংলা মাধ্যম)" if medium == "bn" else "English Version (ইংরেজি মাধ্যম)"
-    preferred_language = "Bangla (বাংলা)" if profile.get("preferred_language") == "bn" else "English or Bangla matching the student"
+    preferred_language = (
+        "Bangla (বাংলা)"
+        if profile.get("preferred_language") == "bn"
+        else "English or Bangla matching the student"
+    )
 
     weak_topics = profile.get("weak_topics") or []
     weak_section = ""
@@ -153,3 +169,24 @@ def build_system_prompt(
     prompt = prompt.replace("{weak_topics_section}", str(weak_section))
     prompt = prompt.replace("{dynamic_catalog_section}", str(catalog_text))
     return prompt.strip()
+
+
+def build_decoupled_system_prompt(
+    student_profile: dict[str, Any] | None = None,
+    language: str = "bn",
+) -> str:
+    """Build the unified system prompt for Gemini, DeepSeek, and Claude tool-calling turns."""
+    base = build_system_prompt(student_profile)
+    lang_note = (
+        "Respond primarily in clear, natural Bangla (বাংলা লিপি) with standard English scientific terms in parentheses where helpful."
+        if language == "bn"
+        else "Respond in clear, natural English while preserving official NCTB/HSC Bangla terms where helpful."
+    )
+    return f"{base}\n\n{DECOUPLED_RAG_SYSTEM_INSTRUCTIONS}\n{lang_note}"
+
+
+def sanitize_chunk_text(text: str) -> str:
+    """Re-export from orchestrator for prompt assembly security."""
+    from core.chat.orchestrator import sanitize_chunk_text as _sanitize
+
+    return _sanitize(text)

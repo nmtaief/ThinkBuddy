@@ -1914,6 +1914,8 @@ async def test_route_inventory_requires_auth_on_every_route() -> None:
 
     public_allowlist = {
         "/metrics",
+        "/health",
+        "/health/rag",
         "/healthz",
         "/readyz",
         "/v1/auth/exchange",

@@ -21,6 +21,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -37,32 +38,71 @@ from core.chat.schemas import (
 )
 from core.chat.service import ChatService
 from core.quiz.integrity import IntegrityEngine
-from core.quiz.models import OPEN_ATTEMPT_STATES, AttemptEvent, Quiz, QuizAttempt
+from core.quiz.models import AttemptEvent
 from core.quiz.service import QuizService
 
 logger = logging.getLogger(__name__)
 
 
 def sanitize_chunk_text(text: str) -> str:
-    """Escape or strip delimiter strings (including </context>, <context>, </system>) before prompt assembly.
+    """Escape or strip delimiter strings and adversarial injection tokens before prompt assembly.
 
     Security Defenses:
+    - Zero-width character stripping (\u200b-\u200d, \ufeff).
     - Unicode NFKC normalization: resolves fullwidth homoglyphs (e.g. ＜ U+FF1C, ＞ U+FF1E, ／ U+FF0F).
-    - Spaced & case-insensitive matching: handles `<  /  context  >`, `< CONTEXT >`, etc.
-    - Mathematical / angle bracket lookalikes: handles ⟨, ⟩, ‹, ›.
+    - XML CDATA cloaking defense: escapes <![CDATA[ and ]]>.
+    - LLM special tokens: strips ChatML (<|im_start|>, <|im_end|>), Llama-3 (<|start_header_id|>, etc.), and [INST].
+    - Unicode white/double brackets: neutralizes ⟦context⟧, ⟦system⟧, ⟪...⟫, 《...》.
+    - Tag neutralization: replaces context, system, instruction, prompt tags with &lt; and &gt;.
+    - Markdown image / SSRF data exfiltration: disarms ![...](https://...) to prevent token leak via img requests.
     """
     if not text:
         return ""
 
-    # 1. Unicode NFKC normalization maps fullwidth/homoglyph characters to standard ASCII
-    normalized = unicodedata.normalize("NFKC", text)
+    # 1. Strip zero-width Unicode steganography characters
+    sanitized = re.sub(r"[\u200B-\u200D\uFEFF]", "", text)
 
-    # 2. Neutralize context, system, instruction, and prompt tags (both ASCII and bracket lookalikes)
-    pattern = re.compile(
+    # 2. Unicode NFKC normalization maps fullwidth/homoglyph characters to standard ASCII
+    sanitized = unicodedata.normalize("NFKC", sanitized)
+
+    # 3. Strip / Neutralize XML CDATA wrappers
+    sanitized = re.sub(r"<!\[CDATA\[", "&lt;![CDATA[", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\]\]>", "]]&gt;", sanitized)
+
+    # 4. Strip ChatML, Llama-3, Mistral, and LLM special control tokens
+    control_token_pattern = re.compile(
+        r"<\|(?:im_start|im_end|start_header_id|end_header_id|eot_id|begin_of_text|end_of_text)\|>"
+        r"|\[/?INST\]",
+        re.IGNORECASE,
+    )
+    sanitized = control_token_pattern.sub("", sanitized)
+
+    # 5. Neutralize Unicode special enclosure brackets
+    unicode_bracket_pattern = re.compile(
+        r"[⟦⟪《«]\s*[/／]?\s*(?:context|system|instruction|prompt)\s*[⟧⟫》»]",
+        re.IGNORECASE,
+    )
+    sanitized = unicode_bracket_pattern.sub(
+        lambda m: (
+            m.group(0)
+            .replace("⟦", "[")
+            .replace("⟧", "]")
+            .replace("⟪", "[")
+            .replace("⟫", "]")
+            .replace("《", "[")
+            .replace("》", "]")
+            .replace("«", "[")
+            .replace("»", "]")
+        ),
+        sanitized,
+    )
+
+    # 6. Neutralize context, system, instruction, and prompt tags
+    tag_pattern = re.compile(
         r"[<＜‹⟨]\s*[/／]?\s*(?:context|system|instruction|prompt)\s*[>＞›⟩]",
         re.IGNORECASE,
     )
-    sanitized = pattern.sub(
+    sanitized = tag_pattern.sub(
         lambda m: (
             m.group(0)
             .replace("<", "&lt;")
@@ -74,8 +114,16 @@ def sanitize_chunk_text(text: str) -> str:
             .replace("⟨", "&lt;")
             .replace("⟩", "&gt;")
         ),
-        normalized,
+        sanitized,
     )
+
+    # 7. Neutralize external markdown image / data / SSRF exfiltration patterns
+    image_exfil_pattern = re.compile(
+        r"!\[(.*?)\]\((https?://[^\s\)]+|javascript:[^\s\)]+|data:[^\s\)]+)\)",
+        re.IGNORECASE,
+    )
+    sanitized = image_exfil_pattern.sub(r"[Image: \1](\2)", sanitized)
+
     return sanitized
 
 
@@ -99,7 +147,13 @@ class ChatOrchestrator:
         if self.llm_gateway is not None:
             return self.llm_gateway
         from core.chat.llm import get_active_llm_gateway
-        return await get_active_llm_gateway(self.db)
+
+        gw = await get_active_llm_gateway(self.db)
+        if gw is None:
+            from core.chat.llm import OpenRouterGateway
+
+            return OpenRouterGateway()
+        return gw
 
     async def get_cached_turn(
         self,
@@ -111,6 +165,7 @@ class ChatOrchestrator:
         cache_k = f"chat:idemp:{student_id}:{session_id}:{key}"
         try:
             from core.common.redis import get_redis_client
+
             r = get_redis_client()
             data = await r.get(cache_k)
             if data:
@@ -120,6 +175,7 @@ class ChatOrchestrator:
 
         # Database lookup backed by unique constraint uq_chat_idempotency_key and non-expired check
         from core.chat.models import ChatIdempotencyRecord
+
         now = datetime.now(UTC)
         stmt = select(ChatIdempotencyRecord).where(
             ChatIdempotencyRecord.student_id == student_id,
@@ -133,8 +189,11 @@ class ChatOrchestrator:
             ttl_remaining = max(1, int((record.expires_at - now).total_seconds()))
             try:
                 from core.common.redis import get_redis_client
+
                 r = get_redis_client()
-                await r.set(cache_k, json.dumps(record.response_payload), ex=min(ttl_remaining, 86400))
+                await r.set(
+                    cache_k, json.dumps(record.response_payload), ex=min(ttl_remaining, 86400)
+                )
             except Exception:
                 pass
             return record.response_payload
@@ -150,11 +209,13 @@ class ChatOrchestrator:
     ) -> None:
         """Store completed chat turn backed by database unique constraint with Redis L1 cache."""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from core.chat.models import ChatIdempotencyRecord
 
         cache_k = f"chat:idemp:{student_id}:{session_id}:{key}"
         try:
             from core.common.redis import get_redis_client
+
             r = get_redis_client()
             await r.set(cache_k, json.dumps(turn_data), ex=ttl_seconds)
         except Exception as exc:
@@ -173,15 +234,14 @@ class ChatOrchestrator:
                 created_at=now,
                 expires_at=expires_at,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_chat_idempotency_key"
-            )
+            .on_conflict_do_nothing(constraint="uq_chat_idempotency_key")
         )
         await self.db.execute(stmt)
         await self.db.commit()
 
         try:
             from core.common.redis import get_redis_client
+
             r = get_redis_client()
             await r.set(cache_k, json.dumps(turn_data), ex=ttl_seconds)
         except Exception as exc:
@@ -220,8 +280,7 @@ class ChatOrchestrator:
                 detail={
                     "code": "DAILY_CHAT_QUOTA_EXCEEDED",
                     "message": (
-                        f"Daily chat quota of {max_quota} messages reached. "
-                        "Resets at midnight UTC."
+                        f"Daily chat quota of {max_quota} messages reached. Resets at midnight UTC."
                     ),
                     "current": current,
                     "max": max_quota,
@@ -259,9 +318,7 @@ class ChatOrchestrator:
         )
 
         language = (
-            payload.language
-            or (student_profile.get("medium") if student_profile else "bn")
-            or "bn"
+            payload.language or (student_profile.get("medium") if student_profile else "bn") or "bn"
         )
 
         # 4. Query Intent Classification
@@ -347,8 +404,7 @@ class ChatOrchestrator:
 
         if intent in ["unsafe", "off_topic"]:
             guidance_text = (
-                "আমি তোমার পাঠ্যবই সংক্রান্ত পড়াশোনায় সাহায্য করতে পারি। "
-                "পাঠ্যবইয়ের কোনো বিষয় নিয়ে প্রশ্ন থাকলে বলো।"
+                "আমি তোমার পাঠ্যবই সংক্রান্ত পড়াশোনায় সাহায্য করতে পারি। পাঠ্যবইয়ের কোনো বিষয় নিয়ে প্রশ্ন থাকলে বলো।"
                 if language == "bn"
                 else (
                     "I am your textbook study assistant. "
@@ -386,21 +442,30 @@ class ChatOrchestrator:
 
         # 4b. Authoritative Deterministic Math Engine
         from core.chat.math_engine import (
-            parse_math_query,
-            lookup_math_item,
             format_math_engine_response,
+            lookup_math_item,
+            parse_math_query,
         )
 
         stream_math_intent = parse_math_query(
             text=payload.content,
-            default_class=payload.class_override or (student_profile.get("class_level") if student_profile else 8),
+            default_class=payload.class_override
+            or (student_profile.get("class_level") if student_profile else 8),
         )
 
         if stream_math_intent.is_math_query:
             math_res = await lookup_math_item(self.db, stream_math_intent)
-            if math_res.status in ["single_match", "multiple_matches"] or (math_res.status == "not_found" and (stream_math_intent.question_no or stream_math_intent.exercise_label)):
+            if math_res.status in ["single_match", "multiple_matches"] or (
+                math_res.status == "not_found"
+                and (stream_math_intent.question_no or stream_math_intent.exercise_label)
+            ):
                 res_text = format_math_engine_response(math_res)
-                meta_json = json.dumps({"message_id": str(message_id), "retrieval_confidence": 1.0 if math_res.status == "single_match" else 0.8})
+                meta_json = json.dumps(
+                    {
+                        "message_id": str(message_id),
+                        "retrieval_confidence": 1.0 if math_res.status == "single_match" else 0.8,
+                    }
+                )
                 yield f"event: meta\ndata: {meta_json}\n\n"
                 yield f"event: token\ndata: {json.dumps({'delta': res_text}, ensure_ascii=False)}\n\n"
 
@@ -445,13 +510,101 @@ class ChatOrchestrator:
                         session_id=session.id,
                         key=idempotency_key,
                         turn_data={
-                            "meta": {"message_id": str(message_id), "retrieval_confidence": 1.0 if math_res.status == "single_match" else 0.8},
+                            "meta": {
+                                "message_id": str(message_id),
+                                "retrieval_confidence": 1.0
+                                if math_res.status == "single_match"
+                                else 0.8,
+                            },
                             "content": res_text,
                             "citations": cits,
                             "done": done_payload,
                         },
                     )
                 return
+
+        # 4.5. Decoupled Multi-Provider Tool Routing (when provider is explicitly selected)
+        if getattr(payload, "provider", None) in ("gemini", "deepseek", "claude"):
+            from core.chat.tool_orchestrator import LLMToolOrchestrator
+
+            tool_orch = LLMToolOrchestrator()
+            status_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            async def _emit_status(status_msg: str) -> None:
+                await status_queue.put(status_msg)
+
+            async def _run_tool_loop() -> Any:
+                try:
+                    return await tool_orch.run(
+                        query=payload.content,
+                        provider=payload.provider,
+                        student_profile=student_profile,
+                        language=language,
+                        on_status=_emit_status,
+                    )
+                finally:
+                    await status_queue.put(None)
+
+            task = asyncio.create_task(_run_tool_loop())
+            try:
+                while True:
+                    status_msg = await status_queue.get()
+                    if status_msg is None:
+                        break
+                    if request is not None and await request.is_disconnected():
+                        task.cancel()
+                        return
+                    yield f"event: status\ndata: {json.dumps({'status': status_msg})}\n\n"
+
+                res = await task
+            except asyncio.CancelledError:
+                task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
+                return
+            except Exception as exc:
+                logger.error(
+                    "Decoupled tool-loop failed for provider '%s': %s", payload.provider, exc
+                )
+                yield f"event: error\ndata: {json.dumps({'code': 'TOOL_LOOP_ERROR', 'message': 'একটু সমস্যা হয়েছে, আবার চেষ্টা করো'})}\n\n"
+                return
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await task
+            meta_json = json.dumps(
+                {
+                    "message_id": str(message_id),
+                    "retrieval_confidence": 1.0,
+                    "provider": res.provider,
+                    "model": res.model,
+                    "tool_calls": [tc.tool_name for tc in res.tool_calls],
+                }
+            )
+            yield f"event: meta\ndata: {meta_json}\n\n"
+            yield f"event: token\ndata: {json.dumps({'delta': res.content})}\n\n"
+            done_payload = {
+                "tokens_in": res.tokens_in,
+                "tokens_out": res.tokens_out,
+                "latency_ms": res.latency_ms,
+            }
+            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
+            await self.chat_service.save_turn(
+                session_id=session.id,
+                student_id=student_id,
+                user_content=payload.content,
+                assistant_content=res.content,
+                citations=[],
+                retrieval_confidence=1.0,
+                tokens_in=res.tokens_in,
+                tokens_out=res.tokens_out,
+                latency_ms=res.latency_ms,
+                model=res.model,
+                language=language,
+            )
+            await self.chat_service.record_usage(student_id, tokens=res.tokens_in + res.tokens_out)
+            return
 
         # 5. Hybrid Retrieval with Boosting & Reranking
         chunks, confidence = await self.retriever.retrieve(
@@ -463,8 +616,7 @@ class ChatOrchestrator:
         # 6. Low Confidence Fallback ("not found in your textbook" without guessing)
         if confidence < CONFIDENCE_THRESHOLD or not chunks:
             fallback_text = (
-                "তোমার পাঠ্যবইয়ে এই বিষয়টি স্পষ্টভাবে খুঁজে পাওয়া যায়নি। "
-                "তুমি সংশ্লিষ্ট অধ্যায়টি দেখতে পারো।"
+                "তোমার পাঠ্যবইয়ে এই বিষয়টি স্পষ্টভাবে খুঁজে পাওয়া যায়নি। তুমি সংশ্লিষ্ট অধ্যায়টি দেখতে পারো।"
                 if language == "bn"
                 else (
                     "I couldn't find this topic in your textbook. "
@@ -503,9 +655,7 @@ class ChatOrchestrator:
             return
 
         # 7. Confident Generation with Authoritative Citations
-        meta_json = json.dumps(
-            {"message_id": str(message_id), "retrieval_confidence": confidence}
-        )
+        meta_json = json.dumps({"message_id": str(message_id), "retrieval_confidence": confidence})
         yield f"event: meta\ndata: {meta_json}\n\n"
 
         prompt_messages = [
@@ -625,9 +775,7 @@ class ChatOrchestrator:
             session_id=session_id,
         )
         language = (
-            payload.language
-            or (student_profile.get("medium") if student_profile else "bn")
-            or "bn"
+            payload.language or (student_profile.get("medium") if student_profile else "bn") or "bn"
         )
 
         # 2. Classification
@@ -695,19 +843,23 @@ class ChatOrchestrator:
 
         # 2b. Authoritative Deterministic Math Engine
         from core.chat.math_engine import (
-            parse_math_query,
-            lookup_math_item,
             format_math_engine_response,
+            lookup_math_item,
+            parse_math_query,
         )
 
         json_math_intent = parse_math_query(
             text=payload.content,
-            default_class=payload.class_override or (student_profile.get("class_level") if student_profile else 8),
+            default_class=payload.class_override
+            or (student_profile.get("class_level") if student_profile else 8),
         )
 
         if json_math_intent.is_math_query:
             math_res = await lookup_math_item(self.db, json_math_intent)
-            if math_res.status in ["single_match", "multiple_matches"] or (math_res.status == "not_found" and (json_math_intent.question_no or json_math_intent.exercise_label)):
+            if math_res.status in ["single_match", "multiple_matches"] or (
+                math_res.status == "not_found"
+                and (json_math_intent.question_no or json_math_intent.exercise_label)
+            ):
                 res_text = format_math_engine_response(math_res)
                 cits = []
                 if math_res.status == "single_match" and math_res.item:
@@ -777,6 +929,46 @@ class ChatOrchestrator:
                     )
                 return resp
 
+        # 2.5. Decoupled Multi-Provider Tool Routing (when provider is explicitly selected)
+        if getattr(payload, "provider", None) in ("gemini", "deepseek", "claude"):
+            from core.chat.tool_orchestrator import LLMToolOrchestrator
+
+            tool_orch = LLMToolOrchestrator()
+            res = await tool_orch.run(
+                query=payload.content,
+                provider=payload.provider,
+                student_profile=student_profile,
+                language=language,
+            )
+            _, asst_msg = await self.chat_service.save_turn(
+                session_id=session.id,
+                student_id=student_id,
+                user_content=payload.content,
+                assistant_content=res.content,
+                citations=[],
+                retrieval_confidence=1.0,
+                tokens_in=res.tokens_in,
+                tokens_out=res.tokens_out,
+                latency_ms=res.latency_ms,
+                model=res.model,
+                language=language,
+            )
+            await self.chat_service.record_usage(student_id, tokens=res.tokens_in + res.tokens_out)
+            return ChatMessageResponse(
+                id=asst_msg.id,
+                session_id=session.id,
+                role="assistant",
+                content=res.content,
+                language=language,
+                model=res.model,
+                citations=[],
+                retrieval_confidence=1.0,
+                tokens_in=res.tokens_in,
+                tokens_out=res.tokens_out,
+                latency_ms=res.latency_ms,
+                created_at=asst_msg.created_at,
+            )
+
         # 3. Retrieval
         chunks, confidence = await self.retriever.retrieve(
             query=payload.content,
@@ -787,8 +979,7 @@ class ChatOrchestrator:
         # 4. Low Confidence
         if confidence < CONFIDENCE_THRESHOLD or not chunks:
             fallback_text = (
-                "তোমার পাঠ্যবইয়ে এই বিষয়টি স্পষ্টভাবে খুঁজে পাওয়া যায়নি। "
-                "তুমি সংশ্লিষ্ট অধ্যায়টি দেখতে পারো।"
+                "তোমার পাঠ্যবইয়ে এই বিষয়টি স্পষ্টভাবে খুঁজে পাওয়া যায়নি। তুমি সংশ্লিষ্ট অধ্যায়টি দেখতে পারো।"
                 if language == "bn"
                 else (
                     "I couldn't find this topic in your textbook. "

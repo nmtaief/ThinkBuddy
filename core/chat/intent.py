@@ -94,9 +94,20 @@ def parse_student_intent(text: str) -> ExtractedIntent:
 
     # 2. Asking library books
     library_triggers = [
-        "what books", "which books", "kon boi", "kon kon boi", "books available",
-        "library", "বই আছে", "কোন বই", "কী কী বই", "কি কি বই", "ssc books", "ssc boi",
-        "বইগুলো কী", "বইগুলো কি"
+        "what books",
+        "which books",
+        "kon boi",
+        "kon kon boi",
+        "books available",
+        "library",
+        "বই আছে",
+        "কোন বই",
+        "কী কী বই",
+        "কি কি বই",
+        "ssc books",
+        "ssc boi",
+        "বইগুলো কী",
+        "বইগুলো কি",
     ]
     if any(t in clean_lower for t in library_triggers):
         intent.is_asking_library = True
@@ -121,9 +132,27 @@ def parse_student_intent(text: str) -> ExtractedIntent:
             intent.class_level = 10
 
     # 4. Subject detection
-    if any(w in clean_lower for w in ["math", "maths", "গণিত", "gonit", "onko", "অঙ্ক", "algebra", "geometry", "trigonometry", "ত্রিকোণমিতি", "পরিসংখ্যান", "statistics"]):
+    if any(
+        w in clean_lower
+        for w in [
+            "math",
+            "maths",
+            "গণিত",
+            "gonit",
+            "onko",
+            "অঙ্ক",
+            "algebra",
+            "geometry",
+            "trigonometry",
+            "ত্রিকোণমিতি",
+            "পরিসংখ্যান",
+            "statistics",
+        ]
+    ):
         intent.subject = "math"
-    elif any(w in clean_lower for w in ["science", "বিজ্ঞান", "biggan", "biology", "physics", "chemistry"]):
+    elif any(
+        w in clean_lower for w in ["science", "বিজ্ঞান", "biggan", "biology", "physics", "chemistry"]
+    ):
         intent.subject = "science"
     elif any(w in clean_lower for w in ["english", "ইংরেজি", "eng"]):
         intent.subject = "english"
@@ -155,7 +184,9 @@ def parse_student_intent(text: str) -> ExtractedIntent:
         if m_dec:
             intent.exercise_label = f"অনুশীলনী {m_dec.group(1)}"
             intent.chapter = m_dec.group(1).split(".")[0]
-        elif intent.chapter and ("onushiloni" in clean_lower or "অনুশীলনী" in clean_lower or "exercise" in clean_lower):
+        elif intent.chapter and (
+            "onushiloni" in clean_lower or "অনুশীলনী" in clean_lower or "exercise" in clean_lower
+        ):
             intent.exercise_label = f"অনুশীলনী {intent.chapter}"
         elif "onushiloni" in clean_lower or "অনুশীলনী" in clean_lower or "exercise" in clean_lower:
             intent.exercise_label = "অনুশীলনী"
@@ -259,6 +290,7 @@ async def rewrite_conversational_query(
     Resolves 'its the last chapter of math' dynamically from PostgreSQL `chapters` table.
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     q_clean = normalize_digits(raw_query).strip()
@@ -276,14 +308,25 @@ async def rewrite_conversational_query(
                     return prev_text
 
     # Case 1: Ordinal follow-up ("and the second one?", "দ্বিতীয়টি?", "and question 2?")
-    ord_match = re.search(r"\b(?:the\s+)?(second|third|fourth|fifth|2nd|3rd|4th|5th|দ্বিতীয়|তৃতীয়|চতুর্থ|পঞ্চম)\s*(?:one|question|no|টা|টি)?\b", q_lower)
+    ord_match = re.search(
+        r"\b(?:the\s+)?(second|third|fourth|fifth|2nd|3rd|4th|5th|দ্বিতীয়|তৃতীয়|চতুর্থ|পঞ্চম)\s*(?:one|question|no|টা|টি)?\b",
+        q_lower,
+    )
     if ord_match:
         ord_word = ord_match.group(1)
         ord_map = {
-            "second": 2, "2nd": 2, "দ্বিতীয়": 2,
-            "third": 3, "3rd": 3, "তৃতীয়": 3,
-            "fourth": 4, "4th": 4, "চতুর্থ": 4,
-            "fifth": 5, "5th": 5, "পঞ্চম": 5,
+            "second": 2,
+            "2nd": 2,
+            "দ্বিতীয়": 2,
+            "third": 3,
+            "3rd": 3,
+            "তৃতীয়": 3,
+            "fourth": 4,
+            "4th": 4,
+            "চতুর্থ": 4,
+            "fifth": 5,
+            "5th": 5,
+            "পঞ্চম": 5,
         }
         target_qno = ord_map.get(ord_word, 2)
         rewritten = f"Class {scope.get('class_level', 8)} {scope.get('subject', 'math')} chapter {scope.get('chapter', 1)} exercise {scope.get('exercise_label', 'অনুশীলনী ১')} question {target_qno}"
@@ -298,6 +341,7 @@ async def rewrite_conversational_query(
         if db is not None:
             try:
                 from sqlalchemy import text
+
                 q_sql = text("""
                     SELECT c.number, c.title
                     FROM chapters c
@@ -310,7 +354,11 @@ async def rewrite_conversational_query(
                 row = res.first()
                 if row:
                     rewritten = f"{subj} শ্রেণি {cl} অধ্যায় {row[0]} {row[1]}"
-                    logger.info("Rewrite last chapter query dynamically from DB: '%s' -> '%s'", raw_query, rewritten)
+                    logger.info(
+                        "Rewrite last chapter query dynamically from DB: '%s' -> '%s'",
+                        raw_query,
+                        rewritten,
+                    )
                     return rewritten
             except Exception as ex:
                 logger.warning("Error querying dynamic last chapter: %s", ex)
@@ -320,7 +368,9 @@ async def rewrite_conversational_query(
         return rewritten
 
     # Case 3: Pronoun reference to formula / definition ("what is its formula?", "এর সূত্র কী?", "its formula")
-    if re.search(r"\b(its|it's|তার|এর|এটার)\s+(formula|definition|rule|সূত্র|সংজ্ঞা|নিয়ম)\b", q_lower) or any(k in q_lower for k in ["এর সূত্র", "এটার সূত্র"]):
+    if re.search(
+        r"\b(its|it's|তার|এর|এটার)\s+(formula|definition|rule|সূত্র|সংজ্ঞা|নিয়ম)\b", q_lower
+    ) or any(k in q_lower for k in ["এর সূত্র", "এটার সূত্র"]):
         ch = scope.get("chapter")
         subj = scope.get("subject", "math")
         rewritten = f"{subj} অধ্যায় {ch or ''} এর প্রয়োজনীয় সূত্রাবলী ও সংজ্ঞা"

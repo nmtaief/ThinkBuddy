@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -195,7 +195,9 @@ async def get_chapter_detail(
 @router.get("/curriculum/subjects")
 async def get_curriculum_subjects(
     class_level: int = Query(default=8, ge=6, le=10, description="Class level (6-10)"),
-    group: str = Query(default="general", description="Group (general, science, humanities, business_studies)"),
+    group: str = Query(
+        default="general", description="Group (general, science, humanities, business_studies)"
+    ),
 ) -> list[dict[str, Any]]:
     """Retrieve official NCTB subjects catalog with metadata for class and group."""
     from core.curriculum.nctb_subjects import get_subjects_for_class_and_group

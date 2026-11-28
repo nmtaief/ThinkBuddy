@@ -49,7 +49,7 @@ jobs:
         env:
           POSTGRES_DB: thinkbuddy
           POSTGRES_USER: thinkbuddy
-          POSTGRES_PASSWORD: thinkbuddy_ci_password
+          POSTGRES_PASSWORD: thinkbuddy_dev_password
         ports:
           - 5432:5432
         options: >-
@@ -57,14 +57,24 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      DATABASE_URL: postgresql+asyncpg://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy
-      DATABASE_URL_SYNC: postgresql://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy
+      DATABASE_URL: postgresql+asyncpg://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy
+      DATABASE_URL_SYNC: postgresql://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy
+      REDIS_URL: redis://127.0.0.1:6379/0
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
       POSTGRES_DB: thinkbuddy
       POSTGRES_USER: thinkbuddy
-      POSTGRES_PASSWORD: thinkbuddy_ci_password
+      POSTGRES_PASSWORD: thinkbuddy_dev_password
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -82,11 +92,38 @@ jobs:
 
       - name: Run Database Migrations
         run: |
-          python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; cur = conn.cursor(); cur.execute('CREATE EXTENSION IF NOT EXISTS vector;'); cur.execute('CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY);')"
+          python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; cur = conn.cursor(); cur.execute('CREATE EXTENSION IF NOT EXISTS vector;'); cur.execute('CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY);')"
           alembic upgrade head
+          python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; cur = conn.cursor(); cur.execute(\"DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'thinkbuddy_api') THEN CREATE ROLE thinkbuddy_api LOGIN PASSWORD 'thinkbuddy_api_password'; ELSE ALTER ROLE thinkbuddy_api WITH LOGIN PASSWORD 'thinkbuddy_api_password'; END IF; END \$\$;\"); cur.execute('GRANT USAGE ON SCHEMA public TO thinkbuddy_api; GRANT SELECT ON ALL TABLES IN SCHEMA public TO thinkbuddy_api; REVOKE ALL ON TABLE question_keys FROM thinkbuddy_api;')"
+
+      - name: Run Migration Reversibility Tests
+        run: pytest -v tests/ -k "reversibility"
+
+      - name: Seed Pilot Test Data
+        run: |
+          mkdir -p audit_math
+          python - <<'EOF'
+          import asyncio
+          from rag.ingest import CurriculumImporter
+
+          async def main() -> None:
+              importer = CurriculumImporter()
+              for p in [
+                  "fixtures/class8_math_manifest.jsonl",
+                  "fixtures/class6_math_manifest.jsonl",
+                  "fixtures/class8_science_manifest.jsonl",
+              ]:
+                  await importer.import_manifest(p)
+
+          asyncio.run(main())
+          EOF
+          python seed_pilot_chapter1.py
+          python scripts/seed_pilot_exercises.py
+          python scripts/seed_pilot_exercises_ch3_ch4.py
+          python scripts/seed_pilot2_100_items.py
 
       - name: Run Tests with Coverage
-        run: pytest -v --cov=core --cov=gateway --cov=rag tests/
+        run: pytest -v --cov=core --cov=gateway --cov=rag tests/ -k "not reversibility"
 
       - name: Export OpenAPI Schema
         run: python scripts/export_openapi.py

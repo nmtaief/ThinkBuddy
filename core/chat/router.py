@@ -76,7 +76,7 @@ async def create_chat_session(
     await orchestrator.assert_no_active_assessed_quiz(current_user.id)
 
     chat_service = ChatService(db)
-    title = (payload.title if payload and payload.title else "New Conversation")
+    title = payload.title if payload and payload.title else "New Conversation"
     subject = payload.subject if payload else None
 
     session = await chat_service.get_or_create_session(
@@ -183,6 +183,7 @@ async def send_chat_message(
         cached = await orchestrator.get_cached_turn(current_user.id, session_id, eff_key)
         if cached:
             if wants_sse:
+
                 async def cached_stream() -> AsyncIterator[str]:
                     if cached.get("meta"):
                         yield f"event: meta\ndata: {json.dumps(cached['meta'])}\n\n"
@@ -214,6 +215,7 @@ async def send_chat_message(
     student_profile = None
     try:
         from core.families.models import StudentProfile
+
         stmt = select(StudentProfile).where(StudentProfile.user_id == current_user.id)
         res = await db.execute(stmt)
         prof = res.scalar_one_or_none()

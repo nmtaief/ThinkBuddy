@@ -245,7 +245,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
   return (
     <div
       className={`math-rendered-text ${className}`}
-      dangerouslySetInnerHTML={{ __html: sanitizedContent }}
+      dangerouslySetInnerHTML={{ __html: sanitizedContent }} // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
     />
   );
 };

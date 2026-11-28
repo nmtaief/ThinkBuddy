@@ -149,12 +149,29 @@ class OpenRouterGateway(LLMGateway):
             return "prompt_injection"
 
         # Check full textbook scraping / bulk dump requests
-        if any(term in q_lower for term in ["dump the entire", "dump the whole", "word for word from start to finish", "সবগুলো পাতা একসাথে"]):
+        if any(
+            term in q_lower
+            for term in [
+                "dump the entire",
+                "dump the whole",
+                "word for word from start to finish",
+                "সবগুলো পাতা একসাথে",
+            ]
+        ):
             return "off_topic"
 
         quiz_keywords = [
-            "quiz", "test", "exam", "answer to question", "কুইজের উত্তর", "পরীক্ষার উত্তর", "answer key",
-            "exam choltese", "shob answer key", "mcq er answer", "direct mcq answer"
+            "quiz",
+            "test",
+            "exam",
+            "answer to question",
+            "কুইজের উত্তর",
+            "পরীক্ষার উত্তর",
+            "answer key",
+            "exam choltese",
+            "shob answer key",
+            "mcq er answer",
+            "direct mcq answer",
         ]
         if any(term in q_lower for term in quiz_keywords):
             return "quiz_integrity"
@@ -164,39 +181,124 @@ class OpenRouterGateway(LLMGateway):
 
         # Check study guidance questions BEFORE general study topic checks
         guidance_triggers = [
-            "what should i study", "what to study", "where should i start", "where to start",
-            "help me study", "make a study plan", "study plan", "suggest a topic", "suggest what to study",
-            "what can i study", "how should i prepare", "routine", "timetable",
-            "how can i improve", "how to improve", "how do i improve", "how to get better", "how do i get better",
-            "improve my", "tips for", "advice for", "how to learn", "how to master", "how to study",
-            "how can i do better", "how to get good marks", "how to get a+",
-            "আজ কী পড়ব", "আজ কি পড়া উচিত", "আজকে কী পড়ব", "আজকে কি পড়ব", "কোন বিষয় পড়ব",
-            "পড়ার রুটিন", "পড়ালেখা কীভাবে করব", "কোন অধ্যায় পড়ব", "কীভাবে ভালো করব", "কিভাবে ভালো করব",
-            "কীভাবে পড়া উচিত", "উন্নতি করার উপায়", "ভালো করার উপায়", "পড়ার নিয়ম", "ভীতি কাটানোর উপায়",
-            "ভালো রেজাল্ট করার উপায়", "ভালো নম্বর পাওয়ার উপায়", "সহজে শেখার উপায়"
+            "what should i study",
+            "what to study",
+            "where should i start",
+            "where to start",
+            "help me study",
+            "make a study plan",
+            "study plan",
+            "suggest a topic",
+            "suggest what to study",
+            "what can i study",
+            "how should i prepare",
+            "routine",
+            "timetable",
+            "how can i improve",
+            "how to improve",
+            "how do i improve",
+            "how to get better",
+            "how do i get better",
+            "improve my",
+            "tips for",
+            "advice for",
+            "how to learn",
+            "how to master",
+            "how to study",
+            "how can i do better",
+            "how to get good marks",
+            "how to get a+",
+            "আজ কী পড়ব",
+            "আজ কি পড়া উচিত",
+            "আজকে কী পড়ব",
+            "আজকে কি পড়ব",
+            "কোন বিষয় পড়ব",
+            "পড়ার রুটিন",
+            "পড়ালেখা কীভাবে করব",
+            "কোন অধ্যায় পড়ব",
+            "কীভাবে ভালো করব",
+            "কিভাবে ভালো করব",
+            "কীভাবে পড়া উচিত",
+            "উন্নতি করার উপায়",
+            "ভালো করার উপায়",
+            "পড়ার নিয়ম",
+            "ভীতি কাটানোর উপায়",
+            "ভালো রেজাল্ট করার উপায়",
+            "ভালো নম্বর পাওয়ার উপায়",
+            "সহজে শেখার উপায়",
         ]
         if any(trig in clean_q for trig in guidance_triggers):
             return "study_guidance"
 
         # Check greetings before strict checks
         study_indicators = [
-            "page", "pg", "পৃষ্ঠা", "chapter", "অধ্যায়", "বই", "book", "explain",
-            "বিজ্ঞান", "গণিত", "math", "science", "নিউরন", "অক্সিন", "photosynthesis",
-            "সালোকসংশ্লেষণ", "পরমাণু", "মহাকর্ষ", "gravity", "formula", "সূত্র"
+            "page",
+            "pg",
+            "পৃষ্ঠা",
+            "chapter",
+            "অধ্যায়",
+            "বই",
+            "book",
+            "explain",
+            "বিজ্ঞান",
+            "গণিত",
+            "math",
+            "science",
+            "নিউরন",
+            "অক্সিন",
+            "photosynthesis",
+            "সালোকসংশ্লেষণ",
+            "পরমাণু",
+            "মহাকর্ষ",
+            "gravity",
+            "formula",
+            "সূত্র",
         ]
         has_study_topic = any(topic in clean_q for topic in study_indicators)
         greeting_words = {
-            "hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "hey buddy", "hi buddy", "hello buddy",
-            "good morning", "good afternoon", "good evening", "greetings",
-            "how are you", "who are you", "what is your name", "what can you do", "introduce yourself",
-            "assalamualaikum", "assalamu alaikum", "as-salamu alaykum",
-            "সালাম", "আসসালামু আলাইকুম", "নমস্কার", "হ্যালো", "হাই", "কেমন আছো", "কেমন আছেন",
-            "তুমি কে", "আপনি কে", "তোমার নাম কি", "কী করতে পারো", "কি করতে পারো", "সাহায্য করো"
+            "hi",
+            "hii",
+            "hiii",
+            "hello",
+            "helo",
+            "hey",
+            "heyy",
+            "hey buddy",
+            "hi buddy",
+            "hello buddy",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "greetings",
+            "how are you",
+            "who are you",
+            "what is your name",
+            "what can you do",
+            "introduce yourself",
+            "assalamualaikum",
+            "assalamu alaikum",
+            "as-salamu alaykum",
+            "সালাম",
+            "আসসালামু আলাইকুম",
+            "নমস্কার",
+            "হ্যালো",
+            "হাই",
+            "কেমন আছো",
+            "কেমন আছেন",
+            "তুমি কে",
+            "আপনি কে",
+            "তোমার নাম কি",
+            "কী করতে পারো",
+            "কি করতে পারো",
+            "সাহায্য করো",
         }
         if not has_study_topic:
             if clean_q in greeting_words or (
                 len(clean_q.split()) <= 3
-                and any(clean_q.startswith(g) for g in ["hi", "hii", "hello", "hey", "হ্যালো", "হাই", "সালাম"])
+                and any(
+                    clean_q.startswith(g)
+                    for g in ["hi", "hii", "hello", "hey", "হ্যালো", "হাই", "সালাম"]
+                )
             ):
                 return "greeting"
 
@@ -254,17 +356,26 @@ class OpenRouterGateway(LLMGateway):
         current_messages: list[dict[str, Any]] = list(messages)
         start_time = time.perf_counter()
 
-        client_timeout = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(connect=10.0, read=float(timeout), write=20.0, pool=30.0)
+        client_timeout = (
+            timeout
+            if isinstance(timeout, httpx.Timeout)
+            else httpx.Timeout(connect=10.0, read=float(timeout), write=20.0, pool=30.0)
+        )
         async with httpx.AsyncClient(timeout=client_timeout) as client:
             # 1. Multi-turn Tool Calling Execution Loop (cap max 3 iterations)
             if tools and tool_executor:
                 tool_iterations = 0
                 while tool_iterations < 3:
-                    payload = self._build_payload(target_model, current_messages, tools=tools, stream=False)
+                    payload = self._build_payload(
+                        target_model, current_messages, tools=tools, stream=False
+                    )
                     try:
                         resp = await client.post(chat_url, headers=headers, json=payload)
                         if resp.status_code == 404 and "data policy" in resp.text.lower():
-                            logger.error("Privacy violation: Model %s rejected due to data policy. Failing closed.", target_model)
+                            logger.error(
+                                "Privacy violation: Model %s rejected due to data policy. Failing closed.",
+                                target_model,
+                            )
                             break
 
                         if resp.is_success:
@@ -297,27 +408,39 @@ class OpenRouterGateway(LLMGateway):
                                 fn = tc.get("function", {})
                                 fn_name = fn.get("name", "")
                                 try:
-                                    fn_args = json.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else fn.get("arguments", {})
+                                    fn_args = (
+                                        json.loads(fn.get("arguments", "{}"))
+                                        if isinstance(fn.get("arguments"), str)
+                                        else fn.get("arguments", {})
+                                    )
                                 except Exception:
                                     fn_args = {}
                                 try:
                                     tool_result = await tool_executor.execute_tool(fn_name, fn_args)
                                 except Exception as tool_ex:
-                                    logger.exception("Tool execution failed for '%s': %s", fn_name, tool_ex)
+                                    logger.exception(
+                                        "Tool execution failed for '%s': %s", fn_name, tool_ex
+                                    )
                                     tool_result = {
                                         "status": "error",
                                         "error": f"Tool '{fn_name}' execution failed: {str(tool_ex)}",
-                                        "message": "পাঠ্যবই অনুসন্ধানে কারিগরি ত্রুটি হয়েছে। বইটি সরাসরি যাচাই করা সম্ভব হয়নি।"
+                                        "message": "পাঠ্যবই অনুসন্ধানে কারিগরি ত্রুটি হয়েছে। বইটি সরাসরি যাচাই করা সম্ভব হয়নি।",
                                     }
-                                current_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tc.get("id", str(uuid.uuid4())),
-                                    "name": fn_name,
-                                    "content": json.dumps(tool_result, ensure_ascii=False),
-                                })
+                                current_messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tc.get("id", str(uuid.uuid4())),
+                                        "name": fn_name,
+                                        "content": json.dumps(tool_result, ensure_ascii=False),
+                                    }
+                                )
                             tool_iterations += 1
                         else:
-                            logger.warning("Tool calling request returned status %s: %s", resp.status_code, resp.text)
+                            logger.warning(
+                                "Tool calling request returned status %s: %s",
+                                resp.status_code,
+                                resp.text,
+                            )
                             break
                     except Exception as ex:
                         logger.warning("Tool iteration failed on %s: %s", target_model, ex)
@@ -326,38 +449,50 @@ class OpenRouterGateway(LLMGateway):
             # If tools were executed, guide the model to formulate its final tutor answer cleanly
             if tools and tool_executor and len(current_messages) > len(messages):
                 has_tool_error = any(
-                    m.get("role") == "tool" and ("\"status\": \"error\"" in m.get("content", "") or "\"error\"" in m.get("content", ""))
+                    m.get("role") == "tool"
+                    and (
+                        '"status": "error"' in m.get("content", "")
+                        or '"error"' in m.get("content", "")
+                    )
                     for m in current_messages
                 )
                 if has_tool_error:
-                    current_messages.append({
-                        "role": "system",
-                        "content": (
-                            "WARNING: A textbook search tool encountered an error or failed. "
-                            "You must explain from your general knowledge if helpful, but you MUST explicitly "
-                            "tell the student that you could NOT check or verify the textbook right now due to a "
-                            "technical error ('পাঠ্যবই যাচাই করা সম্ভব হয়নি'). You MUST NEVER claim that you verified "
-                            "this from the book ('বই থেকে যাচাই করেছি' or similar) when the tool failed. Do not invent page citations."
-                        ),
-                    })
+                    current_messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "WARNING: A textbook search tool encountered an error or failed. "
+                                "You must explain from your general knowledge if helpful, but you MUST explicitly "
+                                "tell the student that you could NOT check or verify the textbook right now due to a "
+                                "technical error ('পাঠ্যবই যাচাই করা সম্ভব হয়নি'). You MUST NEVER claim that you verified "
+                                "this from the book ('বই থেকে যাচাই করেছি' or similar) when the tool failed. Do not invent page citations."
+                            ),
+                        }
+                    )
                 else:
-                    current_messages.append({
-                        "role": "system",
-                        "content": "You have retrieved textbook information above. Now formulate a warm, clear, structured tutor explanation in Bengali. Include the printed page number citation. Do not call any more tools.",
-                    })
+                    current_messages.append(
+                        {
+                            "role": "system",
+                            "content": "You have retrieved textbook information above. Now formulate a warm, clear, structured tutor explanation in Bengali. Include the printed page number citation. Do not call any more tools.",
+                        }
+                    )
 
             # 2. Final Answer Token Streaming Loop
             for active_model in [target_model, self.fallback_model]:
-                payload = self._build_payload(active_model, current_messages, tools=None, stream=True, include_privacy=True)
+                payload = self._build_payload(
+                    active_model, current_messages, tools=None, stream=True, include_privacy=True
+                )
                 try:
                     tokens_yielded = 0
-                    async with client.stream("POST", chat_url, headers=headers, json=payload) as resp:
+                    async with client.stream(
+                        "POST", chat_url, headers=headers, json=payload
+                    ) as resp:
                         if resp.status_code != 200:
                             logger.error(
                                 "Streaming request failed on model %s with status %s: %s",
                                 active_model,
                                 resp.status_code,
-                                (await resp.aread()).decode("utf-8", errors="ignore")[:300]
+                                (await resp.aread()).decode("utf-8", errors="ignore")[:300],
                             )
                             continue
 
@@ -383,11 +518,18 @@ class OpenRouterGateway(LLMGateway):
 
                             if tokens_yielded > 0:
                                 self.last_tokens_out = tokens_yielded
-                                self.last_latency_ms = int((time.perf_counter() - start_time) * 1000)
+                                self.last_latency_ms = int(
+                                    (time.perf_counter() - start_time) * 1000
+                                )
                                 return
                         else:
                             err_body = (await resp.aread()).decode("utf-8", errors="ignore")
-                            logger.warning("Stream attempt on %s returned %s: %s", active_model, resp.status_code, err_body)
+                            logger.warning(
+                                "Stream attempt on %s returned %s: %s",
+                                active_model,
+                                resp.status_code,
+                                err_body,
+                            )
                 except (asyncio.CancelledError, Exception) as ex:
                     if isinstance(ex, asyncio.CancelledError):
                         logger.info("Client disconnected during OpenRouter streaming")
@@ -413,17 +555,26 @@ class OpenRouterGateway(LLMGateway):
         current_messages: list[dict[str, Any]] = list(messages)
         start_time = time.perf_counter()
 
-        client_timeout = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(connect=10.0, read=float(timeout), write=20.0, pool=30.0)
+        client_timeout = (
+            timeout
+            if isinstance(timeout, httpx.Timeout)
+            else httpx.Timeout(connect=10.0, read=float(timeout), write=20.0, pool=30.0)
+        )
         async with httpx.AsyncClient(timeout=client_timeout) as client:
             # 1. Multi-turn Tool Calling Execution Loop
             if tools and tool_executor:
                 tool_iterations = 0
                 while tool_iterations < 3:
-                    payload = self._build_payload(target_model, current_messages, tools=tools, stream=False)
+                    payload = self._build_payload(
+                        target_model, current_messages, tools=tools, stream=False
+                    )
                     try:
                         resp = await client.post(chat_url, headers=headers, json=payload)
                         if resp.status_code == 404 and "data policy" in resp.text.lower():
-                            logger.error("Privacy violation: Model %s rejected due to data policy. Failing closed.", target_model)
+                            logger.error(
+                                "Privacy violation: Model %s rejected due to data policy. Failing closed.",
+                                target_model,
+                            )
                             break
 
                         if resp.is_success:
@@ -456,24 +607,32 @@ class OpenRouterGateway(LLMGateway):
                                 fn = tc.get("function", {})
                                 fn_name = fn.get("name", "")
                                 try:
-                                    fn_args = json.loads(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else fn.get("arguments", {})
+                                    fn_args = (
+                                        json.loads(fn.get("arguments", "{}"))
+                                        if isinstance(fn.get("arguments"), str)
+                                        else fn.get("arguments", {})
+                                    )
                                 except Exception:
                                     fn_args = {}
                                 try:
                                     tool_result = await tool_executor.execute_tool(fn_name, fn_args)
                                 except Exception as tool_ex:
-                                    logger.exception("Tool execution failed for '%s': %s", fn_name, tool_ex)
+                                    logger.exception(
+                                        "Tool execution failed for '%s': %s", fn_name, tool_ex
+                                    )
                                     tool_result = {
                                         "status": "error",
                                         "error": f"Tool '{fn_name}' execution failed: {str(tool_ex)}",
-                                        "message": "পাঠ্যবই অনুসন্ধানে কারিগরি ত্রুটি হয়েছে। বইটি সরাসরি যাচাই করা সম্ভব হয়নি।"
+                                        "message": "পাঠ্যবই অনুসন্ধানে কারিগরি ত্রুটি হয়েছে। বইটি সরাসরি যাচাই করা সম্ভব হয়নি।",
                                     }
-                                current_messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tc.get("id", str(uuid.uuid4())),
-                                    "name": fn_name,
-                                    "content": json.dumps(tool_result, ensure_ascii=False),
-                                })
+                                current_messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tc.get("id", str(uuid.uuid4())),
+                                        "name": fn_name,
+                                        "content": json.dumps(tool_result, ensure_ascii=False),
+                                    }
+                                )
                             tool_iterations += 1
                         else:
                             break
@@ -483,28 +642,38 @@ class OpenRouterGateway(LLMGateway):
 
             if tools and tool_executor and len(current_messages) > len(messages):
                 has_tool_error = any(
-                    m.get("role") == "tool" and ("\"status\": \"error\"" in m.get("content", "") or "\"error\"" in m.get("content", ""))
+                    m.get("role") == "tool"
+                    and (
+                        '"status": "error"' in m.get("content", "")
+                        or '"error"' in m.get("content", "")
+                    )
                     for m in current_messages
                 )
                 if has_tool_error:
-                    current_messages.append({
-                        "role": "system",
-                        "content": (
-                            "WARNING: A textbook search tool encountered an error or failed. "
-                            "You must explain from your general knowledge if helpful, but you MUST explicitly "
-                            "tell the student that you could NOT check or verify the textbook right now due to a "
-                            "technical error ('পাঠ্যবই যাচাই করা সম্ভব হয়নি'). You MUST NEVER claim that you verified "
-                            "this from the book ('বই থেকে যাচাই করেছি' or similar) when the tool failed. Do not invent page citations."
-                        ),
-                    })
+                    current_messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "WARNING: A textbook search tool encountered an error or failed. "
+                                "You must explain from your general knowledge if helpful, but you MUST explicitly "
+                                "tell the student that you could NOT check or verify the textbook right now due to a "
+                                "technical error ('পাঠ্যবই যাচাই করা সম্ভব হয়নি'). You MUST NEVER claim that you verified "
+                                "this from the book ('বই থেকে যাচাই করেছি' or similar) when the tool failed. Do not invent page citations."
+                            ),
+                        }
+                    )
                 else:
-                    current_messages.append({
-                        "role": "system",
-                        "content": "Formulate a warm, clear, structured tutor explanation in Bengali based on the textbook data above. Include printed page citation. Do not call any tools.",
-                    })
+                    current_messages.append(
+                        {
+                            "role": "system",
+                            "content": "Formulate a warm, clear, structured tutor explanation in Bengali based on the textbook data above. Include printed page citation. Do not call any tools.",
+                        }
+                    )
 
             for active_model in [target_model, self.fallback_model]:
-                payload = self._build_payload(active_model, current_messages, tools=None, stream=False, include_privacy=True)
+                payload = self._build_payload(
+                    active_model, current_messages, tools=None, stream=False, include_privacy=True
+                )
                 try:
                     resp = await client.post(chat_url, headers=headers, json=payload)
 
@@ -545,6 +714,7 @@ async def get_active_llm_gateway(db: Any | None = None) -> LLMGateway | None:
     if db is not None:
         try:
             from sqlalchemy import select
+
             from core.admin.models import AITutorConfig
 
             stmt = select(AITutorConfig).order_by(AITutorConfig.created_at.asc()).limit(1)
@@ -563,10 +733,13 @@ async def get_active_llm_gateway(db: Any | None = None) -> LLMGateway | None:
                 )
 
             import os
+
             env_key = os.getenv("OPENROUTER_API_KEY")
             if env_key:
                 return OpenRouterGateway(
-                    primary_model=os.getenv("DEFAULT_LLM_MODEL", "nvidia/nemotron-3.5-super-vl:free"),
+                    primary_model=os.getenv(
+                        "DEFAULT_LLM_MODEL", "nvidia/nemotron-3.5-super-vl:free"
+                    ),
                     fallback_model="nvidia/nemotron-3.5-lightning:free",
                     api_key=env_key,
                     api_base="https://openrouter.ai/api/v1",

@@ -5,14 +5,13 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  const authHeader = req.headers.get("authorization");
-  if (!session && (!authHeader || !authHeader.startsWith("Bearer "))) {
+  if (!session) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "অনুগ্রহ করে আবার লগইন করুন।" } },
       { status: 401 }
     );
   }
-  const userId = session?.user?.id || "bearer_user";
+  const userId = session.user.id;
 
   const configuredBackendUrl = process.env.BACKEND_GATEWAY_URL || process.env.CORE_INTERNAL_URL || BACKEND_GATEWAY_URL;
   if (

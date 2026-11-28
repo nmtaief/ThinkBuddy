@@ -8,10 +8,10 @@ and returns verified LaTeX questions, figures, theory citations, and step-by-ste
 from __future__ import annotations
 
 import re
-import uuid
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel
-from sqlalchemy import select, and_, or_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,10 +20,6 @@ from core.curriculum.models import (
     MathChapter,
     MathExercise,
     MathItemV2,
-    MathSolution,
-    MathFigure,
-    MathHint,
-    MathTheory,
 )
 
 # Bengali to ASCII digits translation
@@ -34,9 +30,21 @@ A2B_TRANS = str.maketrans(ASCII_DIGITS, BANGLA_DIGITS)
 
 # Bengali subparts to canonical form
 SUBPART_MAP = {
-    "ক": "ক", "খ": "খ", "গ": "গ", "ঘ": "ঘ", "ঙ": "ঙ",
-    "a": "ক", "b": "খ", "c": "গ", "d": "ঘ", "e": "ঙ",
-    "ka": "ক", "kha": "খ", "kh": "খ", "ga": "গ", "gha": "ঘ",
+    "ক": "ক",
+    "খ": "খ",
+    "গ": "গ",
+    "ঘ": "ঘ",
+    "ঙ": "ঙ",
+    "a": "ক",
+    "b": "খ",
+    "c": "গ",
+    "d": "ঘ",
+    "e": "ঙ",
+    "ka": "ক",
+    "kha": "খ",
+    "kh": "খ",
+    "ga": "গ",
+    "gha": "ঘ",
 }
 
 
@@ -52,29 +60,31 @@ def to_bangla_digits(num: int | str) -> str:
 
 class MathQueryIntent(BaseModel):
     is_math_query: bool = False
-    class_level: Optional[int] = None
-    chapter_number: Optional[int] = None
-    exercise_label: Optional[str] = None
-    exercise_label_ascii: Optional[str] = None
-    question_no: Optional[int] = None
-    subpart: Optional[str] = None
-    printed_page: Optional[int] = None
+    class_level: int | None = None
+    chapter_number: int | None = None
+    exercise_label: str | None = None
+    exercise_label_ascii: str | None = None
+    question_no: int | None = None
+    subpart: str | None = None
+    printed_page: int | None = None
     is_whole_exercise: bool = False
     raw_query: str = ""
 
 
 class MathLookupResult(BaseModel):
     status: str  # "single_match", "multiple_matches", "whole_exercise", "not_found", "not_math"
-    item: Optional[dict[str, Any]] = None
+    item: dict[str, Any] | None = None
     chips: list[dict[str, Any]] = []
     exercise_items: list[dict[str, Any]] = []
-    message: Optional[str] = None
-    nearest_chapter: Optional[str] = None
+    message: str | None = None
+    nearest_chapter: str | None = None
 
 
-def parse_math_query(text: str, default_class: int = 8, current_chapter: Optional[int] = None) -> MathQueryIntent:
+def parse_math_query(
+    text: str, default_class: int = 8, current_chapter: int | None = None
+) -> MathQueryIntent:
     """Extract deterministic math coordinates from student prompt.
-    
+
     Supports:
       - "chapter 1 er 3 no" / "অধ্যায় ১ এর ৩ নম্বর"
       - "অনুশীলনী ১ এর ৫ নং" / "onushiloni 1.1 er 5 no"
@@ -84,11 +94,13 @@ def parse_math_query(text: str, default_class: int = 8, current_chapter: Optiona
     """
     clean_text = text.lower().strip()
     norm_text = to_ascii_digits(clean_text)
-    
-    intent = MathQueryIntent(raw_query=text, class_level=default_class, chapter_number=current_chapter)
+
+    intent = MathQueryIntent(
+        raw_query=text, class_level=default_class, chapter_number=current_chapter
+    )
 
     # Detect explicit class override (e.g. "class 8", "৮ম শ্রেণি", "ssc", "৯ম")
-    class_match = re.search(r'(?:class|শ্রেণি|শ্রেণী)\s*([6-9]|10)|(ssc)', norm_text)
+    class_match = re.search(r"(?:class|শ্রেণি|শ্রেণী)\s*([6-9]|10)|(ssc)", norm_text)
     if class_match:
         if class_match.group(1):
             intent.class_level = int(class_match.group(1))
@@ -97,17 +109,22 @@ def parse_math_query(text: str, default_class: int = 8, current_chapter: Optiona
 
     # Whole exercise request
     if any(k in norm_text for k in ["sob", "সব", "all", "সবগুলো", "পুরো", "full exercise", "whole"]):
-        if any(e in norm_text for e in ["onushiloni", "অনুশীলনী", "ex", "exercise", "chapter", "অধ্যায়"]):
+        if any(
+            e in norm_text for e in ["onushiloni", "অনুশীলনী", "ex", "exercise", "chapter", "অধ্যায়"]
+        ):
             intent.is_whole_exercise = True
 
     # Detect chapter (e.g. "chapter 1", "ch 1", "১ম অধ্যায়", "অধ্যায় ১", "oddhay 1")
-    ch_match = re.search(r'(?:chapter|ch|অধ্যায়|অধ্যায়|oddhay)\s*(\d+)|(\d+)\s*(?:st|nd|rd|th|ম)?\s*(?:অধ্যায়|অধ্যায়|chapter)', norm_text)
+    ch_match = re.search(
+        r"(?:chapter|ch|অধ্যায়|অধ্যায়|oddhay)\s*(\d+)|(\d+)\s*(?:st|nd|rd|th|ম)?\s*(?:অধ্যায়|অধ্যায়|chapter)",
+        norm_text,
+    )
     if ch_match:
         ch_num = ch_match.group(1) or ch_match.group(2)
         intent.chapter_number = int(ch_num)
 
     # Detect exercise label (e.g. "অনুশীলনী ১", "অনুশীলনী ৩.১", "onushiloni 1.1", "ex 1")
-    ex_match = re.search(r'(?:অনুশীলনী|onushiloni|exercise|ex)\s*(\d+(?:\.\d+)?)', norm_text)
+    ex_match = re.search(r"(?:অনুশীলনী|onushiloni|exercise|ex)\s*(\d+(?:\.\d+)?)", norm_text)
     if ex_match:
         ex_ascii = ex_match.group(1)
         intent.exercise_label_ascii = ex_ascii
@@ -121,25 +138,43 @@ def parse_math_query(text: str, default_class: int = 8, current_chapter: Optiona
             intent.chapter_number = int(ex_ascii)
 
     # Detect page reference (e.g. "page 9", "৯ পৃষ্ঠা", "পৃষ্ঠা ৯")
-    page_match = re.search(r'(?:page|পৃষ্ঠা|prishtha|pristha)\s*(\d+)|(\d+)\s*(?:page|পৃষ্ঠা)', norm_text)
+    page_match = re.search(r"(?:page|পৃষ্ঠা|prishtha|pristha)\s*(\d+)|(\d+)\s*(?:page|পৃষ্ঠা)", norm_text)
     if page_match:
         intent.printed_page = int(page_match.group(1) or page_match.group(2))
 
     # Detect question number (e.g. "5 no", "৫ নং", "question 6", "প্রশ্ন ৪", "৪ নম্বর", "q 2")
-    q_match = re.search(r'(?:question|q|প্রশ্ন|proshno|no|নং|নম্বর|number)\s*(\d+)|(\d+)\s*(?:no|নং|নম্বর|number)', norm_text)
+    q_match = re.search(
+        r"(?:question|q|প্রশ্ন|proshno|no|নং|নম্বর|number)\s*(\d+)|(\d+)\s*(?:no|নং|নম্বর|number)",
+        norm_text,
+    )
     if q_match:
         q_num = q_match.group(1) or q_match.group(2)
         intent.question_no = int(q_num)
 
     # Detect subpart (e.g. "ক", "খ", "গ", "ঘ", "ka", "kha", "kh", "a", "b", "c")
-    sub_match = re.search(r'(?:subpart|part|অংশ|নম্বর)?\s*\b([কখগঘঙabcd]|ka|kha|kh|ga|gha)\b', clean_text)
+    sub_match = re.search(
+        r"(?:subpart|part|অংশ|নম্বর)?\s*\b([কখগঘঙabcd]|ka|kha|kh|ga|gha)\b", clean_text
+    )
     if sub_match:
         intent.subpart = SUBPART_MAP.get(sub_match.group(1))
 
     # Math indicators
     math_indicators = [
-        "math", "গণিত", "gonit", "solve", "kore", "কর", "করে", "সমাধান",
-        "প্যাটার্ন", "সমষ্টি", "মান", "নির্ণয়", "পার্থক্য", "ধারা", "যোগফল"
+        "math",
+        "গণিত",
+        "gonit",
+        "solve",
+        "kore",
+        "কর",
+        "করে",
+        "সমাধান",
+        "প্যাটার্ন",
+        "সমষ্টি",
+        "মান",
+        "নির্ণয়",
+        "পার্থক্য",
+        "ধারা",
+        "যোগফল",
     ]
     if intent.question_no or intent.exercise_label or intent.chapter_number or intent.printed_page:
         intent.is_math_query = True
@@ -158,7 +193,9 @@ async def lookup_math_item(
         return MathLookupResult(status="not_math")
 
     # 1. Whole exercise request
-    if query_intent.is_whole_exercise and (query_intent.exercise_label or query_intent.chapter_number):
+    if query_intent.is_whole_exercise and (
+        query_intent.exercise_label or query_intent.chapter_number
+    ):
         stmt = (
             select(MathItemV2)
             .options(
@@ -171,7 +208,7 @@ async def lookup_math_item(
                 or_(
                     MathItemV2.exercise_label == query_intent.exercise_label,
                     MathItemV2.chapter_number == query_intent.chapter_number,
-                )
+                ),
             )
             .order_by(MathItemV2.question_no, MathItemV2.subpart)
         )
@@ -182,7 +219,7 @@ async def lookup_math_item(
             return MathLookupResult(
                 status="whole_exercise",
                 exercise_items=serialized_items,
-                message=f"{query_intent.exercise_label or f'অধ্যায় {to_bangla_digits(query_intent.chapter_number)}'}-এর মোট {to_bangla_digits(len(items))}টি প্রশ্ন পাওয়া গেছে। নিচে ১ম প্রশ্নটির সমাধান দেওয়া হলো।"
+                message=f"{query_intent.exercise_label or f'অধ্যায় {to_bangla_digits(query_intent.chapter_number)}'}-এর মোট {to_bangla_digits(len(items))}টি প্রশ্ন পাওয়া গেছে। নিচে ১ম প্রশ্নটির সমাধান দেওয়া হলো।",
             )
 
     # 2. Specific question lookup
@@ -214,10 +251,7 @@ async def lookup_math_item(
 
     # Exact single match
     if len(matches) == 1:
-        return MathLookupResult(
-            status="single_match",
-            item=_serialize_item(matches[0])
-        )
+        return MathLookupResult(status="single_match", item=_serialize_item(matches[0]))
 
     # Multiple matches (e.g. subparts ক, খ, গ exist for creative question, or question 5 in multiple exercises)
     if len(matches) > 1:
@@ -226,17 +260,19 @@ async def lookup_math_item(
             label = f"{m.exercise_label} এর {m.question_no_display} নং"
             if m.subpart:
                 label += f" ({m.subpart})"
-            chips.append({
-                "id": str(m.id),
-                "label": label,
-                "question_no": m.question_no,
-                "subpart": m.subpart,
-                "exercise_label": m.exercise_label,
-            })
+            chips.append(
+                {
+                    "id": str(m.id),
+                    "label": label,
+                    "question_no": m.question_no,
+                    "subpart": m.subpart,
+                    "exercise_label": m.exercise_label,
+                }
+            )
         return MathLookupResult(
             status="multiple_matches",
             chips=chips,
-            message="তোমার প্রশ্নে একাধিক অংশ পাওয়া গেছে। কোনটি দেখতে চাও নির্বাচন করো:"
+            message="তোমার প্রশ্নে একাধিক অংশ পাওয়া গেছে। কোনটি দেখতে চাও নির্বাচন করো:",
         )
 
     # Zero matches: Honest fallback with nearest indexed chapter suggestion (no photo offer)
@@ -277,8 +313,10 @@ async def lookup_math_item(
         target_ch = query_intent.chapter_number or 1
         closest_row = min(avail_rows, key=lambda r: abs(r[0] - target_ch))
         nearest_str = f"অধ্যায় {to_bangla_digits(closest_row[0])} ({closest_row[1]})"
-        avail_list_str = ", ".join([f"অধ্যায় {to_bangla_digits(r[0])} ({r[1]} - {r[2]})" for r in avail_rows])
-        
+        avail_list_str = ", ".join(
+            [f"অধ্যায় {to_bangla_digits(r[0])} ({r[1]} - {r[2]})" for r in avail_rows]
+        )
+
         fallback_msg = (
             f"দুঃখিত, {target_desc} এখনও আমাদের ভেরিফায়েড পাইলট ডাটাবেসে সূচিত (indexed) করা হয়নি।\n\n"
             f"বর্তমানে {to_bangla_digits(query_intent.class_level or 8)}ম শ্রেণির পাঠ্যবই থেকে সূচিত অধ্যায়সমূহ:\n"
@@ -293,32 +331,31 @@ async def lookup_math_item(
             f"তুমি সংশ্লিষ্ট অন্য কোনো প্রশ্ন দেখতে পারো, অথবা প্রশ্নটির বক্তব্য সরাসরি লিখে পাঠালে আমি সমাধান করে বুঝিয়ে দেব।"
         )
 
-    return MathLookupResult(
-        status="not_found",
-        nearest_chapter=nearest_str,
-        message=fallback_msg
-    )
+    return MathLookupResult(status="not_found", nearest_chapter=nearest_str, message=fallback_msg)
 
 
 def _serialize_item(item: MathItemV2) -> dict[str, Any]:
     sol = item.solution
     # Strict student-facing invariant:
     # "Checked Solution" ONLY for teacher-approved items; "Draft Solution" for everything else.
-    is_teacher_approved = bool(sol and (
-        sol.verification_status in ["teacher_approved", "checked_solution", "verified_teacher"] or
-        bool(sol.reviewed_by)
-    ))
+    is_teacher_approved = bool(
+        sol
+        and (
+            sol.verification_status in ["teacher_approved", "checked_solution", "verified_teacher"]
+            or bool(sol.reviewed_by)
+        )
+    )
 
     has_fig_or_table = bool(
-        item.needs_figure or 
-        (item.figures and len(item.figures) > 0) or 
-        "সারণি" in (item.stimulus_text or "") or 
-        "সারণি" in (item.question_text or "") or 
-        "ছক" in (item.stimulus_text or "") or 
-        "ছক" in (item.question_text or "") or 
-        "১১" in (item.exercise_label or "")
+        item.needs_figure
+        or (item.figures and len(item.figures) > 0)
+        or "সারণি" in (item.stimulus_text or "")
+        or "সারণি" in (item.question_text or "")
+        or "ছক" in (item.stimulus_text or "")
+        or "ছক" in (item.question_text or "")
+        or "১১" in (item.exercise_label or "")
     )
-    
+
     return {
         "id": str(item.id),
         "class_level": item.class_level,
@@ -333,7 +370,11 @@ def _serialize_item(item: MathItemV2) -> dict[str, Any]:
         "mcq_options": item.mcq_options,
         "printed_page": item.printed_page,
         "needs_figure": item.needs_figure,
-        "figures": [{"path": f.crop_path, "description": f.structured_description} for f in item.figures] if item.figures else [],
+        "figures": [
+            {"path": f.crop_path, "description": f.structured_description} for f in item.figures
+        ]
+        if item.figures
+        else [],
         "solution": {
             "steps": sol.steps if sol else [],
             "final_answer": sol.final_answer if sol else "",
@@ -341,12 +382,22 @@ def _serialize_item(item: MathItemV2) -> dict[str, Any]:
             "theory_page": sol.theory_page if sol else None,
             "verification_status": sol.verification_status if sol else "unverified",
             "is_teacher_approved": is_teacher_approved,
-            "confidence_label": "যাচাইকৃত সমাধান (Checked Solution)" if is_teacher_approved else "খসড়া সমাধান (Draft Solution)",
-            "disclaimer_bn": "একজন শিক্ষক এখনও এই সমাধানটি নিরীক্ষা করেননি; তোমার শিক্ষকের সাথে মিলিয়ে নাও" if not is_teacher_approved else None,
-            "disclaimer_en": "A teacher has not checked this solution yet; compare it with your own teacher’s" if not is_teacher_approved else None,
+            "confidence_label": "যাচাইকৃত সমাধান (Checked Solution)"
+            if is_teacher_approved
+            else "খসড়া সমাধান (Draft Solution)",
+            "disclaimer_bn": "একজন শিক্ষক এখনও এই সমাধানটি নিরীক্ষা করেননি; তোমার শিক্ষকের সাথে মিলিয়ে নাও"
+            if not is_teacher_approved
+            else None,
+            "disclaimer_en": "A teacher has not checked this solution yet; compare it with your own teacher’s"
+            if not is_teacher_approved
+            else None,
             "has_figure_or_table_caution": has_fig_or_table if not is_teacher_approved else False,
-        } if sol else None,
-        "hints": [h.hint_text for h in sorted(item.hints, key=lambda x: x.level)] if item.hints else []
+        }
+        if sol
+        else None,
+        "hints": [h.hint_text for h in sorted(item.hints, key=lambda x: x.level)]
+        if item.hints
+        else [],
     }
 
 
@@ -367,7 +418,9 @@ def format_math_engine_response(result: MathLookupResult) -> str:
         q_label = f"প্রশ্ন {it['question_no_display']}"
         if it.get("subpart"):
             q_label += f" ({it['subpart']})"
-        lines.append(f"### {it['exercise_label']} — {q_label} (পৃষ্ঠা {to_bangla_digits(it['printed_page'])})\n")
+        lines.append(
+            f"### {it['exercise_label']} — {q_label} (পৃষ্ঠা {to_bangla_digits(it['printed_page'])})\n"
+        )
 
         if it.get("stimulus_text"):
             lines.append(f"**উদ্দীপক:** {it['stimulus_text']}\n")
@@ -388,8 +441,10 @@ def format_math_engine_response(result: MathLookupResult) -> str:
         sol = it.get("solution")
         if sol:
             v_status = sol.get("verification_status")
-            is_approved = sol.get("is_teacher_approved") or (v_status in ["teacher_approved", "checked_solution", "verified_teacher"])
-            
+            is_approved = sol.get("is_teacher_approved") or (
+                v_status in ["teacher_approved", "checked_solution", "verified_teacher"]
+            )
+
             # Student-facing wording: “checked solution” ONLY for teacher-approved items, “draft solution” for everything else
             if is_approved:
                 status_badge = "✓ যাচাইকৃত সমাধান (Checked Solution)"
@@ -397,20 +452,24 @@ def format_math_engine_response(result: MathLookupResult) -> str:
             else:
                 status_badge = "খসড়া সমাধান (Draft Solution)"
                 lines.append(f"#### সমাধান ({status_badge})\n")
-                lines.append("> ⚠ **একজন শিক্ষক এখনও এই সমাধানটি নিরীক্ষা করেননি; তোমার শিক্ষকের সাথে মিলিয়ে নাও** *(A teacher has not checked this solution yet; compare it with your own teacher’s)*\n")
+                lines.append(
+                    "> ⚠ **একজন শিক্ষক এখনও এই সমাধানটি নিরীক্ষা করেননি; তোমার শিক্ষকের সাথে মিলিয়ে নাও** *(A teacher has not checked this solution yet; compare it with your own teacher’s)*\n"
+                )
 
                 # Check if item depends on figures or tables
                 has_figure = bool(it.get("needs_figure") or it.get("figures"))
                 has_table = bool(
-                    "সারণি" in str(it.get("stimulus_text", "")) or 
-                    "সারণি" in str(it.get("question_text", "")) or 
-                    "ছক" in str(it.get("stimulus_text", "")) or 
-                    "ছক" in str(it.get("question_text", "")) or 
-                    "১১" in str(it.get("exercise_label", "")) or 
-                    "পরিসংখ্যান" in str(it.get("exercise_label", ""))
+                    "সারণি" in str(it.get("stimulus_text", ""))
+                    or "সারণি" in str(it.get("question_text", ""))
+                    or "ছক" in str(it.get("stimulus_text", ""))
+                    or "ছক" in str(it.get("question_text", ""))
+                    or "১১" in str(it.get("exercise_label", ""))
+                    or "পরিসংখ্যান" in str(it.get("exercise_label", ""))
                 )
                 if has_figure or has_table:
-                    lines.append("> ⚠ **সতর্কতা:** চিত্র বা সারণি নির্ভর সমাধান — ডেটা বা চিত্রের নির্ভুলতার জন্য শিক্ষক নিরীক্ষা আবশ্যক। *(Caution: Figure/table-dependent solution — requires teacher verification for diagrammatic or tabular fidelity.)*\n")
+                    lines.append(
+                        "> ⚠ **সতর্কতা:** চিত্র বা সারণি নির্ভর সমাধান — ডেটা বা চিত্রের নির্ভুলতার জন্য শিক্ষক নিরীক্ষা আবশ্যক। *(Caution: Figure/table-dependent solution — requires teacher verification for diagrammatic or tabular fidelity.)*\n"
+                    )
             if sol.get("method"):
                 lines.append(f"**পদ্ধতি:** {sol['method']}\n")
             if sol.get("steps"):
@@ -420,7 +479,9 @@ def format_math_engine_response(result: MathLookupResult) -> str:
                 lines.append("")
             lines.append(f"**চূড়ান্ত উত্তর:** **{sol['final_answer']}**\n")
             if sol.get("theory_page"):
-                lines.append(f"> *পাঠ্যবইয়ের থিওরি রেফারেন্স: পৃষ্ঠা {to_bangla_digits(sol['theory_page'])}*")
+                lines.append(
+                    f"> *পাঠ্যবইয়ের থিওরি রেফারেন্স: পৃষ্ঠা {to_bangla_digits(sol['theory_page'])}*"
+                )
 
         return "\n".join(lines)
 
@@ -446,7 +507,8 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
     # Extract any Bengali and ASCII numbers from student's working
     ascii_msg = to_ascii_digits(msg)
     import re
-    found_numbers = re.findall(r'\b\d+(?:\.\d+)?\b', ascii_msg)
+
+    found_numbers = re.findall(r"\b\d+(?:\.\d+)?\b", ascii_msg)
 
     # Case A: Check conceptual misconception first (Prime definition, difference of squares)
     if "মৌলিক" in msg_lower or ("24" in found_numbers and "১" in msg):
@@ -459,14 +521,26 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
         )
     if "a^2 - b^2" in msg_lower or "a² - b²" in msg_lower:
         return (
-            f"তুমি লিখেছ $(a-b)^2 = a^2 - b^2$। একটু লক্ষ্য করো:\n\n"
-            f"$(a-b)^2$ মানে হলো $(a-b)$ কে $(a-b)$ দিয়ে গুণ করা, অর্থাৎ $(a-b)(a-b) = a^2 - 2ab + b^2$।\n"
-            f"আর $a^2 - b^2 = (a+b)(a-b)$, যা দুইটি বর্গের বিয়োগফল। দুটি কিন্তু সম্পূর্ণ আলাদা রাশি!"
+            "তুমি লিখেছ $(a-b)^2 = a^2 - b^2$। একটু লক্ষ্য করো:\n\n"
+            "$(a-b)^2$ মানে হলো $(a-b)$ কে $(a-b)$ দিয়ে গুণ করা, অর্থাৎ $(a-b)(a-b) = a^2 - 2ab + b^2$।\n"
+            "আর $a^2 - b^2 = (a+b)(a-b)$, যা দুইটি বর্গের বিয়োগফল। দুটি কিন্তু সম্পূর্ণ আলাদা রাশি!"
         )
 
     # Case B: Check if student provides a DIFFERENT VALID METHOD
-    valid_method_indicators = ["দ্বিঘাত", "উৎপাদক", "বিকল্প পদ্ধতি", "b²", "b^2", "প্রতিস্থাপন", "a(a-4)", "(b+10)", "(b-6)"]
-    if any(k in msg_lower for k in valid_method_indicators) and ("16" in found_numbers or "±16" in msg):
+    valid_method_indicators = [
+        "দ্বিঘাত",
+        "উৎপাদক",
+        "বিকল্প পদ্ধতি",
+        "b²",
+        "b^2",
+        "প্রতিস্থাপন",
+        "a(a-4)",
+        "(b+10)",
+        "(b-6)",
+    ]
+    if any(k in msg_lower for k in valid_method_indicators) and (
+        "16" in found_numbers or "±16" in msg
+    ):
         return (
             f"চমৎকার! তোমার বিকল্প পদ্ধতিটি সম্পূর্ণ সঠিক এবং প্রশংসনীয়!\n\n"
             f"**তোমার কাজের পর্যালোচনা:** তুমি সূত্রে সরাসরি না গিয়ে $ab = 60$ এবং $a = b + 4$ প্রতিস্থাপন করে দ্বিঘাত সমীকরণ "
@@ -475,18 +549,33 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
             f"পাঠ্যবইয়ে যদিও সরাসরি অনুসিদ্ধান্ত $(a+b)^2 = (a-b)^2 + 4ab$ প্রয়োগ করা হয়েছে, তোমার বীজগণিতীয় সমীকরণ সমাধান পদ্ধতিটিও "
             f"শতভাগ নির্ভুল ও যুক্তিসঙ্গত। চূড়ান্ত উত্তর: **{final_ans}**।"
         )
-    if ("কমন" in msg or "common" in msg_lower or "3/2" in msg or "৩/২" in msg) and ("1/4" in msg or "১/৪" in msg or "9/4" in msg or "৯/৪" in msg):
+    if ("কমন" in msg or "common" in msg_lower or "3/2" in msg or "৩/২" in msg) and (
+        "1/4" in msg or "১/৪" in msg or "9/4" in msg or "৯/৪" in msg
+    ):
         return (
-            f"চমৎকার! তোমার বিকল্প পদ্ধতিটি সম্পূর্ণ সঠিক এবং প্রশংসনীয়!\n\n"
-            f"**তোমার কাজের পর্যালোচনা:** তুমি সমীকরণ $2x + 2/x = 3$ থেকে ২ কমন নিয়ে $x + 1/x = 3/2$ বের করেছ, "
-            f"এবং এরপর অনুসিদ্ধান্ত প্রয়োগ করে $(x + 1/x)^2 - 2 = (3/2)^2 - 2 = 9/4 - 2 = 1/4$ নির্ণয় করেছ।\n\n"
-            f"তোমার এই গাণিতিক যুক্তি ও হিসাব শতভাগ নির্ভুল!"
+            "চমৎকার! তোমার বিকল্প পদ্ধতিটি সম্পূর্ণ সঠিক এবং প্রশংসনীয়!\n\n"
+            "**তোমার কাজের পর্যালোচনা:** তুমি সমীকরণ $2x + 2/x = 3$ থেকে ২ কমন নিয়ে $x + 1/x = 3/2$ বের করেছ, "
+            "এবং এরপর অনুসিদ্ধান্ত প্রয়োগ করে $(x + 1/x)^2 - 2 = (3/2)^2 - 2 = 9/4 - 2 = 1/4$ নির্ণয় করেছ।\n\n"
+            "তোমার এই গাণিতিক যুক্তি ও হিসাব শতভাগ নির্ভুল!"
         )
 
     # Case C: Student challenges, disagrees, or shares their own working / answer
     disagreement_keywords = [
-        "ভুল", "হবে না", "না স্যার", "আমার তো", "উত্তর তো", "ভুল আছে", "সঠিক না", 
-        "আসছে", "আসবে", "এসেছে", "হিসেবে", "আমার হিসেবে", "না,", "হবে", "কেন"
+        "ভুল",
+        "হবে না",
+        "না স্যার",
+        "আমার তো",
+        "উত্তর তো",
+        "ভুল আছে",
+        "সঠিক না",
+        "আসছে",
+        "আসবে",
+        "এসেছে",
+        "হিসেবে",
+        "আমার হিসেবে",
+        "না,",
+        "হবে",
+        "কেন",
     ]
     is_disagreement = any(k in msg_lower for k in disagreement_keywords) or bool(found_numbers)
 
@@ -503,26 +592,43 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
                 )
             else:
                 student_working_diagnostics.append(
-                    f"তোমার পাওয়া ৩২০ মানটি এবং বইয়ের ৩২২ এর মধ্যে পার্থক্য ঠিক ২। "
-                    f"তুমি সম্ভবত $(x^2 + 1/x^2)^2 = 324$ এর পর উভয়পক্ষ থেকে ২ বিয়োগ করার সময় অসতর্কতাবশত ৪ বিয়োগ করে ফেলেছিলে।"
+                    "তোমার পাওয়া ৩২০ মানটি এবং বইয়ের ৩২২ এর মধ্যে পার্থক্য ঠিক ২। "
+                    "তুমি সম্ভবত $(x^2 + 1/x^2)^2 = 324$ এর পর উভয়পক্ষ থেকে ২ বিয়োগ করার সময় অসতর্কতাবশত ৪ বিয়োগ করে ফেলেছিলে।"
                 )
-        elif ("10" in found_numbers or "১০" in msg) and ("বাঢ়ছে" in msg or "বাড়ছে" in msg or "বৃদ্ধি" in msg or "পার্থক্য" in msg or "পরের" in msg):
+        elif ("10" in found_numbers or "১০" in msg) and (
+            "বাঢ়ছে" in msg or "বাড়ছে" in msg or "বৃদ্ধি" in msg or "পার্থক্য" in msg or "পরের" in msg
+        ):
             student_working_diagnostics.append(
                 "তুমি ধরে নিয়েছ সংখ্যাগুলো ১০ করে বাড়ছে। কিন্তু প্যাটার্নের পরপর দুটি পদের পার্থক্য লক্ষ্য করো: "
                 "$১৭ - ৬ = ১১$, $২৮ - ১৭ = ১১$, $৩৯ - ২৮ = ১১$। অর্থাৎ প্রতিবার ১১ করে বাড়ছে, ১০ নয়! "
                 "তাই ৫০-এর পরবর্তী পদ দুটি হবে $৫০ + ১১ = ৬১$ এবং $৬১ + ১১ = ৭২$।"
             )
-        elif ("40" in found_numbers or "৪০" in msg) and ("কোণ" in msg or "ক্ষুদ্রতম" in msg or "৯০" in msg or "90" in msg or "৮৫" in msg or "85" in msg):
+        elif ("40" in found_numbers or "৪০" in msg) and (
+            "কোণ" in msg
+            or "ক্ষুদ্রতম" in msg
+            or "৯০" in msg
+            or "90" in msg
+            or "৮৫" in msg
+            or "85" in msg
+        ):
             student_working_diagnostics.append(
                 "তুমি ৯০ থেকে ৫ বিয়োগ করে ৮৫ পেয়েছ, যা সঠিক পদক্ষেপ। কিন্তু সমীকরণ $2y = 85^\\circ$ থেকে "
                 "$y = 85^\\circ \\div 2 = 42.5^\\circ$ হয়, ৪০ নয় ($40 \\times 2 = 80$)! তাই ক্ষুদ্রতম কোণটির সঠিক মান হলো ৪২.৫°।"
             )
-        elif ("1800" in found_numbers or "১৮০০" in msg or "72" in found_numbers or "৭২" in msg) and ("গড়" in msg or "গড়" in msg or "যোগফল" in msg or "প্রাপ্ত নম্বর" in msg):
+        elif (
+            "1800" in found_numbers or "১৮০০" in msg or "72" in found_numbers or "৭২" in msg
+        ) and ("গড়" in msg or "গড়" in msg or "যোগফল" in msg or "প্রাপ্ত নম্বর" in msg):
             student_working_diagnostics.append(
                 "তোমার গড়ের সূত্র প্রয়োগ ($১৮০০ \\div ২৫ = ৭২$) ঠিক আছে, তবে উপাত্তগুলো যোগ করার সময় ভুল হয়েছে। "
                 "২৫টি প্রাপ্ত নম্বরের সঠিক যোগফল হলো ১৮৭৫, ১৮০০ নয়। সুতরাং সঠিক গড় হলো $১৮৭৫ \\div ২৫ = ৭৫$।"
             )
-        elif ("a^3 - b^3" in msg_lower or "a³ - b³" in msg_lower) and ("a - b" in msg_lower or "a-b" in msg_lower or "সূচক" in msg or "ঘাত" in msg or "কেন" in msg):
+        elif ("a^3 - b^3" in msg_lower or "a³ - b³" in msg_lower) and (
+            "a - b" in msg_lower
+            or "a-b" in msg_lower
+            or "সূচক" in msg
+            or "ঘাত" in msg
+            or "কেন" in msg
+        ):
             student_working_diagnostics.append(
                 "তোমার সূত্রের অনুমান ($x^3 - y^3$) একদম সঠিক! তবে ঘাত বা সূচকের হিসাবটি লক্ষ্য করো: "
                 "এখানে $x = a^{1/3}$ এবং $y = b^{1/3}$। ফলে $x^3 = (a^{1/3})^3 = a^{3/3} = a^1 = a$ এবং $y^3 = (b^{1/3})^3 = b^{3/3} = b^1 = b$। "
@@ -564,8 +670,8 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
             )
 
         explanation_lines = [
-            f"চলো তোমার খাতার হিসাবটি মিলিয়ে দেখি কোথায় পার্থক্য হচ্ছে!\n",
-            f"**প্রশ্ন:** {q_text}\n"
+            "চলো তোমার খাতার হিসাবটি মিলিয়ে দেখি কোথায় পার্থক্য হচ্ছে!\n",
+            f"**প্রশ্ন:** {q_text}\n",
         ]
 
         if student_working_diagnostics:
@@ -594,19 +700,20 @@ def handle_student_math_interaction(item: dict, student_message: str) -> str:
             )
         elif "a^2 - b^2" in msg_lower or "বর্গ" in msg:
             return (
-                f"তুমি লিখেছ $(a-b)^2 = a^2 - b^2$। একটু লক্ষ্য করো:\n\n"
-                f"$(a-b)^2$ মানে হলো $(a-b)$ কে $(a-b)$ দিয়ে গুণ করা, অর্থাৎ $(a-b)(a-b) = a^2 - 2ab + b^2$।\n"
-                f"আর $a^2 - b^2 = (a+b)(a-b)$, যা দুইটি বর্গের বিয়োগফল। দুটি কিন্তু সম্পূর্ণ আলাদা রাশি!"
+                "তুমি লিখেছ $(a-b)^2 = a^2 - b^2$। একটু লক্ষ্য করো:\n\n"
+                "$(a-b)^2$ মানে হলো $(a-b)$ কে $(a-b)$ দিয়ে গুণ করা, অর্থাৎ $(a-b)(a-b) = a^2 - 2ab + b^2$।\n"
+                "আর $a^2 - b^2 = (a+b)(a-b)$, যা দুইটি বর্গের বিয়োগফল। দুটি কিন্তু সম্পূর্ণ আলাদা রাশি!"
             )
 
     # Case C: General confusion ("bujhtisi na" / "bujhi nai")
     explanation_lines = [
-        f"কোনো চিন্তা নেই! চলো সহজ ভাষায় বিষয়টি ধাপে ধাপে বুঝে নেই:\n",
-        f"**প্রশ্ন:** {q_text}\n"
+        "কোনো চিন্তা নেই! চলো সহজ ভাষায় বিষয়টি ধাপে ধাপে বুঝে নেই:\n",
+        f"**প্রশ্ন:** {q_text}\n",
     ]
     for idx, step in enumerate(steps, 1):
         explanation_lines.append(f"- **ধাপ {to_bangla_digits(idx)}:** {step}")
 
-    explanation_lines.append(f"\nএভাবে হিসাব করে চূড়ান্ত উত্তর পাওয়া যায়: **{final_ans}**। কোনো নির্দিষ্ট ধাপে খটকা থাকলে বলো, আরও ভেঙে বুঝিয়ে দেব।")
+    explanation_lines.append(
+        f"\nএভাবে হিসাব করে চূড়ান্ত উত্তর পাওয়া যায়: **{final_ans}**। কোনো নির্দিষ্ট ধাপে খটকা থাকলে বলো, আরও ভেঙে বুঝিয়ে দেব।"
+    )
     return "\n".join(explanation_lines)
-
