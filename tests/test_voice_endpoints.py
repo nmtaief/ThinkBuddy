@@ -133,3 +133,45 @@ async def test_voice_speak_tts_and_503_browser_fallback(monkeypatch: pytest.Monk
         )
         assert r_fb.status_code == 503
         assert r_fb.json()["fallback"] == "browser_tts"
+
+
+@pytest.mark.asyncio
+async def test_voice_rate_limit_returns_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-process in-memory rate limiter returns 429 when per-minute cap is exceeded."""
+    import core.voice.router as vr_mod
+    from core.common.config import settings
+    from core.main import app
+
+    monkeypatch.setenv("VOICE_RATE_LIMIT_PER_MIN", "2")
+    vr_mod._minute_buckets.clear()
+    vr_mod._day_buckets.clear()
+
+    class _FakeVoiceService:
+        async def synthesize_speech(
+            self, *, text: str, mood: str = "friendly", language: str = "bn"
+        ) -> tuple[bytes, str]:
+            return b"RIFF0000WAVE", "audio/wav"
+
+    monkeypatch.setattr(vr_mod, "get_voice_service", lambda: _FakeVoiceService())
+    headers = {
+        "X-Internal-Service-Token": settings.INTERNAL_SERVICE_TOKEN,
+        "X-User-Id": "rate_limit_test_user",
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for _ in range(2):
+            r = await client.post(
+                "/v1/voice/speak",
+                json={"text": "হ্যালো", "mood": "friendly", "language": "bn"},
+                headers=headers,
+            )
+            assert r.status_code == 200
+        r_429 = await client.post(
+            "/v1/voice/speak",
+            json={"text": "হ্যালো", "mood": "friendly", "language": "bn"},
+            headers=headers,
+        )
+        assert r_429.status_code == 429
+        assert r_429.json()["error"]["code"] == "VOICE_RATE_LIMITED"

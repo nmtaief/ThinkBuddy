@@ -43,6 +43,7 @@ def _require_internal_token(
 
 
 def _enforce_voice_rate_limit(x_user_id: str | None = Header(default="anonymous")) -> None:
+    # Per-process in-memory rate limiter (does not require Redis; resets per worker).
     uid = x_user_id or "anonymous"
     now = time.time()
     per_min = int(os.getenv("VOICE_RATE_LIMIT_PER_MIN", "15"))
