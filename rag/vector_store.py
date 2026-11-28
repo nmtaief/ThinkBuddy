@@ -81,11 +81,12 @@ class PgVectorStore(VectorStore):
     ) -> list[SearchResult]:
         """Execute hybrid search using Reciprocal Rank Fusion (RRF) over dense and lexical hits."""
         from core.common.config import settings
+
         if settings.EMBEDDING_PROVIDER.lower() in ("mock", "test"):
             logger.warning(
                 "Dense vector search disabled: EMBEDDING_PROVIDER is '%s'. "
                 "Falling back to pure lexical retrieval to prevent mock vector noise.",
-                settings.EMBEDDING_PROVIDER
+                settings.EMBEDDING_PROVIDER,
             )
             return await self.search_lexical(query_text, limit=limit, filters=filters)
 
@@ -216,54 +217,117 @@ class PgVectorStore(VectorStore):
     ) -> list[SearchResult]:
         """Perform lexical full-text (tsvector) and trigram similarity search."""
         import re
-        from rag.bengali_normalizer import normalize_text, expand_query_for_tsquery
+
+        from rag.bengali_normalizer import expand_query_for_tsquery, normalize_text
 
         cleaned_query = normalize_text(query_text)
         if not cleaned_query:
             return []
 
         # Extract page number mention (e.g. "page 58", "pg 58", "পৃষ্ঠা ৫৮", "৫৮ নং পৃষ্ঠা")
-        page_match = re.search(r'(?:page|pg|পৃষ্ঠা|পেইজ)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        page_match = re.search(
+            r"(?:page|pg|পৃষ্ঠা|পেইজ)\s*[:=]?\s*(\d+)", cleaned_query, re.IGNORECASE
+        )
         if not page_match:
-            page_match = re.search(r'\b(\d+)\s*(?:নং\s*)?(?:পৃষ্ঠা|page)\b', cleaned_query, re.IGNORECASE)
+            page_match = re.search(
+                r"\b(\d+)\s*(?:নং\s*)?(?:পৃষ্ঠা|page)\b", cleaned_query, re.IGNORECASE
+            )
         ext_page = int(page_match.group(1)) if page_match else -1
 
         # Extract chapter number mention (e.g. "chapter 2", "ch 2", "first chapter", "1st chapter", "অধ্যায় ২", "প্রথম অধ্যায়")
         ordinals = {
-            "first": 1, "1st": 1, "প্রথম": 1, "১ম": 1,
-            "second": 2, "2nd": 2, "দ্বিতীয়": 2, "দ্বিতীয়": 2, "২য়": 2,
-            "third": 3, "3rd": 3, "তৃতীয়": 3, "তৃতীয়": 3, "৩য়": 3,
-            "fourth": 4, "4th": 4, "চতুর্থ": 4, "৪র্থ": 4,
-            "fifth": 5, "5th": 5, "পঞ্চম": 5, "৫ম": 5,
-            "sixth": 6, "6th": 6, "ষষ্ঠ": 6, "৬ষ্ঠ": 6,
-            "seventh": 7, "7th": 7, "সপ্তম": 7, "৭ম": 7,
-            "eighth": 8, "8th": 8, "অষ্টম": 8, "৮ম": 8,
-            "ninth": 9, "9th": 9, "নবম": 9, "৯ম": 9,
-            "tenth": 10, "10th": 10, "দশম": 10, "১০ম": 10,
-            "eleventh": 11, "11th": 11, "একাদশ": 11, "১১শ": 11,
-            "twelfth": 12, "12th": 12, "দ্বাদশ": 12, "১২শ": 12,
-            "thirteenth": 13, "13th": 13, "ত্রয়োদশ": 13, "১৩শ": 13,
-            "fourteenth": 14, "14th": 14, "চতুর্দশ": 14, "১৪শ": 14,
+            "first": 1,
+            "1st": 1,
+            "প্রথম": 1,
+            "১ম": 1,
+            "second": 2,
+            "2nd": 2,
+            "দ্বিতীয়": 2,
+            "দ্বিতীয়": 2,
+            "২য়": 2,
+            "third": 3,
+            "3rd": 3,
+            "তৃতীয়": 3,
+            "তৃতীয়": 3,
+            "৩য়": 3,
+            "fourth": 4,
+            "4th": 4,
+            "চতুর্থ": 4,
+            "৪র্থ": 4,
+            "fifth": 5,
+            "5th": 5,
+            "পঞ্চম": 5,
+            "৫ম": 5,
+            "sixth": 6,
+            "6th": 6,
+            "ষষ্ঠ": 6,
+            "৬ষ্ঠ": 6,
+            "seventh": 7,
+            "7th": 7,
+            "সপ্তম": 7,
+            "৭ম": 7,
+            "eighth": 8,
+            "8th": 8,
+            "অষ্টম": 8,
+            "৮ম": 8,
+            "ninth": 9,
+            "9th": 9,
+            "নবম": 9,
+            "৯ম": 9,
+            "tenth": 10,
+            "10th": 10,
+            "দশম": 10,
+            "১০ম": 10,
+            "eleventh": 11,
+            "11th": 11,
+            "একাদশ": 11,
+            "১১শ": 11,
+            "twelfth": 12,
+            "12th": 12,
+            "দ্বাদশ": 12,
+            "১২শ": 12,
+            "thirteenth": 13,
+            "13th": 13,
+            "ত্রয়োদশ": 13,
+            "১৩শ": 13,
+            "fourteenth": 14,
+            "14th": 14,
+            "চতুর্দশ": 14,
+            "১৪শ": 14,
         }
-        chap_match = re.search(r'(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        chap_match = re.search(
+            r"(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)\s*[:=]?\s*(\d+)", cleaned_query, re.IGNORECASE
+        )
         if not chap_match:
-            chap_match = re.search(r'\b(\d+)\s*(?:নং\s*)?(?:অধ্যায়|অধ্যায়|chapter|ch)\b', cleaned_query, re.IGNORECASE)
+            chap_match = re.search(
+                r"\b(\d+)\s*(?:নং\s*)?(?:অধ্যায়|অধ্যায়|chapter|ch)\b", cleaned_query, re.IGNORECASE
+            )
         ext_chapter = int(chap_match.group(1)) if chap_match else -1
-        if ext_chapter == -1 and re.search(r'(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)', cleaned_query, re.IGNORECASE):
+        if ext_chapter == -1 and re.search(
+            r"(?:chapter|ch|অধ্যায়|অধ্যায়|পাঠ)", cleaned_query, re.IGNORECASE
+        ):
             for word, ch_num in ordinals.items():
-                if re.search(rf'(?:\b{word}\s*(?:অধ্যায়|অধ্যায়|chapter|ch)?\b|(?:chapter|ch|অধ্যায়|অধ্যায়)\s*{word}\b)', cleaned_query, re.IGNORECASE):
+                if re.search(
+                    rf"(?:\b{word}\s*(?:অধ্যায়|অধ্যায়|chapter|ch)?\b|(?:chapter|ch|অধ্যায়|অধ্যায়)\s*{word}\b)",
+                    cleaned_query,
+                    re.IGNORECASE,
+                ):
                     ext_chapter = ch_num
                     break
 
         if ext_chapter == -1:
-            ex_match = re.search(r'(?:অনুশীলনী|onushiloni|exercise|ex)\s*(\d+(?:\.\d+)?)', cleaned_query, re.IGNORECASE)
+            ex_match = re.search(
+                r"(?:অনুশীলনী|onushiloni|exercise|ex)\s*(\d+(?:\.\d+)?)",
+                cleaned_query,
+                re.IGNORECASE,
+            )
             if ex_match:
                 try:
-                    ext_chapter = int(ex_match.group(1).split('.')[0])
+                    ext_chapter = int(ex_match.group(1).split(".")[0])
                 except (ValueError, TypeError):
                     pass
             else:
-                dec_match = re.search(r'\b(\d+)\.\d+\b', cleaned_query)
+                dec_match = re.search(r"\b(\d+)\.\d+\b", cleaned_query)
                 if dec_match:
                     try:
                         ext_chapter = int(dec_match.group(1))
@@ -271,7 +335,9 @@ class PgVectorStore(VectorStore):
                         pass
 
         # Extract class level mention (e.g. "class 8", "class 7", "৮ম শ্রেণি")
-        class_match = re.search(r'(?:class|শ্রেণি|শ্রেণী)\s*[:=]?\s*(\d+)', cleaned_query, re.IGNORECASE)
+        class_match = re.search(
+            r"(?:class|শ্রেণি|শ্রেণী)\s*[:=]?\s*(\d+)", cleaned_query, re.IGNORECASE
+        )
         ext_class = int(class_match.group(1)) if class_match else -1
 
         # Generic Bengali morphological inflection expansion for tsquery
@@ -279,13 +345,51 @@ class PgVectorStore(VectorStore):
 
         # Filter out conversational stopwords for full-text lexical queries
         stopwords = {
-            "can", "you", "explain", "me", "tell", "about", "what", "is", "please",
-            "help", "with", "the", "a", "an", "book", "of", "in", "for", "to", "how",
-            "er", "kon", "konta", "ta", "ki", "je", "te", "kono", "kobe", "kemon",
-            "বলো", "বলুন", "আমাকে", "একটু", "সম্পর্কে", "কী", "কি", "বোঝাও", "বুঝিয়ে",
-            "দাও", "হলো", "বলতে", "বোঝায়"
+            "can",
+            "you",
+            "explain",
+            "me",
+            "tell",
+            "about",
+            "what",
+            "is",
+            "please",
+            "help",
+            "with",
+            "the",
+            "a",
+            "an",
+            "book",
+            "of",
+            "in",
+            "for",
+            "to",
+            "how",
+            "er",
+            "kon",
+            "konta",
+            "ta",
+            "ki",
+            "je",
+            "te",
+            "kono",
+            "kobe",
+            "kemon",
+            "বলো",
+            "বলুন",
+            "আমাকে",
+            "একটু",
+            "সম্পর্কে",
+            "কী",
+            "কি",
+            "বোঝাও",
+            "বুঝিয়ে",
+            "দাও",
+            "হলো",
+            "বলতে",
+            "বোঝায়",
         }
-        raw_words = [w for w in re.findall(r'[\w]+', cleaned_query) if w.lower() not in stopwords]
+        raw_words = [w for w in re.findall(r"[\w]+", cleaned_query) if w.lower() not in stopwords]
         clean_q = " ".join(raw_words) if raw_words else cleaned_query
 
         where_clauses = ["c.retrievable = true"]

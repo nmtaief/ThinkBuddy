@@ -12,7 +12,18 @@ import re
 import unicodedata
 
 # Mapping of Bengali numerals to ASCII digits
-BN_DIGITS = {"০": "0", "১": "1", "২": "2", "৩": "3", "৪": "4", "৫": "5", "৬": "6", "৭": "7", "৮": "8", "৯": "9"}
+BN_DIGITS = {
+    "০": "0",
+    "১": "1",
+    "২": "2",
+    "৩": "3",
+    "৪": "4",
+    "৫": "5",
+    "৬": "6",
+    "৭": "7",
+    "৮": "8",
+    "৯": "9",
+}
 ASCII_TO_BN_DIGITS = {v: k for k, v in BN_DIGITS.items()}
 
 # Primary Bengali consonants
@@ -25,15 +36,40 @@ INDEPENDENT_VOWELS = set("অআইঈউঊঋএঐওঔ")
 # Common Bengali noun and case suffixes ordered by length (longest match first)
 BENGALI_SUFFIXES = [
     # Plural + genitive / locative
-    "গুলোর", "গুলির", "দেরকে", "গুলো", "গুলি", "সমূহ", "গণের", "গণ",
+    "গুলোর",
+    "গুলির",
+    "দেরকে",
+    "গুলো",
+    "গুলি",
+    "সমূহ",
+    "গণের",
+    "গণ",
     # Definiteness + case
-    "টিতে", "টাতে", "টির", "টার", "টিকে", "টাকে", "খানা", "খানি",
+    "টিতে",
+    "টাতে",
+    "টির",
+    "টার",
+    "টিকে",
+    "টাকে",
+    "খানা",
+    "খানি",
     # Multi-char case endings
-    "থেকে", "দ্বারা", "য়েরা", "য়ের", "দের",
+    "থেকে",
+    "দ্বারা",
+    "য়েরা",
+    "য়ের",
+    "দের",
     # 2-char endings
-    "ের", "য়ে",
+    "ের",
+    "য়ে",
     # 1-char / light suffixes (highest risk of false friends)
-    "টি", "টা", "কে", "রে", "তে", "র", "য়",
+    "টি",
+    "টা",
+    "কে",
+    "রে",
+    "তে",
+    "র",
+    "য়",
 ]
 
 
@@ -67,11 +103,11 @@ def strip_bengali_suffix(word: str) -> tuple[str, str | None]:
             stem = word[: -len(sfx)]
 
             # 1. Phonotactic guard: Never sever a conjunct consonant (stem cannot end with orphan virama/hasanta)
-            if stem.endswith("\u09CD"):
+            if stem.endswith("\u09cd"):
                 continue
 
             c_count = count_consonants(stem)
-            viramas = stem.count("\u09CD")
+            viramas = stem.count("\u09cd")
             eff_c = c_count - viramas  # Effective distinct consonant positions
             has_indep_vowel = any(c in INDEPENDENT_VOWELS for c in stem)
 
@@ -103,9 +139,36 @@ def strip_bengali_suffix(word: str) -> tuple[str, str | None]:
 
 # Common Bengali question words and conversational stopwords that should not constrain lexical tsquery
 QUESTION_STOPWORDS = {
-    "কী", "কি", "কেন", "কাকে", "বলতে", "বোঝায়", "কখন", "কোথায়", "কত", "কোন",
-    "কোনটি", "কীভাবে", "কিভাবে", "সম্পর্কে", "বলো", "বলুন", "আমাকে", "একটু",
-    "দাও", "হলো", "হলে", "এবং", "ও", "বা", "কিন্তু", "যে", "এর", "তে", "টি", "টা"
+    "কী",
+    "কি",
+    "কেন",
+    "কাকে",
+    "বলতে",
+    "বোঝায়",
+    "কখন",
+    "কোথায়",
+    "কত",
+    "কোন",
+    "কোনটি",
+    "কীভাবে",
+    "কিভাবে",
+    "সম্পর্কে",
+    "বলো",
+    "বলুন",
+    "আমাকে",
+    "একটু",
+    "দাও",
+    "হলো",
+    "হলে",
+    "এবং",
+    "ও",
+    "বা",
+    "কিন্তু",
+    "যে",
+    "এর",
+    "তে",
+    "টি",
+    "টা",
 }
 
 

@@ -281,10 +281,14 @@ class BgeM3EmbeddingProvider(EmbeddingProvider):
 
                 logger.info("Initializing BgeM3EmbeddingProvider from %s", self._model_path)
                 BgeM3EmbeddingProvider._model = SentenceTransformer(
-                    self._model_path, device="cpu", local_files_only=os.path.exists(self._model_path)
+                    self._model_path,
+                    device="cpu",
+                    local_files_only=os.path.exists(self._model_path),
                 )
             except Exception as ex:
-                logger.error("Failed to initialize BgeM3EmbeddingProvider from %s: %s", self._model_path, ex)
+                logger.error(
+                    "Failed to initialize BgeM3EmbeddingProvider from %s: %s", self._model_path, ex
+                )
                 raise
 
     @property
@@ -328,7 +332,10 @@ def get_embedding_provider() -> EmbeddingProvider:
         return BgeM3EmbeddingProvider(dimension=settings.EMBEDDING_DIMENSION)
 
     if provider_type in ("mock", "test"):
-        if getattr(settings, "ENVIRONMENT", "development") not in ("test", "development") and os.getenv("TESTING") != "true":
+        if (
+            getattr(settings, "ENVIRONMENT", "development") not in ("test", "development")
+            and os.getenv("TESTING") != "true"
+        ):
             raise ValueError(
                 "Mock embeddings are strictly forbidden in production. Set EMBEDDING_PROVIDER='bge-m3'."
             )
@@ -374,7 +381,9 @@ async def verify_embedding_compatibility(session) -> None:
     chk_res = await session.execute(chk_query)
     stored_models = [r[0] for r in chk_res.fetchall() if r[0]]
     for sm in stored_models:
-        if sm != provider.model_name and not (sm == "bge-m3" and provider.model_name == "BAAI/bge-m3"):
+        if sm != provider.model_name and not (
+            sm == "bge-m3" and provider.model_name == "BAAI/bge-m3"
+        ):
             raise RuntimeError(
                 f"Embedding model mismatch: Retrievable chunks in database were embedded with '{sm}' "
                 f"but active provider is '{provider.model_name}'."

@@ -303,6 +303,14 @@ class CurriculumImporter:
             }
             await session.commit()
 
+            # Sync newly ingested manifest into Two-Layer Decoupled RAG (best-effort if Qdrant offline)
+            try:
+                from rag.reindex_qdrant import index_manifest_to_layers
+
+                await index_manifest_to_layers(path)
+            except Exception as q_exc:
+                logger.warning("Optional Qdrant/SyllabusIndex sync skipped: %s", q_exc)
+
             logger.info(
                 "Ingestion completed for book %s: %d newly ingested, %d skipped, %d unretrievable",
                 book_id,
