@@ -38,8 +38,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
   return (
     <div
       className={`math-content ${className}`}
-      // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml - KaTeX/sanitized math output
-      dangerouslySetInnerHTML={{ __html: renderedContent }}
+      dangerouslySetInnerHTML={{ __html: renderedContent }} // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
     />
   );
 };

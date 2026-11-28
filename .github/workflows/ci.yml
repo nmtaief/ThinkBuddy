@@ -94,6 +94,7 @@ jobs:
         run: |
           python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; cur = conn.cursor(); cur.execute('CREATE EXTENSION IF NOT EXISTS vector;'); cur.execute('CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL PRIMARY KEY);')"
           alembic upgrade head
+          python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_dev_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; cur = conn.cursor(); cur.execute(\"DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'thinkbuddy_api') THEN CREATE ROLE thinkbuddy_api LOGIN PASSWORD 'thinkbuddy_api_password'; ELSE ALTER ROLE thinkbuddy_api WITH LOGIN PASSWORD 'thinkbuddy_api_password'; END IF; END \$\$;\"); cur.execute('GRANT USAGE ON SCHEMA public TO thinkbuddy_api; GRANT SELECT ON ALL TABLES IN SCHEMA public TO thinkbuddy_api; REVOKE ALL ON TABLE question_keys FROM thinkbuddy_api;')"
 
       - name: Run Tests with Coverage
         run: pytest -v --cov=core --cov=gateway --cov=rag tests/
