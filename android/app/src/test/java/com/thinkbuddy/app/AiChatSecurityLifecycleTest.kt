@@ -70,7 +70,7 @@ class AiChatSecurityLifecycleTest {
     // 1. Chat blocked during assessed attempts
     // -------------------------------------------------------------------------
     @Test
-    fun testChatBlockedDuringAssessedAttemptReturnsQuizLockout() = runTest {
+    fun testChatBlockedDuringAssessedAttemptReturnsQuizLockout() = runTest(testDispatcher) {
         val fakeRepo = object : ChatRepository() {
             override fun streamMessage(
                 sessionId: String,
@@ -102,7 +102,7 @@ class AiChatSecurityLifecycleTest {
     // 2. Stream cancellation when an assessed attempt starts
     // -------------------------------------------------------------------------
     @Test
-    fun testStreamCancellationWhenAssessedAttemptStarts() = runTest {
+    fun testStreamCancellationWhenAssessedAttemptStarts() = runTest(testDispatcher) {
         var cancellationObserved = false
 
         val fakeRepo = object : ChatRepository() {
