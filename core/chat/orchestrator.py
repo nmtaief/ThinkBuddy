@@ -148,7 +148,12 @@ class ChatOrchestrator:
             return self.llm_gateway
         from core.chat.llm import get_active_llm_gateway
 
-        return await get_active_llm_gateway(self.db)
+        gw = await get_active_llm_gateway(self.db)
+        if gw is None:
+            from core.chat.llm import OpenRouterGateway
+
+            return OpenRouterGateway()
+        return gw
 
     async def get_cached_turn(
         self,

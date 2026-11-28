@@ -138,8 +138,9 @@ def verify_play_integrity_token(
     if "." in token_str:
         try:
             # Decode claims from JWT
-            unverified_claims = jwt.decode(  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode - Play Integrity JWS claims inspection before Google attestation check
-                token_str, options={"verify_signature": False}
+            unverified_claims = jwt.decode(
+                token_str,
+                options={"verify_signature": False},  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode - Play Integrity JWS claims inspection before Google attestation check
             )
 
             # 1. Package name verification
