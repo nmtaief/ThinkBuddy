@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 import zlib
 from asyncio import Lock
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -30,12 +33,8 @@ from core.planner.engine import (
     MultiSubjectPlanOutput,
     SubjectSetupInput,
 )
-from core.planner.provider import (
-    AiPlannerProvider,
-    PlanProviderContext,
-    get_plan_provider,
-)
 from core.planner.models import (
+    AdminPolicy,
     Plan,
     PlanDay,
     StudentChangeRequest,
@@ -44,7 +43,11 @@ from core.planner.models import (
     SyllabusItem,
     Task,
 )
-from core.progress.models import ProgressDaily, RevisionItem
+from core.planner.provider import (
+    AiPlannerProvider,
+    PlanProviderContext,
+    get_plan_provider,
+)
 from core.planner.schemas import (
     AiSuggestionResponse,
     DailyMinutesResponse,
@@ -67,6 +70,7 @@ from core.planner.settings_resolver import (
     resolve_calendar_days,
     resolve_student_settings,
 )
+from core.progress.models import ProgressDaily, RevisionItem
 
 router = APIRouter(prefix="", tags=["Planner & Study Setup"])
 
@@ -110,12 +114,18 @@ async def execute_student_plan_regeneration(
         if student_user and student_user.status == "pending_deletion":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "ACCOUNT_PENDING_DELETION", "message": "Account is pending deletion. Study plan updates are suspended."},
+                detail={
+                    "code": "ACCOUNT_PENDING_DELETION",
+                    "message": "Account is pending deletion. Study plan updates are suspended.",
+                },
             )
         if student_user and not student_user.has_parental_consent:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "CONSENT_WITHDRAWN", "message": "Parental consent is required to generate or update study plans."},
+                detail={
+                    "code": "CONSENT_WITHDRAWN",
+                    "message": "Parental consent is required to generate or update study plans.",
+                },
             )
 
         # 1. Fetch student profile
@@ -296,7 +306,9 @@ async def execute_student_plan_regeneration(
         progress_days = res_p.scalars().all()
         quiz_accs = [p.quiz_avg for p in progress_days if p.quiz_avg is not None]
         avg_quiz_acc = (sum(quiz_accs) / len(quiz_accs)) if quiz_accs else 0.8
-        skipped_count = sum(p.tasks_total - p.tasks_done for p in progress_days if p.tasks_total > p.tasks_done)
+        skipped_count = sum(
+            p.tasks_total - p.tasks_done for p in progress_days if p.tasks_total > p.tasks_done
+        )
 
         learning_signals = {
             "quiz_accuracy": round(avg_quiz_acc, 2),
@@ -323,10 +335,12 @@ async def execute_student_plan_regeneration(
         )
 
         # Check per-student override and dynamic rollout config (Item 3)
-        from core.planner.rollout import get_ai_planner_rollout_config
         from core.planner.models import AiPlannerShadowRun
+        from core.planner.rollout import get_ai_planner_rollout_config
 
-        stmt_sett = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+        stmt_sett = select(StudentStudySettings).where(
+            StudentStudySettings.student_id == student_id
+        )
         res_sett = await db.execute(stmt_sett)
         settings_record = res_sett.scalars().first()
         per_student_override = settings_record.ai_planner_override if settings_record else None
@@ -348,6 +362,7 @@ async def execute_student_plan_regeneration(
                 ai_shadow_res = await ai_shadow_provider.generate_plan(provider_ctx)
                 if ai_shadow_res.plan_out:
                     from core.planner.shadow_comparator import compare_plans
+
                     shadow_report = compare_plans(ai_shadow_res.plan_out, plan_out)
                     provider_result.shadow_comparison = shadow_report
                     # Persist shadow evaluation to dedicated table (no payload data, no prompt, no PII) (Item 5)
@@ -361,10 +376,16 @@ async def execute_student_plan_regeneration(
                         ai_warnings_count=int(shadow_report.get("ai_warnings_count", 0)),
                         metrics={
                             "total_ai_tasks": shadow_report.get("total_ai_tasks", 0),
-                            "total_deterministic_tasks": shadow_report.get("total_deterministic_tasks", 0),
+                            "total_deterministic_tasks": shadow_report.get(
+                                "total_deterministic_tasks", 0
+                            ),
                             "ai_total_minutes": shadow_report.get("ai_total_minutes", 0),
-                            "deterministic_total_minutes": shadow_report.get("deterministic_total_minutes", 0),
-                            "subject_coverage_delta": shadow_report.get("subject_coverage_delta", {}),
+                            "deterministic_total_minutes": shadow_report.get(
+                                "deterministic_total_minutes", 0
+                            ),
+                            "subject_coverage_delta": shadow_report.get(
+                                "subject_coverage_delta", {}
+                            ),
                         },
                     )
                     db.add(shadow_run)
@@ -385,9 +406,9 @@ async def execute_student_plan_regeneration(
                 logger.warning("AI Planner Shadow Mode execution error: %s", shadow_exc)
 
         # Suggestions processing: de-duplication, daily cap (3/day), non-labeling rationales, and auto_within_limits (Items 2, 4, 7)
-        from core.parent.service import sanitize_non_labeling_reason, localize_rationale_bn
-        from core.notifications.service import NotificationService
         from core.families.models import ParentStudentLink
+        from core.notifications.service import NotificationService
+        from core.parent.service import localize_rationale_bn, sanitize_non_labeling_reason
 
         stmt_plink = select(ParentStudentLink.parent_id).where(
             ParentStudentLink.student_id == student_id,
@@ -400,16 +421,20 @@ async def execute_student_plan_regeneration(
         # Minute-change suggestion if exam is within 14 days or skipped tasks
         if resolved_settings.adaptive_mode in ("suggest", "auto_within_limits"):
             exam_proximity = exam_dates and min((ed - today_dhaka).days for ed in exam_dates) < 14
-            if (exam_proximity or learning_signals.get("skipped_tasks_count", 0) > 3) and resolved_settings.school_day_minutes < 240:
-                suggestions_to_process.append({
-                    "type": "ai_minute_suggestion",
-                    "field": "school_day_minutes",
-                    "current_minutes": resolved_settings.school_day_minutes,
-                    "suggested_minutes": min(resolved_settings.school_day_minutes + 15, 240),
-                    "minutes_delta": 15,
-                    "evidence_codes": ["PACING_ALIGNMENT"],
-                    "rationale": "Recommended pacing adjustment of +15 daily study minutes to reinforce exam preparation.",
-                })
+            if (
+                exam_proximity or learning_signals.get("skipped_tasks_count", 0) > 3
+            ) and resolved_settings.school_day_minutes < 240:
+                suggestions_to_process.append(
+                    {
+                        "type": "ai_minute_suggestion",
+                        "field": "school_day_minutes",
+                        "current_minutes": resolved_settings.school_day_minutes,
+                        "suggested_minutes": min(resolved_settings.school_day_minutes + 15, 240),
+                        "minutes_delta": 15,
+                        "evidence_codes": ["PACING_ALIGNMENT"],
+                        "rationale": "Recommended pacing adjustment of +15 daily study minutes to reinforce exam preparation.",
+                    }
+                )
 
         if suggestions_to_process and settings_record:
             today_start = datetime.combine(today_dhaka, datetime.min.time(), tzinfo=UTC)
@@ -428,7 +453,8 @@ async def execute_student_plan_regeneration(
             pending_keys = {
                 (
                     (r.requested_changes or {}).get("type"),
-                    (r.requested_changes or {}).get("subject") or (r.requested_changes or {}).get("field"),
+                    (r.requested_changes or {}).get("subject")
+                    or (r.requested_changes or {}).get("field"),
                 )
                 for r in pending_reqs
             }
@@ -437,7 +463,9 @@ async def execute_student_plan_regeneration(
 
             for ps in suggestions_to_process:
                 sugg_type = ps.get("type", "ai_priority_suggestion")
-                target_key = ps.get("subject") if sugg_type == "ai_priority_suggestion" else ps.get("field")
+                target_key = (
+                    ps.get("subject") if sugg_type == "ai_priority_suggestion" else ps.get("field")
+                )
                 if (sugg_type, target_key) in pending_keys:
                     continue
 
@@ -449,7 +477,11 @@ async def execute_student_plan_regeneration(
                 is_locked = False
                 if sugg_type == "ai_priority_suggestion":
                     sub = ps.get("subject")
-                    if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+                    if (
+                        sub in locked_fields
+                        or f"priority_{sub}" in locked_fields
+                        or "subject_priorities" in locked_fields
+                    ):
                         is_locked = True
                 elif sugg_type == "ai_minute_suggestion":
                     fld = ps.get("field")
@@ -479,7 +511,9 @@ async def execute_student_plan_regeneration(
                         else:
                             new_lvl = raw_lvl
 
-                        prev_state["subject_priorities"] = dict(settings_record.subject_priorities or {})
+                        prev_state["subject_priorities"] = dict(
+                            settings_record.subject_priorities or {}
+                        )
                         new_prios = dict(settings_record.subject_priorities or {})
                         new_prios[sub] = new_lvl
                         settings_record.subject_priorities = new_prios
@@ -502,23 +536,35 @@ async def execute_student_plan_regeneration(
                         # Rule: Ceilings per class band and day type from admin_policies table
                         # Auto mode never lowers a parent setting, never raises above the ceiling,
                         # and leaves a parent value that is already above the ceiling unchanged.
-                        stmt_prof = select(StudentProfile.class_level).where(StudentProfile.user_id == student_id)
+                        stmt_prof = select(StudentProfile.class_level).where(
+                            StudentProfile.user_id == student_id
+                        )
                         res_prof = await db.execute(stmt_prof)
                         cls_lvl = res_prof.scalar_one_or_none() or 10
                         band = "6-8" if cls_lvl <= 8 else ("9-10" if cls_lvl <= 10 else "11-12")
 
                         stmt_pol = (
                             select(AdminPolicy)
-                            .where(AdminPolicy.class_band == band, AdminPolicy.status == "published")
+                            .where(
+                                AdminPolicy.class_band == band, AdminPolicy.status == "published"
+                            )
                             .order_by(AdminPolicy.version.desc())
                         )
                         res_pol = await db.execute(stmt_pol)
                         pol_rec = res_pol.scalars().first()
 
                         if fld == "holiday_minutes":
-                            ceiling = pol_rec.holiday_ceiling_minutes if pol_rec else (360 if band == "6-8" else (480 if band == "9-10" else 600))
+                            ceiling = (
+                                pol_rec.holiday_ceiling_minutes
+                                if pol_rec
+                                else (360 if band == "6-8" else (480 if band == "9-10" else 600))
+                            )
                         else:
-                            ceiling = pol_rec.school_day_ceiling_minutes if pol_rec else (240 if band == "6-8" else (360 if band == "9-10" else 360))
+                            ceiling = (
+                                pol_rec.school_day_ceiling_minutes
+                                if pol_rec
+                                else (240 if band == "6-8" else (360 if band == "9-10" else 360))
+                            )
 
                         # Invariant 1: Leaves a parent value that is already above the ceiling unchanged
                         if cur_mins >= ceiling:
@@ -530,21 +576,25 @@ async def execute_student_plan_regeneration(
 
                         prev_state[fld] = cur_mins
                         setattr(settings_record, fld, final_mins)
-                        summary_en = f"Adjusted daily study time to {final_mins} minutes for exam pacing."
+                        summary_en = (
+                            f"Adjusted daily study time to {final_mins} minutes for exam pacing."
+                        )
                         summary_bn = f"দৈনিক পড়ার সময় {final_mins} মিনিটে সমন্বয় করা হয়েছে।"
 
                     settings_record.version += 1
                     cur_adj = dict(settings_record.ai_adjustments or {})
                     recent_adj = list(cur_adj.get("recent_adjustments", []))
-                    recent_adj.append({
-                        "adjustment_id": adj_id,
-                        "type": sugg_type,
-                        "previous_state": prev_state,
-                        "summary": summary_en,
-                        "summary_bn": summary_bn,
-                        "applied_at": datetime.now(UTC).isoformat(),
-                        "undone": False,
-                    })
+                    recent_adj.append(
+                        {
+                            "adjustment_id": adj_id,
+                            "type": sugg_type,
+                            "previous_state": prev_state,
+                            "summary": summary_en,
+                            "summary_bn": summary_bn,
+                            "applied_at": datetime.now(UTC).isoformat(),
+                            "undone": False,
+                        }
+                    )
                     cur_adj["recent_adjustments"] = recent_adj
                     settings_record.ai_adjustments = cur_adj
 
@@ -1134,7 +1184,8 @@ async def get_student_plan(
         model_version=getattr(primary_plan, "model_version", "v2-rules") or "v2-rules",
         contract_version=getattr(primary_plan, "contract_version", "p03-engine") or "p03-engine",
         settings_version=getattr(primary_plan, "settings_version", 1) or 1,
-        generation_reason=getattr(primary_plan, "generation_reason", "deterministic_baseline") or "deterministic_baseline",
+        generation_reason=getattr(primary_plan, "generation_reason", "deterministic_baseline")
+        or "deterministic_baseline",
         rationale=primary_plan.params.get("rationale", {}) if primary_plan.params else {},
     )
 
@@ -1247,7 +1298,9 @@ async def get_today_payload(
     countdowns: dict[str, int] = {}
     prov = "deterministic"
     gen_reason = "deterministic_baseline"
-    reason_for_parents = "Study plan optimized for syllabus coverage, priority appearance, and spaced retention."
+    reason_for_parents = (
+        "Study plan optimized for syllabus coverage, priority appearance, and spaced retention."
+    )
     first_plan_found = False
 
     for s_subject, s_exam_date, p_prov, p_gen_reason, p_params in sp_rows:
@@ -1778,7 +1831,9 @@ async def submit_student_settings_change_request(
             },
         )
 
-    stmt_sett = select(StudentStudySettings.version).where(StudentStudySettings.student_id == student_id)
+    stmt_sett = select(StudentStudySettings.version).where(
+        StudentStudySettings.student_id == student_id
+    )
     res_sett = await db.execute(stmt_sett)
     sett_ver = res_sett.scalar_one_or_none()
 
@@ -1811,7 +1866,9 @@ async def submit_student_settings_change_request(
 # ============================================================================
 
 
-async def verify_parent_access_to_student(user: User, student_id: uuid.UUID, session: AsyncSession) -> None:
+async def verify_parent_access_to_student(
+    user: User, student_id: uuid.UUID, session: AsyncSession
+) -> None:
     """Verify that a parent user has an active linked relationship to the student."""
     has_access = await can_access_student(user, student_id, session)
     if not has_access:
@@ -1889,7 +1946,9 @@ async def approve_ai_suggestion(
 ) -> dict[str, Any]:
     """Parent approves an AI planner suggestion (priority or minute-change), updating settings and regenerating plan."""
     if current_user.role != "parent" and current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required"
+        )
     if current_user.role == "parent":
         await verify_parent_access_to_student(current_user, student_id, db)
 
@@ -1905,7 +1964,9 @@ async def approve_ai_suggestion(
     res = await db.execute(stmt)
     req = res.scalars().first()
     if not req:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found"
+        )
 
     # Item (4): Concurrent approvals return 409 Conflict
     if req.status in ("approved", "rejected"):
@@ -1939,7 +2000,11 @@ async def approve_ai_suggestion(
             pass
 
     # 2. Re-validate at approval against active student study settings (Item 4)
-    stmt_settings = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id).with_for_update()
+    stmt_settings = (
+        select(StudentStudySettings)
+        .where(StudentStudySettings.student_id == student_id)
+        .with_for_update()
+    )
     res_s = await db.execute(stmt_settings)
     settings_obj = res_s.scalars().first()
 
@@ -1953,7 +2018,11 @@ async def approve_ai_suggestion(
         sub = ch.get("subject")
         sugg_level = ch.get("suggested_level")
         if settings_obj and sub:
-            if sub in locked_fields or f"priority_{sub}" in locked_fields or "subject_priorities" in locked_fields:
+            if (
+                sub in locked_fields
+                or f"priority_{sub}" in locked_fields
+                or "subject_priorities" in locked_fields
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Subject priority for '{sub}' is locked by parent against AI suggestions (Rule V09)",
@@ -2031,7 +2100,9 @@ async def reject_ai_suggestion(
 ) -> dict[str, str]:
     """Parent rejects an AI planner suggestion."""
     if current_user.role != "parent" and current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Parent authorization required"
+        )
     if current_user.role == "parent":
         await verify_parent_access_to_student(current_user, student_id, db)
 
@@ -2042,7 +2113,9 @@ async def reject_ai_suggestion(
     res = await db.execute(stmt)
     req = res.scalars().first()
     if not req or req.status != "pending":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pending suggestion not found"
+        )
 
     req.status = "rejected"
     req.reviewed_at = datetime.now(UTC)
@@ -2064,6 +2137,7 @@ async def reject_ai_suggestion(
 # ==============================================================================
 # ONBOARDING & INTERACTIVE TIME ALLOCATION ENGINE
 # ==============================================================================
+
 
 class CalculateAllocationPayload(BaseModel):
     class_level: int = Field(default=8, ge=6, le=10)
@@ -2100,6 +2174,7 @@ async def calculate_allocation_preview(
 ) -> dict[str, Any]:
     """Calculate mathematically grounded daily time and spaced revision allocation for any subject combination."""
     from dataclasses import asdict
+
     from core.planner.dataset import calculate_study_and_revision_dataset
 
     summary = calculate_study_and_revision_dataset(
@@ -2124,6 +2199,7 @@ async def ai_review_and_plan_endpoint(
 ) -> dict[str, Any]:
     """Review student study setup with LLM, parse natural text, and generate balanced plan."""
     from pydantic import TypeAdapter
+
     from core.planner.ai_planner import AIPlanReviewRequest, review_and_generate_ai_plan
 
     req_obj = TypeAdapter(AIPlanReviewRequest).validate_python(payload)
@@ -2139,6 +2215,7 @@ async def submit_student_onboarding(
 ) -> dict[str, Any]:
     """Submit student self-onboarding: configure syllabus, exams, study budget, weak/focus subjects."""
     from dataclasses import asdict
+
     from core.planner.dataset import calculate_study_and_revision_dataset
 
     student_id = current_user.id
@@ -2179,7 +2256,9 @@ async def submit_student_onboarding(
         profile.available_days = payload.weekly_off_days
 
     # 2. Update or create StudentStudySettings
-    stmt_settings = select(StudentStudySettings).where(StudentStudySettings.student_id == student_id)
+    stmt_settings = select(StudentStudySettings).where(
+        StudentStudySettings.student_id == student_id
+    )
     settings_obj = (await db.execute(stmt_settings)).scalar_one_or_none()
 
     if not settings_obj:
@@ -2275,7 +2354,7 @@ async def get_planner_combinations(
     if not data_path.exists():
         raise HTTPException(status_code=404, detail="Combinations dataset not yet generated")
 
-    with open(data_path, "r", encoding="utf-8") as f:
+    with open(data_path, encoding="utf-8") as f:
         data = json.load(f)
 
     combs = data.get("combinations", [])
@@ -2294,5 +2373,3 @@ async def get_planner_combinations(
         "rules": data.get("rules", {}),
         "combinations": combs,
     }
-
-

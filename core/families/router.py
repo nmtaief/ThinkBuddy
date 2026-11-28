@@ -8,9 +8,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.audit.models import AuditLog
@@ -165,7 +165,9 @@ async def add_child_to_family(
 
     # Verify parental consent is on record before processing child data
     if not current_user.has_parental_consent and current_user.role != "admin":
-        enforce_gate = (not settings.is_local) or (request is not None and request.headers.get("x-enforce-consent", "").lower() == "true")
+        enforce_gate = (not settings.is_local) or (
+            request is not None and request.headers.get("x-enforce-consent", "").lower() == "true"
+        )
         if enforce_gate:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -359,13 +361,14 @@ async def revoke_parent_student_link(
 
     # Invalidate dashboard cache for student (Item 5)
     from core.parent.service import ParentService
+
     await ParentService.invalidate_student_dashboard_cache(link.student_id)
 
     # Token cleanup on parent link revocation (Item 3: shared devices)
     from core.devices.models import Device
-    stmt_shared = (
-        select(Device.push_token)
-        .where(Device.user_id == link.student_id, Device.push_token.is_not(None))
+
+    stmt_shared = select(Device.push_token).where(
+        Device.user_id == link.student_id, Device.push_token.is_not(None)
     )
     res_shared = await db.execute(stmt_shared)
     student_tokens = [t for t in res_shared.scalars().all() if t]

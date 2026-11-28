@@ -12,7 +12,6 @@ Per docs/05_SECURE_QUIZ.md:
 from __future__ import annotations
 
 import hashlib
-
 import logging
 import random
 import secrets
@@ -25,10 +24,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.quiz.builder import QuizBuilderService
-from core.quiz.grading import QuizGradingService
 from core.auth.models import User
 from core.devices.models import Device
+from core.quiz.builder import QuizBuilderService
+from core.quiz.grading import QuizGradingService
 from core.quiz.integrity import (
     ATTESTED_DEVICES,
     DeviceIntegrityVerdict,
@@ -187,7 +186,7 @@ class QuizService:
             unverified_device=False,
             nonce_hash=nonce_hash,
         )
-        setattr(attempt, "_raw_nonce", raw_nonce)
+        attempt._raw_nonce = raw_nonce
         try:
             self.db.add(attempt)
             await self.db.flush()
@@ -267,7 +266,10 @@ class QuizService:
                 await self.db.commit()
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
-                    detail={"code": "ATTEMPT_EXPIRED", "message": "Quiz attempt deadline has passed."},
+                    detail={
+                        "code": "ATTEMPT_EXPIRED",
+                        "message": "Quiz attempt deadline has passed.",
+                    },
                 )
 
             # Verify device integrity bound to attempt_id
@@ -319,11 +321,16 @@ class QuizService:
                     attempt.mastery_weight = 0.2
                     attempt.parent_flag = True
                     attempt.parent_flag_reason = "downgrade_unsupported_claim"
-                    self.db.add(AttemptEvent(
-                        attempt_id=attempt.id,
-                        event_type="downgrade_unsupported_flag",
-                        data={"reason": "account_previously_attested", "device_id": str(target_dev_id)}
-                    ))
+                    self.db.add(
+                        AttemptEvent(
+                            attempt_id=attempt.id,
+                            event_type="downgrade_unsupported_flag",
+                            data={
+                                "reason": "account_previously_attested",
+                                "device_id": str(target_dev_id),
+                            },
+                        )
+                    )
                 elif attestation == DeviceIntegrityVerdict.LOW_TRUST:
                     init_integrity_score = 0.85
                     is_unverified = True
@@ -377,7 +384,7 @@ class QuizService:
                 started_at=attempt.started_at,  # type: ignore[arg-type]
                 deadline_at=attempt.deadline_at,  # type: ignore[arg-type]
                 attempt_token=attempt.attempt_token,
-                total_items=len(items),
+                total_items=len(item_rows),
                 current_item=first_item_public,
             )
 
@@ -563,13 +570,19 @@ class QuizService:
         if attempt.state == "paused":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "ATTEMPT_PAUSED", "message": "Quiz attempt is paused due to integrity review."},
+                detail={
+                    "code": "ATTEMPT_PAUSED",
+                    "message": "Quiz attempt is paused due to integrity review.",
+                },
             )
 
         if attempt.state == "invalidated":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "ATTEMPT_INVALIDATED", "message": "Quiz attempt has been invalidated."},
+                detail={
+                    "code": "ATTEMPT_INVALIDATED",
+                    "message": "Quiz attempt has been invalidated.",
+                },
             )
 
         if attempt.state not in ("active", "warned"):
