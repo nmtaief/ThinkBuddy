@@ -16,13 +16,13 @@ Per docs/05_SECURE_QUIZ.md §2, §6, §7 and P04 hardening:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-import uuid
 
-import hashlib
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,7 +107,9 @@ def check_and_auto_resume_pause(attempt: QuizAttempt) -> bool:
         now = datetime.now(UTC)
         if now >= attempt.pause_expires_at:
             attempt.state = "warned"
-            logger.info("Attempt %s auto-resumed from pause after short period (%ds)", attempt.id, 60)
+            logger.info(
+                "Attempt %s auto-resumed from pause after short period (%ds)", attempt.id, 60
+            )
             return True
     return False
 
@@ -136,13 +138,17 @@ def verify_play_integrity_token(
     if "." in token_str:
         try:
             # Decode claims from JWT
-            unverified_claims = jwt.decode(token_str, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
+            unverified_claims = jwt.decode(
+                token_str, options={"verify_signature": False}
+            )  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
 
             # 1. Package name verification
             app_integrity = unverified_claims.get("appIntegrity", {})
             pkg = app_integrity.get("packageName") or unverified_claims.get("package_name")
             if pkg and pkg != package_name:
-                logger.warning("Play Integrity package mismatch: got '%s', expected '%s'", pkg, package_name)
+                logger.warning(
+                    "Play Integrity package mismatch: got '%s', expected '%s'", pkg, package_name
+                )
                 return DeviceIntegrityVerdict.COMPROMISED
 
             # 2. Canonical Nonce verification (strictly bound to single-use attempt nonce)
@@ -155,7 +161,7 @@ def verify_play_integrity_token(
             if expected_nonce_hash:
                 token_nonce_hash = hashlib.sha256(str(token_nonce).encode("utf-8")).hexdigest()
                 if token_nonce_hash != expected_nonce_hash:
-                    logger.warning(
+                    logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure - logs non-secret Play Integrity nonce mismatch hash
                         "Play Integrity nonce hash mismatch: got token nonce '%s' (hash '%s'), expected hash '%s'",
                         token_nonce,
                         token_nonce_hash,
@@ -165,7 +171,10 @@ def verify_play_integrity_token(
             elif expected_nonce or device_id:
                 canonical_nonce = str(expected_nonce or device_id).strip()
                 is_test_env = settings.ENVIRONMENT in ("local", "testing")
-                is_legacy_test_nonce = is_test_env and token_nonce in ("device-p04-android-001", "test-play-integrity-nonce-123")
+                is_legacy_test_nonce = is_test_env and token_nonce in (
+                    "device-p04-android-001",
+                    "test-play-integrity-nonce-123",
+                )
                 if token_nonce != canonical_nonce and not is_legacy_test_nonce:
                     logger.warning(
                         "Play Integrity nonce mismatch: got '%s', expected canonical '%s'",
@@ -175,7 +184,9 @@ def verify_play_integrity_token(
                     return DeviceIntegrityVerdict.COMPROMISED
 
             # 3. Freshness check
-            ts_millis = req_details.get("timestampMillis") or (unverified_claims.get("iat", 0) * 1000)
+            ts_millis = req_details.get("timestampMillis") or (
+                unverified_claims.get("iat", 0) * 1000
+            )
             if ts_millis:
                 token_time = datetime.fromtimestamp(ts_millis / 1000.0, tz=UTC)
                 age = (datetime.now(UTC) - token_time).total_seconds()
@@ -231,7 +242,9 @@ def evaluate_device_attestation(
     # Check for devices without Play services
     provider = None
     if headers:
-        provider = headers.get("x-device-attestation-provider") or headers.get("X-Device-Attestation-Provider")
+        provider = headers.get("x-device-attestation-provider") or headers.get(
+            "X-Device-Attestation-Provider"
+        )
     if provider and provider.strip().lower() in ("none", "aosp", "hms", "unsupported"):
         if (device_id and (device_id in ATTESTED_DEVICES)) or device_has_valid_attestation:
             logger.error(
@@ -255,15 +268,28 @@ def evaluate_device_attestation(
         v_clean = raw_token.strip().lower()
 
         # Client cannot label itself trusted: any self-reported string without a cryptographic token is rejected
-        if v_clean in ("trusted", "secure", "passed", "verified", "meets_strong_integrity", "meets_device_integrity"):
-            logger.warning("Client self-asserted trusted verdict '%s' strictly rejected; server is the authority", raw_token)
+        if v_clean in (
+            "trusted",
+            "secure",
+            "passed",
+            "verified",
+            "meets_strong_integrity",
+            "meets_device_integrity",
+        ):
+            logger.warning(
+                "Client self-asserted trusted verdict '%s' strictly rejected; server is the authority",
+                raw_token,
+            )
             return DeviceIntegrityVerdict.COMPROMISED
 
         if env != "local":
             if v_clean in ("compromised", "rooted", "emulator", "untrusted", "failed"):
                 return DeviceIntegrityVerdict.COMPROMISED
             if "." not in raw_token:
-                logger.error("Client-reported attestation string '%s' rejected outside ENV=local; requires Google token", raw_token)
+                logger.error(
+                    "Client-reported attestation string '%s' rejected outside ENV=local; requires Google token",
+                    raw_token,
+                )
                 return DeviceIntegrityVerdict.COMPROMISED
 
             # Cryptographic token verification
@@ -287,7 +313,9 @@ def evaluate_device_attestation(
             return DeviceIntegrityVerdict.BASIC
 
         if v_clean in ("secure", "strong", "mock_secure", "test_stub"):
-            logger.info("Attestation stub evaluated in ENV=local; reporting UNVERIFIED (not trusted)")
+            logger.info(
+                "Attestation stub evaluated in ENV=local; reporting UNVERIFIED (not trusted)"
+            )
             return DeviceIntegrityVerdict.UNVERIFIED
 
         # Server-side token verification (JWT / Play Integrity token)
@@ -398,7 +426,9 @@ class IntegrityEngine:
             prev_items = list(res_prev.scalars().all())
 
             if len(prev_items) >= 2:
-                all_fast = time_spent_ms < 2500 and all(p.time_spent_ms < 2500 for p in prev_items[:2])
+                all_fast = time_spent_ms < 2500 and all(
+                    p.time_spent_ms < 2500 for p in prev_items[:2]
+                )
                 all_correct = all(p.is_correct is True for p in prev_items[:2])
                 if all_fast and all_correct:
                     anomalies.append("suspicious_streak")
@@ -428,7 +458,9 @@ class IntegrityEngine:
         existing_events = list(total_res.scalars().all())
         total_events_count = len(existing_events)
 
-        infraction_events = [e for e in existing_events if e.type in EVENT_PENALTIES or e.type.startswith("anomaly_")]
+        infraction_events = [
+            e for e in existing_events if e.type in EVENT_PENALTIES or e.type.startswith("anomaly_")
+        ]
         total_infractions_count = len(infraction_events)
         distinct_signal_types = {e.type for e in infraction_events}
         distinct_signals_count = len(distinct_signal_types)
@@ -439,7 +471,10 @@ class IntegrityEngine:
         if attempt.state in ("active", "warned", "paused"):
             if (
                 total_infractions_count >= config.invalidate_threshold
-                or (total_infractions_count >= 3 and attempt.integrity_score <= config.invalidation_score)
+                or (
+                    total_infractions_count >= 3
+                    and attempt.integrity_score <= config.invalidation_score
+                )
             ) and distinct_signals_count >= 2:
                 attempt.state = "invalidated"
                 attempt.invalid_reason = (
@@ -451,14 +486,21 @@ class IntegrityEngine:
                 # Pausing requires two signals OR one severe signal (auto-resumes after 60s)
                 attempt.state = "paused"
                 attempt.paused_at = datetime.now(UTC)
-                attempt.pause_expires_at = datetime.now(UTC) + timedelta(seconds=config.pause_duration_s)
-                attempt.invalid_reason = (
-                    f"Attempt paused due to multiple signals ({len(anomaly_signals)}) or severe telemetry signal"
+                attempt.pause_expires_at = datetime.now(UTC) + timedelta(
+                    seconds=config.pause_duration_s
                 )
-                logger.warning("Attempt %s paused: %s (auto-resumes in %ds)", attempt.id, attempt.invalid_reason, config.pause_duration_s)
+                attempt.invalid_reason = f"Attempt paused due to multiple signals ({len(anomaly_signals)}) or severe telemetry signal"
+                logger.warning(
+                    "Attempt %s paused: %s (auto-resumes in %ds)",
+                    attempt.id,
+                    attempt.invalid_reason,
+                    config.pause_duration_s,
+                )
             elif len(anomaly_signals) == 1:
                 # Single anomaly logs a warning
-                logger.warning("Attempt %s logged warning for anomaly (1 distinct signal)", attempt.id)
+                logger.warning(
+                    "Attempt %s logged warning for anomaly (1 distinct signal)", attempt.id
+                )
                 if attempt.state == "active":
                     attempt.state = "warned"
 
