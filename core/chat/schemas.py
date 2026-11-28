@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -75,6 +76,10 @@ class ChatMessageCreateRequest(BaseModel):
     image_data: str | None = Field(
         default=None,
         description="Optional base64 JPEG/PNG data of student question photo",
+    )
+    provider: Literal["gemini", "deepseek", "claude"] | None = Field(
+        default=None,
+        description="Optional decoupled tool-calling LLM provider ('gemini', 'deepseek', or 'claude')",
     )
 
 

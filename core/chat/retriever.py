@@ -71,16 +71,46 @@ class LexicalReranker(Reranker):
         has_bengali = any("\u0980" <= c <= "\u09ff" for c in query)
 
         stopwords = {
-            "what", "is", "a", "an", "the", "are", "tell", "me", "about", "can", "you",
-            "explain", "help", "with", "how", "why", "who", "which", "when", "where",
-            "ki", "konta", "kon", "er", "ta", "te", "kono", "বলো", "বলুন", "কী", "কি"
+            "what",
+            "is",
+            "a",
+            "an",
+            "the",
+            "are",
+            "tell",
+            "me",
+            "about",
+            "can",
+            "you",
+            "explain",
+            "help",
+            "with",
+            "how",
+            "why",
+            "who",
+            "which",
+            "when",
+            "where",
+            "ki",
+            "konta",
+            "kon",
+            "er",
+            "ta",
+            "te",
+            "kono",
+            "বলো",
+            "বলুন",
+            "কী",
+            "কি",
         }
         tokens = [t for t in query.lower().split() if t not in stopwords]
         query_tokens = set(tokens) if tokens else set(query.lower().split())
 
         for chunk in candidates:
             chunk_tokens = set(chunk.text.lower().split())
-            overlap_ratio = len(query_tokens & chunk_tokens) / len(query_tokens) if query_tokens else 0.0
+            overlap_ratio = (
+                len(query_tokens & chunk_tokens) / len(query_tokens) if query_tokens else 0.0
+            )
 
             if not has_bengali:
                 # Non-Bengali / Banglish query: rely on cross-lingual dense embedding without lexical discount
@@ -145,6 +175,7 @@ class ChatRetriever:
         search_results: list[SearchResult] = []
         try:
             from rag.embedding import get_embedding_provider
+
             emb_provider = get_embedding_provider()
             query_vec = await emb_provider.embed_query(query)
             search_results = await self.vector_store.search_hybrid(
@@ -198,10 +229,7 @@ class ChatRetriever:
 
         if document_context:
             for chunk in working_candidates:
-                if (
-                    document_context.chapter_id
-                    and chunk.chapter_id == document_context.chapter_id
-                ):
+                if document_context.chapter_id and chunk.chapter_id == document_context.chapter_id:
                     chunk.score = min(1.0, chunk.score + 0.20)
                 if (
                     document_context.printed_page

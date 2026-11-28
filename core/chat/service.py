@@ -289,7 +289,9 @@ class ChatService:
                 book_res = await self.db.execute(select(Book.id).where(Book.id.in_(cand_books)))
                 valid_book_ids = set(book_res.scalars().all())
 
-            cand_chapters = [get_val(c, "chapter_id") for c in citations if get_val(c, "chapter_id")]
+            cand_chapters = [
+                get_val(c, "chapter_id") for c in citations if get_val(c, "chapter_id")
+            ]
             if cand_chapters:
                 ch_stmt = select(Chapter.id).where(Chapter.id.in_(cand_chapters))
                 ch_res = await self.db.execute(ch_stmt)
@@ -299,12 +301,30 @@ class ChatService:
         for c in citations:
             c_chunk_id = c.get("chunk_id") if isinstance(c, dict) else getattr(c, "chunk_id", None)
             c_book_id = c.get("book_id") if isinstance(c, dict) else getattr(c, "book_id", None)
-            c_chapter_id = c.get("chapter_id") if isinstance(c, dict) else getattr(c, "chapter_id", None)
-            c_book_title = c.get("book_title", "") if isinstance(c, dict) else getattr(c, "book_title", "")
-            c_chapter_title = c.get("chapter_title", "") if isinstance(c, dict) else getattr(c, "chapter_title", "")
-            c_chapter_number = c.get("chapter_number") if isinstance(c, dict) else getattr(c, "chapter_number", None)
-            c_printed_page = c.get("printed_page") if isinstance(c, dict) else getattr(c, "printed_page", None)
-            c_pdf_page_index = c.get("pdf_page_index") if isinstance(c, dict) else getattr(c, "pdf_page_index", None)
+            c_chapter_id = (
+                c.get("chapter_id") if isinstance(c, dict) else getattr(c, "chapter_id", None)
+            )
+            c_book_title = (
+                c.get("book_title", "") if isinstance(c, dict) else getattr(c, "book_title", "")
+            )
+            c_chapter_title = (
+                c.get("chapter_title", "")
+                if isinstance(c, dict)
+                else getattr(c, "chapter_title", "")
+            )
+            c_chapter_number = (
+                c.get("chapter_number")
+                if isinstance(c, dict)
+                else getattr(c, "chapter_number", None)
+            )
+            c_printed_page = (
+                c.get("printed_page") if isinstance(c, dict) else getattr(c, "printed_page", None)
+            )
+            c_pdf_page_index = (
+                c.get("pdf_page_index")
+                if isinstance(c, dict)
+                else getattr(c, "pdf_page_index", None)
+            )
             if c_pdf_page_index is None:
                 c_pdf_page_index = c_printed_page if c_printed_page is not None else 0
             c_score = c.get("score", 1.0) if isinstance(c, dict) else getattr(c, "score", 1.0)
@@ -332,7 +352,11 @@ class ChatService:
         # Emit learning signal for topic queried (ai_question / ai_repeat)
         if citations:
             primary_chunk = citations[0]
-            p_chap_id = primary_chunk.get("chapter_id") if isinstance(primary_chunk, dict) else getattr(primary_chunk, "chapter_id", None)
+            p_chap_id = (
+                primary_chunk.get("chapter_id")
+                if isinstance(primary_chunk, dict)
+                else getattr(primary_chunk, "chapter_id", None)
+            )
             if p_chap_id and p_chap_id in valid_chapter_ids:
                 # Check for repeat asks within past 7 days
                 seven_days_ago = now - timedelta(days=7)

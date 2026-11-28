@@ -12,12 +12,11 @@ Protects against:
 from __future__ import annotations
 
 import re
-from typing import Any
 
 
 def check_exercise_text_quality(text: str) -> tuple[bool, str]:
     """Inspect exercise question text for corrupted OCR artifacts.
-    
+
     Returns (is_clean, reason).
     """
     if not text or len(text.strip()) < 5:
@@ -28,7 +27,10 @@ def check_exercise_text_quality(text: str) -> tuple[bool, str]:
         (r"[Ili]1['`]", "Corrupted OCR token matching [Ili]1'"),
         (r"^\s*=\s*\d+", "Hanging equation starting with '=' without LHS operand"),
         (r"\n\s*=\s*\d+", "Hanging line starting with '=' without LHS operand"),
-        (r"[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f]", "Invalid control or Unicode replacement characters"),
+        (
+            r"[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f]",
+            "Invalid control or Unicode replacement characters",
+        ),
         (r"\+\s*=\s*\d+", "Missing operand before '=' sign (+ =)"),
         (r"-\s*=\s*\d+", "Missing operand before '=' sign (- =)"),
     ]
@@ -47,7 +49,7 @@ def check_degeneration(
 ) -> tuple[bool, str]:
     """Inspect generated assistant response for generic degeneration, repetition loops,
     language mismatch, or premature truncation.
-    
+
     Contains NO test-case specific phrase bans or hardcoded prompt overrides.
     Returns (is_degenerate, reason).
     """
@@ -71,7 +73,10 @@ def check_degeneration(
         if ngrams:
             unique_ratio = len(set(ngrams)) / len(ngrams)
             if unique_ratio < 0.65:
-                return True, f"Excessive 4-gram repetition (unique ratio: {unique_ratio:.2f} < 0.65)"
+                return (
+                    True,
+                    f"Excessive 4-gram repetition (unique ratio: {unique_ratio:.2f} < 0.65)",
+                )
 
     # 3. Repeated short phrases (2-4 words) occurring consecutively >= 3 times
     for phrase_len in (2, 3, 4):
@@ -91,8 +96,21 @@ def check_degeneration(
         return True, "Premature truncation: unclosed LaTeX math delimiter ($)."
 
     hanging_ends = [
-        "হলো:", "হলো", "এবং", "বা", "সুতরাং", "অতএব", "১.", "২.", "ধাপ:",
-        "প্রশ্নের সমাধান:", "উত্তর:", "**", "```", "(", "[",
+        "হলো:",
+        "হলো",
+        "এবং",
+        "বা",
+        "সুতরাং",
+        "অতএব",
+        "১.",
+        "২.",
+        "ধাপ:",
+        "প্রশ্নের সমাধান:",
+        "উত্তর:",
+        "**",
+        "```",
+        "(",
+        "[",
     ]
     for h in hanging_ends:
         if clean_text.endswith(h):
@@ -108,7 +126,10 @@ def check_degeneration(
             "কোন প্রশ্ন আছে বা আমি একটি প্রশ্ন দিতে পারি",
         ]
         if any(ep in clean_text for ep in evasion_phrases):
-            return True, "Evasive loop: model asked student for question instead of solving exercise."
+            return (
+                True,
+                "Evasive loop: model asked student for question instead of solving exercise.",
+            )
 
     # 6. Generic language match
     if student_language == "bn":
@@ -125,7 +146,7 @@ def verify_mathematical_claims(
     stored_answer_key: str | None = None,
 ) -> tuple[bool, str]:
     """Generic mathematical verification.
-    
+
     Validates output against verified stored answer key if available.
     Contains NO hardcoded test-case overrides or question-specific rules.
     Returns (was_corrected, corrected_text).
@@ -146,4 +167,3 @@ def get_safe_friendly_error(language: str = "bn") -> str:
     if language == "bn":
         return "একটু সমস্যা হয়েছে, আরেকবার বলো তো বন্ধু? আমি এখনই তোমাকে সুন্দরভাবে বুঝিয়ে দিচ্ছি!"
     return "I had a brief hiccup while processing that. Could you please ask again? I'll explain it clearly!"
-

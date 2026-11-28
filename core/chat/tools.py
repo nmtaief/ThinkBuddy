@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import logging
 import re
-import uuid
 from typing import Any
 
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -203,7 +202,19 @@ def normalize_subject_name(raw: str | None) -> str:
     if not raw:
         return "math"
     s = raw.strip().lower()
-    if any(k in s for k in ["math", "গণিত", "অঙ্ক", "algebra", "geometry", "trigonometry", "ত্রিকোণমিতি", "statistics"]):
+    if any(
+        k in s
+        for k in [
+            "math",
+            "গণিত",
+            "অঙ্ক",
+            "algebra",
+            "geometry",
+            "trigonometry",
+            "ত্রিকোণমিতি",
+            "statistics",
+        ]
+    ):
         return "math"
     if any(k in s for k in ["science", "বিজ্ঞান", "biology", "physics", "chemistry"]):
         return "science"
@@ -286,13 +297,15 @@ class ToolExecutor:
         catalog = []
         book_names = []
         for b, chunk_count in rows:
-            catalog.append({
-                "class_level": b.class_level,
-                "subject": b.subject,
-                "title": b.title,
-                "total_chapters": len(b.chapters),
-                "chunks_count": chunk_count,
-            })
+            catalog.append(
+                {
+                    "class_level": b.class_level,
+                    "subject": b.subject,
+                    "title": b.title,
+                    "total_chapters": len(b.chapters),
+                    "chunks_count": chunk_count,
+                }
+            )
             book_names.append(f"Class {b.class_level} {b.subject.title()} ({b.title})")
 
         return {
@@ -422,12 +435,18 @@ class ToolExecutor:
                     target_ex_num = ex_num_match.group(1) if ex_num_match else None
                     for idx, (c, ch, b) in enumerate(all_chunks):
                         text_ascii = c.text.translate(bn_to_ascii)
-                        found_exs = re.findall(r"(?:অনুশীলনী|exercise)\s*(\d+(?:\.\d+)?)", text_ascii, re.IGNORECASE)
+                        found_exs = re.findall(
+                            r"(?:অনুশীলনী|exercise)\s*(\d+(?:\.\d+)?)", text_ascii, re.IGNORECASE
+                        )
                         if target_ex_num and target_ex_num in found_exs:
                             target_start_page = c.printed_page
-                            for next_c, _, _ in all_chunks[idx + 1:]:
+                            for next_c, _, _ in all_chunks[idx + 1 :]:
                                 next_text_ascii = next_c.text.translate(bn_to_ascii)
-                                next_exs = re.findall(r"(?:অনুশীলনী|exercise)\s*(\d+(?:\.\d+)?)", next_text_ascii, re.IGNORECASE)
+                                next_exs = re.findall(
+                                    r"(?:অনুশীলনী|exercise)\s*(\d+(?:\.\d+)?)",
+                                    next_text_ascii,
+                                    re.IGNORECASE,
+                                )
                                 if next_exs and any(e != target_ex_num for e in next_exs):
                                     target_end_page = next_c.printed_page - 1
                                     break
@@ -443,7 +462,8 @@ class ToolExecutor:
                 if target_start_page is not None:
                     end_p = target_end_page or all_chunks[-1][0].printed_page
                     candidate_chunks = [
-                        (c, ch, b) for c, ch, b in all_chunks
+                        (c, ch, b)
+                        for c, ch, b in all_chunks
                         if target_start_page <= c.printed_page <= end_p
                     ]
                 else:
@@ -467,7 +487,9 @@ class ToolExecutor:
                             end_pos = min(len(c_text), m.end() + 250)
                             snippet = c_text[start_pos:end_pos].strip()
                             score = 100
-                            if re.search(rf"{bn_q}\s*[\.।\:\-\!|I]", snippet) or re.search(rf"{question_no}\s*[\.।\:\-\!|I]", snippet):
+                            if re.search(rf"{bn_q}\s*[\.।\:\-\!|I]", snippet) or re.search(
+                                rf"{question_no}\s*[\.।\:\-\!|I]", snippet
+                            ):
                                 score += 50
                             if "নম্বর" in snippet or "নং" in snippet or "অনুশীলনী" in snippet:
                                 score += 20
@@ -479,14 +501,16 @@ class ToolExecutor:
                 if best_hit:
                     c, ch, b = best_hit
                     ex_label_final = exercise_label or f"অনুশীলনী {ch.number}"
-                    self.used_citations.append({
-                        "chunk_id": str(c.id),
-                        "book_title": b.title,
-                        "chapter_title": f"{ex_label_final} (প্রশ্ন {question_no}{f' {subpart}' if subpart else ''})",
-                        "chapter_number": ch.number,
-                        "printed_page": c.printed_page,
-                        "score": 1.0,
-                    })
+                    self.used_citations.append(
+                        {
+                            "chunk_id": str(c.id),
+                            "book_title": b.title,
+                            "chapter_title": f"{ex_label_final} (প্রশ্ন {question_no}{f' {subpart}' if subpart else ''})",
+                            "chapter_number": ch.number,
+                            "printed_page": c.printed_page,
+                            "score": 1.0,
+                        }
+                    )
                     return {
                         "found": True,
                         "book_title": b.title,
@@ -549,14 +573,16 @@ class ToolExecutor:
 
         ex_item, ch, b = rows[0]
         # Register authoritative citation
-        self.used_citations.append({
-            "chunk_id": str(ex_item.id),
-            "book_title": b.title,
-            "chapter_title": f"{ex_item.exercise_label} (প্রশ্ন {ex_item.question_no}{f' {ex_item.subpart}' if ex_item.subpart else ''})",
-            "chapter_number": ch.number,
-            "printed_page": ex_item.printed_page,
-            "score": 1.0,
-        })
+        self.used_citations.append(
+            {
+                "chunk_id": str(ex_item.id),
+                "book_title": b.title,
+                "chapter_title": f"{ex_item.exercise_label} (প্রশ্ন {ex_item.question_no}{f' {ex_item.subpart}' if ex_item.subpart else ''})",
+                "chapter_number": ch.number,
+                "printed_page": ex_item.printed_page,
+                "score": 1.0,
+            }
+        )
 
         return {
             "found": True,
@@ -663,8 +689,13 @@ class ToolExecutor:
 
         # If embedding provider cannot load or is mock outside tests, fail loudly
         if settings.EMBEDDING_PROVIDER.lower() in ("mock", "test"):
-            if getattr(settings, "ENVIRONMENT", "development") not in ("test", "development") and os.getenv("TESTING") != "true":
-                logger.critical("Mock embeddings are strictly forbidden in production. Vector search disabled.")
+            if (
+                getattr(settings, "ENVIRONMENT", "development") not in ("test", "development")
+                and os.getenv("TESTING") != "true"
+            ):
+                logger.critical(
+                    "Mock embeddings are strictly forbidden in production. Vector search disabled."
+                )
                 return {
                     "found": False,
                     "status": "error",
@@ -682,7 +713,11 @@ class ToolExecutor:
                 filters=filters,
             )
         except Exception as ex:
-            logger.critical("Embedding model or vector retrieval failed: %s. Never falling back to mock.", ex, exc_info=True)
+            logger.critical(
+                "Embedding model or vector retrieval failed: %s. Never falling back to mock.",
+                ex,
+                exc_info=True,
+            )
             return {
                 "found": False,
                 "status": "error",
@@ -692,21 +727,25 @@ class ToolExecutor:
 
         results = []
         for h in hits:
-            self.used_citations.append({
-                "chunk_id": str(h.chunk_id),
-                "book_title": h.book_title,
-                "chapter_title": h.chapter_title,
-                "chapter_number": h.chapter_number,
-                "printed_page": h.printed_page,
-                "score": round(float(h.score), 4),
-            })
-            results.append({
-                "book_title": h.book_title,
-                "chapter_title": h.chapter_title,
-                "printed_page": h.printed_page,
-                "text": getattr(h, "text", getattr(h, "snippet", "")),
-                "score": round(float(h.score), 4),
-            })
+            self.used_citations.append(
+                {
+                    "chunk_id": str(h.chunk_id),
+                    "book_title": h.book_title,
+                    "chapter_title": h.chapter_title,
+                    "chapter_number": h.chapter_number,
+                    "printed_page": h.printed_page,
+                    "score": round(float(h.score), 4),
+                }
+            )
+            results.append(
+                {
+                    "book_title": h.book_title,
+                    "chapter_title": h.chapter_title,
+                    "printed_page": h.printed_page,
+                    "text": getattr(h, "text", getattr(h, "snippet", "")),
+                    "score": round(float(h.score), 4),
+                }
+            )
 
         return {
             "found": len(results) > 0,
@@ -745,14 +784,16 @@ class ToolExecutor:
             }
 
         chunk, chapter, book = row
-        self.used_citations.append({
-            "chunk_id": str(chunk.id),
-            "book_title": book.title,
-            "chapter_title": chapter.title,
-            "chapter_number": chapter.number,
-            "printed_page": chunk.printed_page,
-            "score": 1.0,
-        })
+        self.used_citations.append(
+            {
+                "chunk_id": str(chunk.id),
+                "book_title": book.title,
+                "chapter_title": chapter.title,
+                "chapter_number": chapter.number,
+                "printed_page": chunk.printed_page,
+                "score": 1.0,
+            }
+        )
 
         return {
             "class_level": class_level,
@@ -782,12 +823,14 @@ class ToolExecutor:
 
         results = []
         for c, ch, b in rows:
-            results.append({
-                "concept": c.title,
-                "kind": c.kind,
-                "chapter_title": ch.title,
-                "book_title": b.title,
-            })
+            results.append(
+                {
+                    "concept": c.title,
+                    "kind": c.kind,
+                    "chapter_title": ch.title,
+                    "book_title": b.title,
+                }
+            )
 
         return {
             "concept_or_topic": concept_or_topic,
