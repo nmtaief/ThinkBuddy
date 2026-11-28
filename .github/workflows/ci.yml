@@ -98,10 +98,12 @@ jobs:
 
       - name: Seed Pilot Test Data
         run: |
-          python seed_pilot_chapter1.py || true
-          python scripts/seed_pilot_exercises.py || true
-          python scripts/seed_pilot_exercises_ch3_ch4.py || true
-          python scripts/seed_pilot2_100_items.py || true
+          mkdir -p audit_math
+          python -c "import asyncio; from core.common.database import async_session_factory; from rag.ingest import ingest_manifest; async def main():\n  for p in ['fixtures/class8_math_manifest.jsonl', 'fixtures/class6_math_manifest.jsonl', 'fixtures/class8_science_manifest.jsonl']:\n    async with async_session_factory() as s:\n      await ingest_manifest(s, p)\nasyncio.run(main())"
+          python seed_pilot_chapter1.py
+          python scripts/seed_pilot_exercises.py
+          python scripts/seed_pilot_exercises_ch3_ch4.py
+          python scripts/seed_pilot2_100_items.py
 
       - name: Run Tests with Coverage
         run: pytest -v --cov=core --cov=gateway --cov=rag tests/
