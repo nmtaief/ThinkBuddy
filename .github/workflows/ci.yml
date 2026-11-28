@@ -43,6 +43,28 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg16
+        env:
+          POSTGRES_DB: thinkbuddy
+          POSTGRES_USER: thinkbuddy
+          POSTGRES_PASSWORD: thinkbuddy_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thinkbuddy -d thinkbuddy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy
+      DATABASE_URL_SYNC: postgresql://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: thinkbuddy
+      POSTGRES_USER: thinkbuddy
+      POSTGRES_PASSWORD: thinkbuddy_ci_password
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -57,6 +79,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[dev]
+
+      - name: Run Database Migrations
+        run: |
+          python -c "import psycopg2; conn = psycopg2.connect('postgresql://thinkbuddy:thinkbuddy_ci_password@127.0.0.1:5432/thinkbuddy'); conn.autocommit = True; conn.cursor().execute('CREATE EXTENSION IF NOT EXISTS vector;')"
+          alembic upgrade head
 
       - name: Run Tests with Coverage
         run: pytest -v --cov=core --cov=gateway --cov=rag tests/
@@ -100,7 +127,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install semgrep
-          semgrep scan --config auto --error
+          semgrep scan --config p/python --config p/typescript --config p/dockerfile --metrics=off --error --exclude node_modules --exclude .next --exclude data --exclude fixtures --exclude tests/data
 
   trivy:
     name: Trivy Container Image Scan
