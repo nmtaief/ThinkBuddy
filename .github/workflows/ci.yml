@@ -101,17 +101,16 @@ jobs:
           mkdir -p audit_math
           python - <<'EOF'
           import asyncio
-          from core.common.database import async_session_factory
-          from rag.ingest import ingest_manifest
+          from rag.ingest import CurriculumImporter
 
           async def main() -> None:
+              importer = CurriculumImporter()
               for p in [
                   "fixtures/class8_math_manifest.jsonl",
                   "fixtures/class6_math_manifest.jsonl",
                   "fixtures/class8_science_manifest.jsonl",
               ]:
-                  async with async_session_factory() as s:
-                      await ingest_manifest(s, p)
+                  await importer.import_manifest(p)
 
           asyncio.run(main())
           EOF
