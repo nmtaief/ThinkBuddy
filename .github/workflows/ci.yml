@@ -99,7 +99,22 @@ jobs:
       - name: Seed Pilot Test Data
         run: |
           mkdir -p audit_math
-          python -c "import asyncio; from core.common.database import async_session_factory; from rag.ingest import ingest_manifest; async def main():\n  for p in ['fixtures/class8_math_manifest.jsonl', 'fixtures/class6_math_manifest.jsonl', 'fixtures/class8_science_manifest.jsonl']:\n    async with async_session_factory() as s:\n      await ingest_manifest(s, p)\nasyncio.run(main())"
+          python - <<'EOF'
+          import asyncio
+          from core.common.database import async_session_factory
+          from rag.ingest import ingest_manifest
+
+          async def main() -> None:
+              for p in [
+                  "fixtures/class8_math_manifest.jsonl",
+                  "fixtures/class6_math_manifest.jsonl",
+                  "fixtures/class8_science_manifest.jsonl",
+              ]:
+                  async with async_session_factory() as s:
+                      await ingest_manifest(s, p)
+
+          asyncio.run(main())
+          EOF
           python seed_pilot_chapter1.py
           python scripts/seed_pilot_exercises.py
           python scripts/seed_pilot_exercises_ch3_ch4.py
